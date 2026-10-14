@@ -13,8 +13,9 @@ namespace MealMate.Application.Features.CollaborativeCampaigns.Queries;
 public sealed record DurationPriceBreakdownDto(
     int DurationDays,
     decimal ReferenceCustomerPrice,
-    decimal EstimatedGrossPayout,
-    decimal EstimatedNetPayout);
+    decimal? EstimatedGrossPayout,
+    decimal? EstimatedNetPayout,
+    string Currency);
 
 public sealed record RestaurantCampaignInvitationDto(
     Guid Id,
@@ -24,15 +25,19 @@ public sealed record RestaurantCampaignInvitationDto(
     string Status,
     DateTime StartsAtUtc,
     DateTime EndsAtUtc,
-    decimal TotalDiscountRate,
-    decimal MealMateShareRate,
-    decimal RestaurantShareRate,
+    decimal? TotalDiscountRate,
+    decimal? MealMateShareRate,
+    decimal? RestaurantShareRate,
     string ParticipationStatus,
     int? DedicatedDailyCapacity,
     string? DeclineReason,
     IReadOnlyList<DurationPriceBreakdownDto> DurationPrices,
     IReadOnlyList<CampaignProgramDto> Programs,
-    IReadOnlyList<CampaignParticipatingBoxDto> ParticipatingBoxes);
+    IReadOnlyList<CampaignParticipatingBoxDto> ParticipatingBoxes,
+    DateTime? EnrollmentOpensAtUtc = null,
+    DateTime? EnrollmentClosesAtUtc = null,
+    DateTime? ReviewStartsAtUtc = null,
+    DateTime? ReviewEndsAtUtc = null);
 
 public sealed record GetRestaurantCampaignInvitationsQuery(Guid? RestaurantId = null) : IQuery<IReadOnlyList<RestaurantCampaignInvitationDto>>;
 
@@ -57,20 +62,23 @@ public sealed class GetRestaurantCampaignInvitationsQueryHandler : IQueryHandler
             return Result.Success<IReadOnlyList<RestaurantCampaignInvitationDto>>(Array.Empty<RestaurantCampaignInvitationDto>());
         }
 
-        // Open campaigns for joining
+        // An invitation exists only when the restaurant has a persisted enrollment.
+        var enrollments = await _context.CampaignRestaurantEnrollments
+            .AsNoTracking()
+            .Include(e => e.Campaign)
+            .Where(e => e.RestaurantId == restaurantId.Value &&
+                        e.ParticipationStatus == CampaignRestaurantParticipationStatus.Invited &&
+                        e.Campaign.Status == CampaignStatus.OpenForJoining)
+            .OrderByDescending(e => e.Campaign.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var campaignIds = enrollments.Select(e => e.CampaignId).Distinct().ToList();
         var openCampaigns = await _context.Campaigns
             .AsNoTracking()
             .Include(c => c.Bundles)
                 .ThenInclude(b => b.DurationPrices)
-            .Where(c => c.Status == CampaignStatus.OpenForJoining)
+            .Where(c => campaignIds.Contains(c.Id))
             .OrderByDescending(c => c.CreatedAtUtc)
-            .ToListAsync(cancellationToken);
-
-        var campaignIds = openCampaigns.Select(c => c.Id).ToList();
-
-        var existingEnrollments = await _context.CampaignRestaurantEnrollments
-            .AsNoTracking()
-            .Where(e => campaignIds.Contains(e.CampaignId) && e.RestaurantId == restaurantId.Value)
             .ToListAsync(cancellationToken);
 
         var campaignPrograms = await _context.CampaignPrograms
@@ -112,29 +120,10 @@ public sealed class GetRestaurantCampaignInvitationsQueryHandler : IQueryHandler
 
         foreach (var c in openCampaigns)
         {
-            var enrollment = existingEnrollments.FirstOrDefault(e => e.CampaignId == c.Id);
-
-            Guid enrollmentId;
-            string participationStatus;
-            int? dedicatedCapacity = null;
-            string? declineReason = null;
-
-            if (enrollment != null)
-            {
-                enrollmentId = enrollment.Id;
-                participationStatus = enrollment.ParticipationStatus.ToString();
-                dedicatedCapacity = enrollment.DedicatedDailyCapacity;
-                declineReason = enrollment.DeclineReason;
-            }
-            else
-            {
-                enrollmentId = Guid.NewGuid();
-                participationStatus = "Invited";
-            }
-
-            var totalDiscount = c.TotalDiscountRate?.Value ?? 0.20m;
-            var mealMateShare = c.MealMateShareRate?.Value ?? 0.10m;
-            var restaurantShare = c.RestaurantShareRate?.Value ?? 0.10m;
+            var enrollment = enrollments.Single(e => e.CampaignId == c.Id);
+            var totalDiscount = c.TotalDiscountRate?.Value;
+            var mealMateShare = c.MealMateShareRate?.Value;
+            var restaurantShare = c.RestaurantShareRate?.Value;
 
             var durationPrices = new List<DurationPriceBreakdownDto>();
 
@@ -148,25 +137,7 @@ public sealed class GetRestaurantCampaignInvitationsQueryHandler : IQueryHandler
                 foreach (var bp in allBundlePrices)
                 {
                     var refPrice = bp.ReferenceCustomerPrice.Amount;
-                    var gross = Math.Round(refPrice * (1m - (restaurantShare * 0.5m)), 2);
-                    var net = Math.Round(refPrice * (1m - restaurantShare), 2);
-                    durationPrices.Add(new DurationPriceBreakdownDto(bp.DurationDays, refPrice, gross, net));
-                }
-            }
-            else
-            {
-                var standardTiers = new[]
-                {
-                    (Days: 7, RefPrice: 42.0m),
-                    (Days: 14, RefPrice: 79.0m),
-                    (Days: 28, RefPrice: 150.0m),
-                };
-
-                foreach (var tier in standardTiers)
-                {
-                    var gross = Math.Round(tier.RefPrice * (1m - (restaurantShare * 0.5m)), 2);
-                    var net = Math.Round(tier.RefPrice * (1m - restaurantShare), 2);
-                    durationPrices.Add(new DurationPriceBreakdownDto(tier.Days, tier.RefPrice, gross, net));
+                    durationPrices.Add(new DurationPriceBreakdownDto(bp.DurationDays, refPrice, null, null, bp.ReferenceCustomerPrice.CurrencyCode));
                 }
             }
 
@@ -179,7 +150,7 @@ public sealed class GetRestaurantCampaignInvitationsQueryHandler : IQueryHandler
                 restaurantOffers);
 
             result.Add(new RestaurantCampaignInvitationDto(
-                enrollmentId,
+                enrollment.Id,
                 c.Id,
                 c.NameAr,
                 c.NameEn,
@@ -189,12 +160,16 @@ public sealed class GetRestaurantCampaignInvitationsQueryHandler : IQueryHandler
                 totalDiscount,
                 mealMateShare,
                 restaurantShare,
-                participationStatus,
-                dedicatedCapacity,
-                declineReason,
+                enrollment.ParticipationStatus.ToString(),
+                enrollment.DedicatedDailyCapacity,
+                enrollment.DeclineReason,
                 durationPrices,
                 programs,
-                boxes
+                boxes,
+                c.EnrollmentOpensAtUtc,
+                c.EnrollmentClosesAtUtc,
+                c.ReviewStartsAtUtc,
+                c.ReviewEndsAtUtc
             ));
         }
 
@@ -203,33 +178,18 @@ public sealed class GetRestaurantCampaignInvitationsQueryHandler : IQueryHandler
 
     private async Task<Guid?> ResolveTargetRestaurantIdAsync(Guid? requestedId, CancellationToken cancellationToken)
     {
-        if (requestedId.HasValue && requestedId.Value != Guid.Empty)
+        if (!_currentUser.IsAuthenticated || _currentUser.UserType != UserType.Restaurant) return null;
+        var actorRestaurantId = _currentUser.RestaurantId;
+        if (!actorRestaurantId.HasValue && _currentUser.UserId.HasValue)
         {
-            return requestedId.Value;
-        }
-
-        if (_currentUser.RestaurantId.HasValue)
-        {
-            return _currentUser.RestaurantId.Value;
-        }
-
-        if (_currentUser.UserId.HasValue)
-        {
-            var fromUser = await _context.RestaurantProfiles
-                .Where(r => r.UserId == _currentUser.UserId.Value)
+            actorRestaurantId = await _context.RestaurantProfiles
+                .Where(r => r.UserId == _currentUser.UserId.Value && !r.IsDeleted)
                 .Select(r => (Guid?)r.Id)
                 .FirstOrDefaultAsync(cancellationToken);
-
-            if (fromUser.HasValue)
-            {
-                return fromUser.Value;
-            }
         }
 
-        return await _context.RestaurantProfiles
-            .Where(r => !r.IsDeleted)
-            .OrderBy(r => r.CreatedAtUtc)
-            .Select(r => (Guid?)r.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+        return requestedId.HasValue && requestedId.Value != Guid.Empty
+            ? actorRestaurantId == requestedId.Value ? requestedId : null
+            : actorRestaurantId;
     }
 }

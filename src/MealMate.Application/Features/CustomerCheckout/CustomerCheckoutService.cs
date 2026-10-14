@@ -53,7 +53,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         ISender sender,
         IRestaurantCapacityReader capacityReader,
         ISandboxCheckoutService? sandbox = null,
-        ISubscriptionFlowCouponService? couponService = null)
+        ISubscriptionFlowCouponService? couponService = null,
+        IApplicationLockManager? applicationLocks = null)
     {
         _db = db;
         _payments = payments;
@@ -71,7 +72,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         _sender = sender;
         _capacityReader = capacityReader;
         _sandbox = sandbox;
-        _coupons = couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock);
+        _coupons = couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock, applicationLocks);
     }
 
     public async Task<Result<IReadOnlyList<CheckoutCatalogItem>>> GetCatalogAsync(CancellationToken ct = default)
@@ -94,7 +95,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         var serviceDates = _schedule.GetServiceDates(request.StartDate, request.DurationDays, request.IncludeFriday);
         var fridayDays = _schedule.CountFridays(serviceDates);
         var pricing = await _sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
-            IncludeFriday: request.IncludeFriday, FridayDays: fridayDays), ct);
+            IncludeFriday: request.IncludeFriday, FridayDays: fridayDays, CustomerId: customerUserId), ct);
         if (pricing.IsFailure) return pricing.Error;
 
         var rows = await _eligibility.EvaluateAsync(new RestaurantEligibilityRequest(request.ProgramId, request.BundleId, request.Tier, request.RegionId, request.StartDate, request.DurationDays, request.IncludeFriday, customerUserId), ct);
@@ -144,7 +145,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         var serviceDates = _schedule.GetServiceDates(startDate, request.DurationDays, request.IncludeFriday);
         var fridayDays = _schedule.CountFridays(serviceDates);
         var preview = await _sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
-            IncludeFriday: request.IncludeFriday, FridayDays: fridayDays), ct);
+            IncludeFriday: request.IncludeFriday, FridayDays: fridayDays, CustomerId: customerUserId,
+            PromoCode: request.PromoCode, CustomerSubscriptionType: "Individual"), ct);
         if (preview.IsFailure) return preview.Error;
 
         // Coupon gate: a rejected code aborts checkout before any subscription, capacity hold or
@@ -156,7 +158,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         {
             couponEvaluation = await _coupons.EvaluateAsync(
                 promoCode, customerUserId, request.ProgramId, request.BundleId, request.DurationDays,
-                preview.Value.FinalCustomerPrice, ct);
+                preview.Value.FinalCustomerPrice, ct, subscriptionType: "Individual");
             if (!couponEvaluation.IsValid)
             {
                 return new Error("checkout.coupon_rejected", couponEvaluation.MessageEn, ErrorType.Validation,
@@ -173,7 +175,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
 
             var discounted = await _sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
                 IncludeFriday: request.IncludeFriday, FridayDays: fridayDays,
-                CustomerId: customerUserId, PromoCode: promoCode), ct);
+                CustomerId: customerUserId, PromoCode: promoCode, CustomerSubscriptionType: "Individual"), ct);
             if (discounted.IsFailure) return discounted.Error;
             pricingResult = discounted.Value;
             if (pricingResult.FinalCustomerPrice <= 0m)
@@ -226,17 +228,29 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
 
                 var create = await _sender.Send(new CreateSubscriptionCommand(customerUserId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
                     startDate, deliveryAddress, RegionId: resolvedRegionId, CorrelationId: request.CorrelationId, IncludeFriday: request.IncludeFriday,
-                    CouponOfferId: couponEvaluation?.OfferId, CouponDiscountKwd: couponEvaluation is { IsValid: true } ? pricingResult.CampaignDiscountApplied : 0m,
+                    PromoCodeId: couponEvaluation is { IsValid: true }
+                        && (couponEvaluation.PromoCodeId.HasValue ? pricingResult.PromoCodeDiscountApplied > 0m : pricingResult.CampaignDiscountApplied > 0m)
+                        ? couponEvaluation.PromoCodeId : null,
+                    CouponOfferId: couponEvaluation is { IsValid: true }
+                        && !couponEvaluation.PromoCodeId.HasValue && pricingResult.CampaignDiscountApplied > 0m
+                        ? couponEvaluation.OfferId : null,
+                    CouponDiscountKwd: couponEvaluation is { IsValid: true }
+                        ? couponEvaluation.PromoCodeId.HasValue ? pricingResult.PromoCodeDiscountApplied : pricingResult.CampaignDiscountApplied
+                        : 0m,
                     CheckoutAnchorDate: chosenStartDate), transactionCt);
                 if (create.IsFailure) throw new CheckoutReservationException(create.Error.Code);
                 var expiresAt = _clock.UtcNow.AddMinutes(15);
 
                 // The coupon hold lives in the same transaction as the subscription so concurrent
                 // checkouts cannot exceed the offer's usage limits; released on failure/expiry.
-                if (couponEvaluation is { IsValid: true })
+                if (couponEvaluation is { IsValid: true }
+                    && (couponEvaluation.PromoCodeId.HasValue
+                        ? pricingResult.PromoCodeDiscountApplied > 0m
+                        : pricingResult.CampaignDiscountApplied > 0m))
                     await _coupons.CreateCheckoutHoldAsync(
-                        couponEvaluation.Offer!, create.Value.Id, customerUserId,
-                        pricingResult.CampaignDiscountApplied, transactionCt);
+                        couponEvaluation, create.Value.Id, customerUserId,
+                        couponEvaluation.PromoCodeId.HasValue ? pricingResult.PromoCodeDiscountApplied : pricingResult.CampaignDiscountApplied,
+                        transactionCt);
 
                 foreach (var resolved in restaurant.MenuPlanVersionsByDate)
                     _db.CapacityHolds.Add(new CapacityHold { RestaurantId = restaurant.RestaurantId, SubscriptionId = create.Value.Id, MenuPlanVersionId = resolved.MenuPlanVersionId, ServiceDate = resolved.ServiceDate, Quantity = 1, Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = expiresAt });
@@ -250,6 +264,10 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                         h.Status = CapacityHoldStatus.Released;
                         h.ReleasedAtUtc = _clock.UtcNow;
                     }
+                    foreach (var prevSubId in prevSubIds)
+                    {
+                        await _coupons.ReleaseCheckoutRedemptionAsync(prevSubId, transactionCt);
+                    }
                 }
 
                 await _db.SaveChangesAsync(transactionCt);
@@ -262,6 +280,11 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         {
             return new Error(ex.Code, "Checkout could not be completed. Review your selections and try again.", ErrorType.Validation,
                 [new { error = ex.Code, message = "Checkout could not be completed. Review your selections and try again." }]);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return new Error("checkout.coupon_limit_reached", "The coupon is no longer available or usage limit was reached.", ErrorType.Conflict,
+                [new { error = "checkout.coupon_limit_reached", message = "The coupon is no longer available or usage limit was reached." }]);
         }
 
         if (reservation.ErrorCode is not null)
@@ -477,7 +500,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         var fridayDays = _schedule.CountFridays(serviceDates);
 
         var preview = await _sender.Send(new PreviewCustomerPricingQuery(subscription.ProgramId, subscription.BundleId, subscription.SelectedTier, subscription.DurationDays,
-            IncludeFriday: subscription.IncludeFriday, FridayDays: fridayDays), ct);
+            IncludeFriday: subscription.IncludeFriday, FridayDays: fridayDays, CustomerId: customerUserId), ct);
         if (preview.IsFailure) return preview.Error;
 
         // Resume never creates a new discount: the subscription's existing coupon hold is
@@ -486,11 +509,16 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         var pricingResult = preview.Value;
         var heldRedemption = await _db.OfferRedemptions.AsNoTracking()
             .FirstOrDefaultAsync(x => x.SubscriptionId == subscription.Id, ct);
-        if (heldRedemption is not null)
+        var heldPromoRedemption = await _db.PromoCodeRedemptions.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.SubscriptionId == subscription.Id
+                && x.Status == PromoCodeRedemptionStatus.Held, ct);
+        if (heldRedemption is not null || heldPromoRedemption is not null)
         {
-            var heldOffer = await _db.Offers.AsNoTracking()
+            var heldOffer = heldRedemption is null ? null : await _db.Offers.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.Id == heldRedemption.OfferId, ct);
-            var heldCode = heldOffer?.PromoCode;
+            var heldPromo = heldPromoRedemption is null ? null : await _db.PromoCodes.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == heldPromoRedemption.PromoCodeId, ct);
+            var heldCode = heldPromo?.Code ?? heldOffer?.PromoCode;
             var reevaluation = await _coupons.EvaluateAsync(
                 heldCode, customerUserId, subscription.ProgramId, subscription.BundleId, subscription.DurationDays,
                 preview.Value.FinalCustomerPrice, ct, excludeSubscriptionId: subscription.Id);
@@ -510,7 +538,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
 
             var discounted = await _sender.Send(new PreviewCustomerPricingQuery(subscription.ProgramId, subscription.BundleId, subscription.SelectedTier, subscription.DurationDays,
                 IncludeFriday: subscription.IncludeFriday, FridayDays: fridayDays,
-                CustomerId: customerUserId, PromoCode: heldCode), ct);
+                CustomerId: customerUserId, PromoCode: heldCode, CustomerSubscriptionType: "Individual",
+                ExcludeSubscriptionId: subscription.Id), ct);
             if (discounted.IsFailure) return discounted.Error;
             pricingResult = discounted.Value;
             if (pricingResult.FinalCustomerPrice <= 0m)

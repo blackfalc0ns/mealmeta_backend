@@ -5,6 +5,7 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyManager;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
@@ -29,7 +30,8 @@ public sealed record FamilyStartCheckoutRequest(
     string? IdempotencyKey = null,
     Guid? BatchId = null,
     long? BatchVersion = null,
-    int? ClientContractVersion = null);
+    int? ClientContractVersion = null,
+    string? PromoCode = null);
 
 public sealed record FamilyRenewalCheckoutRequest(
     DateOnly StartDate,
@@ -74,6 +76,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
     private readonly IApplicationLockManager _locks;
     private readonly IFamilySubscriptionAccess _familyAccess;
     private readonly IFamilyPricingSettingsReader _familyPricing;
+    private readonly ISubscriptionFlowCouponService _coupons;
     private readonly FamilyInvoiceOptions _invoiceOptions;
 
     public FamilyCheckoutService(
@@ -93,7 +96,8 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         IApplicationLockManager locks,
         IFamilySubscriptionAccess? familyAccess = null,
         IFamilyPricingSettingsReader? familyPricing = null,
-        IOptions<FamilyInvoiceOptions>? invoiceOptions = null)
+        IOptions<FamilyInvoiceOptions>? invoiceOptions = null,
+        ISubscriptionFlowCouponService? coupons = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -111,6 +115,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         _locks = locks;
         _familyAccess = familyAccess ?? new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
         _familyPricing = familyPricing ?? new FamilyPricingSettingsReader(db);
+        _coupons = coupons ?? new SubscriptionFlowCouponService(db, new MealMate.Application.Features.Offers.Services.OfferEligibilityEngine(), clock, locks);
         _invoiceOptions = invoiceOptions?.Value ?? new FamilyInvoiceOptions();
     }
 
@@ -551,6 +556,11 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             if (_db is DbContext context) context.ChangeTracker.Clear();
             return Error.Conflict(ex.Code, ex.Code);
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            if (_db is DbContext context) context.ChangeTracker.Clear();
+            return Error.Conflict("family.coupon_limit_reached", "The coupon is no longer available or usage limit was reached.");
+        }
         if (prepared.IsFailure) return prepared.Error;
         var reservation = prepared.Value;
         if (!reservation.OwnsInitialization)
@@ -735,7 +745,8 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         if ((request.BatchId.HasValue && request.BatchId != draft.Id)
             || (request.BatchVersion.HasValue && request.BatchVersion != draft.Version))
             return Error.Conflict("family.quote_changed", "family.quote_changed");
-        var quoteResult = await _quote.QuoteAsync(group, cancellationToken, new FamilyQuoteScope(activeIds, selectedIds));
+        var quoteResult = await _quote.QuoteAsync(group, cancellationToken,
+            new FamilyQuoteScope(activeIds, selectedIds, request.PromoCode, managerId));
         if (quoteResult.IsFailure) return quoteResult.Error;
         var quote = quoteResult.Value;
         var allergiesCompleted = await FamilyCheckoutAllergyLookup.CompletedMemberIdsAsync(_db, group, payableMembers, cancellationToken);
@@ -862,6 +873,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                         plan.Address.AddressLine,
                         RegionId: plan.ResolvedRegionId,
                         CorrelationId: request.CorrelationId,
+                        PromoCodeId: quote.CouponHolderMemberId == member.Id ? quote.CouponEvaluation?.PromoCodeId : null,
                         IncludeFriday: member.IncludeFriday), ct);
                     if (create.IsFailure)
                         throw new FamilyCheckoutReservationException(create.Error.Code);
@@ -892,6 +904,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                     line.MenuPlanVersionsJson = JsonSerializer.Serialize(plan.Restaurant.MenuPlanVersionsByDate);
                     line.PriceBeforeFamilyDiscount = allocation.PriceBeforeFamilyDiscount;
                     line.FamilyDiscountAllocated = allocation.FamilyDiscountAllocated;
+                    line.PromoCodeDiscountAllocated = allocation.PromoCodeDiscountAllocated;
                     line.NetPaidAmount = allocation.NetPaidAmount; line.CurrencyCode = quote.CurrencyCode;
 
                     foreach (var resolved in plan.Restaurant.MenuPlanVersionsByDate)
@@ -940,6 +953,17 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                     ? managerCreated.Subscription.Id
                     : payableCreated[0].Subscription.Id;
 
+                if (quote.CouponEvaluation is { IsValid: true, PromoCodeId: not null } familyCoupon
+                    && quote.PromoCodeDiscountAmount > 0m)
+                {
+                    var holder = quote.CouponHolderMemberId is { } holderMember
+                        ? payableCreated.First(x => x.Member.Id == holderMember)
+                        : payableCreated.First(x => x.Subscription.Id == paymentAnchorId);
+                    holder.Subscription.PromoCodeId = familyCoupon.PromoCodeId;
+                    await _coupons.CreateCheckoutHoldAsync(familyCoupon, holder.Subscription.Id, managerId,
+                        quote.PromoCodeDiscountAmount, ct);
+                }
+
                 draft.PaymentAnchorSubscriptionId = paymentAnchorId;
                 group.DiscountPercentSnapshot = quote.FamilyDiscountPercent;
                 group.QuotedFinalPrice = quote.FinalPrice;
@@ -963,6 +987,10 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             }, cancellationToken);
         }
         catch (FamilyCheckoutReservationException) { throw; }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Error.Conflict("family.coupon_limit_reached", "The coupon is no longer available or usage limit was reached.");
+        }
 
         foreach (var capture in reservation.PoolCaptures)
         {

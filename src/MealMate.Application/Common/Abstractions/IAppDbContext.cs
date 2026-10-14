@@ -1,5 +1,6 @@
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.CalendarMeals;
+using MealMate.Domain.Advertising;
 using MealMate.Domain.CollaborativeCampaigns;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.Entities;
@@ -93,7 +94,9 @@ public interface IAppDbContext
     DbSet<FamilyMemberAccess> FamilyMemberAccesses { get; }
     DbSet<FamilyMemberPermissions> FamilyMemberPermissions { get; }
     DbSet<PromoCode> PromoCodes { get; }
+    DbSet<PromoCodeRedemption> PromoCodeRedemptions { get; }
     DbSet<ReferralCode> ReferralCodes { get; }
+    DbSet<ReferralAttribution> ReferralAttributions { get; }
     DbSet<SubscriptionTierUpgrade> SubscriptionTierUpgrades { get; }
     DbSet<SubscriptionRenewal> SubscriptionRenewals { get; }
     DbSet<SubscriptionFreezeRequest> SubscriptionFreezeRequests { get; }
@@ -211,6 +214,19 @@ public interface IAppDbContext
     DbSet<CampaignProfitabilitySnapshot> CampaignProfitabilitySnapshots { get; }
     DbSet<CampaignCheckoutSession> CampaignCheckoutSessions { get; }
     DbSet<CampaignReservationAllocation> CampaignReservationAllocations { get; }
+    DbSet<CampaignPricingPolicy> CampaignPricingPolicies { get; }
+
+    // Advertising
+    DbSet<AdvertisingSettings> AdvertisingSettings { get; }
+    DbSet<AdCommercialPolicy> AdCommercialPolicies { get; }
+    DbSet<AdSpace> AdSpaces { get; }
+    DbSet<AdAuction> AdAuctions { get; }
+    DbSet<AdBid> AdBids { get; }
+    DbSet<AdAuctionNextBidderOffer> AdAuctionNextBidderOffers { get; }
+    DbSet<AdPlacement> AdPlacements { get; }
+    DbSet<AdPaymentTransaction> AdPaymentTransactions { get; }
+    DbSet<AdFinancialLedgerEntry> AdFinancialLedgerEntries { get; }
+    DbSet<AdPlacementEvent> AdPlacementEvents { get; }
 
     // Offers & Promotions
     DbSet<Offer> Offers { get; }

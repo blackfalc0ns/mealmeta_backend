@@ -121,4 +121,36 @@ public sealed class PostgresApplicationLockManager : IApplicationLockManager
                 cancellationToken);
         }
     }
+
+    public async Task LockAdAuctionAsync(Guid auctionId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = "ad-auction:" + auctionId.ToString("N");
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"AdAuctions\" WHERE \"Id\" = {auctionId} FOR UPDATE", cancellationToken);
+        var tracked = _db.ChangeTracker.Entries<MealMate.Domain.Advertising.AdAuction>()
+            .FirstOrDefault(x => x.Entity.Id == auctionId);
+        if (tracked is not null)
+        {
+            await tracked.ReloadAsync(cancellationToken);
+            foreach (var bidEntry in _db.ChangeTracker.Entries<MealMate.Domain.Advertising.AdBid>()
+                         .Where(x => x.Entity.AdAuctionId == auctionId).ToList())
+                bidEntry.State = EntityState.Detached;
+            tracked.Entity.Bids.Clear();
+            var bids = tracked.Collection(x => x.Bids);
+            bids.IsLoaded = false;
+            await bids.LoadAsync(cancellationToken);
+        }
+    }
+
+    public async Task LockPromoCodeAsync(Guid promoCodeId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = "promo-code:" + promoCodeId.ToString("N");
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"PromoCodes\" WHERE \"Id\" = {promoCodeId} FOR UPDATE", cancellationToken);
+        var tracked = _db.ChangeTracker.Entries<MealMate.Domain.ProgramsSubscriptions.PromoCode>()
+            .FirstOrDefault(x => x.Entity.Id == promoCodeId);
+        if (tracked is not null) await tracked.ReloadAsync(cancellationToken);
+    }
 }

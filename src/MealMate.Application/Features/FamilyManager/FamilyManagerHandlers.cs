@@ -152,6 +152,43 @@ public sealed class FamilyManagerHandlers :
             .Where(p => programIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, cancellationToken);
 
+        var bundleIds = members.SelectMany(m => new[] { m.BundleId,
+                serviceSubscriptions.GetValueOrDefault(m.Id)?.Current?.BundleId,
+                serviceSubscriptions.GetValueOrDefault(m.Id)?.Upcoming?.BundleId })
+            .Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToList();
+        var bundles = await _db.Bundles.AsNoTracking().Where(b => bundleIds.Contains(b.Id))
+            .ToDictionaryAsync(b => b.Id, cancellationToken);
+        var profileOwners = members.Select(m => m.Role == FamilyMemberRole.Manager
+                ? _currentUser.UserId
+                : access.GetValueOrDefault(m.Id)?.LinkedCustomerUserId)
+            .Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToList();
+        var profileImages = await _db.CustomerProfiles.AsNoTracking()
+            .Where(p => profileOwners.Contains(p.UserId))
+            .ToDictionaryAsync(p => p.UserId, p => p.ProfileImageStorageKey, cancellationToken);
+
+        var currentSubscriptionIds = serviceSubscriptions.Values.Where(x => x.CurrentId.HasValue)
+            .Select(x => x.CurrentId!.Value).Distinct().ToList();
+        var todayDays = await _db.SubscriptionDays.AsNoTracking()
+            .Where(d => d.ServiceDate == today && currentSubscriptionIds.Contains(d.SubscriptionId))
+            .ToListAsync(cancellationToken);
+        var todayDayIds = todayDays.Select(d => d.Id).ToList();
+        var todaySelections = await _db.DailyMealSelections.AsNoTracking()
+            .Where(s => todayDayIds.Contains(s.SubscriptionDayId))
+            .Select(s => new { s.SubscriptionDayId, s.MealId }).ToListAsync(cancellationToken);
+        var filledByDay = todaySelections.GroupBy(x => x.SubscriptionDayId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.MealId).Distinct().Count());
+
+        var serviceIds = serviceSubscriptions.Values.SelectMany(x => new[] { x.CurrentId, x.UpcomingId })
+            .Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToList();
+        var calendarDays = await _db.SubscriptionDays.AsNoTracking()
+            .Where(d => serviceIds.Contains(d.SubscriptionId))
+            .Select(d => new { d.SubscriptionId, d.Status }).ToListAsync(cancellationToken);
+        var calendarUsage = calendarDays.GroupBy(x => x.SubscriptionId).ToDictionary(g => g.Key, g => new
+        {
+            Total = g.Count(x => x.Status != SubscriptionDayStatus.Cancelled),
+            Used = g.Count(x => x.Status == SubscriptionDayStatus.Delivered)
+        });
+
         var remaining = await LoadRemainingDaysAsync(serviceSubscriptions.Values.Select(x => x.CurrentId ?? x.UpcomingId)
             .Where(x => x.HasValue).Select(x => x!.Value).ToList(), today, cancellationToken);
         var lines = await LoadLatestLinesAsync(members, serviceSubscriptions.ToDictionary(x => x.Key, x => x.Value.CurrentId ?? x.Value.UpcomingId), cancellationToken);
@@ -163,11 +200,44 @@ public sealed class FamilyManagerHandlers :
             var service = projection.Current ?? projection.Upcoming;
             var programAr = service?.Program?.NameAr ?? program?.NameAr;
             var programEn = service?.Program?.NameEn ?? program?.NameEn;
+            bundles.TryGetValue(service?.BundleId ?? m.BundleId ?? Guid.Empty, out var bundle);
+            var fundedId = projection.CurrentId ?? projection.UpcomingId;
+            var fundedService = projection.Current ?? projection.Upcoming;
+            var hasFundedService = fundedId.HasValue && fundedService is not null;
+            var planMeals = bundle is null ? (int?)null : bundle.BreakfastCount + bundle.LunchCount + bundle.DinnerCount + bundle.SnackCount;
+            var hasSavedPlan = m.ProgramId.HasValue || m.BundleId.HasValue;
+            FamilyPlanSummaryDto? planSummary = null;
+            if (hasFundedService && fundedService is not null)
+            {
+                var usage = calendarUsage.GetValueOrDefault(fundedService.Id);
+                var total = usage?.Total;
+                var used = usage?.Used;
+                decimal? percentage = usage is null ? null : usage.Total == 0 ? 0m : Math.Round((decimal)usage.Used * 100m / usage.Total, 2);
+                planSummary = new FamilyPlanSummaryDto(planMeals, fundedService.DurationDays,
+                    fundedService.StartDate, fundedService.EndDate, fundedService.EndDate.AddDays(1), total, used, percentage);
+            }
+            else if (hasSavedPlan)
+            {
+                planSummary = new FamilyPlanSummaryDto(planMeals, m.DurationDays,
+                    m.StartDate.HasValue && m.DurationDays is > 0 ? m.StartDate : null,
+                    null, null, null, null, null);
+            }
+            var currentDay = projection.CurrentId is { } currentId
+                ? todayDays.FirstOrDefault(d => d.SubscriptionId == currentId)
+                : null;
+            FamilyTodayMealSelectionDto? todaySelection = null;
+            if (currentDay is not null && planMeals.HasValue)
+                todaySelection = new FamilyTodayMealSelectionDto(today, currentDay.Status.ToString(),
+                    filledByDay.GetValueOrDefault(currentDay.Id), planMeals.Value, currentDay.IsAutoSelected);
+            var ownerId = m.Role == FamilyMemberRole.Manager ? _currentUser.UserId : memberAccess?.LinkedCustomerUserId;
+            var imageUrl = ownerId.HasValue && profileImages.TryGetValue(ownerId.Value, out var imageKey)
+                ? MealMate.Application.Common.Storage.CatalogImageStorage.ToContentUrl(imageKey) : null;
             return new FamilyMemberListItemDto(
                 m.Id, m.DisplayName, m.Role, m.AgeYears, memberAccess?.IsPaused == true,
                 projection.CurrentId, programAr, programEn, remaining.GetValueOrDefault((projection.CurrentId ?? projection.UpcomingId) ?? Guid.Empty), m.SetupStatus,
                 Lifecycle(m, memberAccess, lines.GetValueOrDefault(m.Id), service, projectionResolved: true),
-                projection.UpcomingId, projection.UpcomingStartDate);
+                projection.UpcomingId, projection.UpcomingStartDate, imageUrl,
+                memberAccess?.HasSeparateAccount == true, planSummary, todaySelection);
         }).ToList();
         return Result.Success(list);
     }

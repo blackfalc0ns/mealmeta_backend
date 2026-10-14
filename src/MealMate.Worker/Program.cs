@@ -25,6 +25,8 @@ builder.Services.AddSingleton<ICurrentUser, SystemCurrentUser>();
 
 builder.Services.AddHostedService<AuthTokenCleanupJob>();
 builder.Services.AddHostedService<CampaignReservationExpirationJob>();
+builder.Services.AddHostedService<AdAuctionSweepJob>();
+builder.Services.AddHostedService<AdPaymentReconciliationJob>();
 builder.Services.AddHostedService<CampaignCheckoutReconciliationJob>();
 builder.Services.AddHostedService<CampaignLifecycleSchedulerJob>();
 builder.Services.AddHostedService<OfferLifecycleSchedulerJob>();

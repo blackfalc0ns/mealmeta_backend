@@ -55,21 +55,36 @@ public sealed class GetCampaignsListQueryHandler : IQueryHandler<GetCampaignsLis
         return new PagedResult<CampaignDraftDto>(dtos, total, pageReq.NormalizedPage, pageReq.NormalizedPageSize);
     }
 
-    public static CampaignDraftDto MapDto(Campaign c) => new(
-        c.Id,
-        c.NameAr,
-        c.NameEn,
-        c.Status,
-        c.StartsAtUtc,
-        c.EndsAtUtc,
-        c.TotalDiscountRate.Value,
-        c.MealMateShareRate.Value,
-        c.RestaurantShareRate.Value,
-        c.FundingMode,
-        c.MaxSubscribers,
-        c.EnrollmentOpensAtUtc,
-        c.EnrollmentClosesAtUtc,
-        c.Programs.Select(p => p.ProgramId).ToList(),
-        c.Bundles.Select(b => b.BundleId).ToList()
-    );
+    public static CampaignDraftDto MapDto(Campaign c) => MapDto(c, DateTime.UtcNow);
+
+    public static CampaignDraftDto MapDto(Campaign c, DateTime utcNow)
+    {
+        var (reviewOverdue, approvalStatus) = CampaignApprovalState.Derive(
+            c.Status, c.ReviewStartsAtUtc, c.ReviewEndsAtUtc, c.CurrentSnapshotVersion, c.ApprovedSnapshotVersion, utcNow);
+
+        return new CampaignDraftDto(
+            c.Id,
+            c.NameAr,
+            c.NameEn,
+            c.Status,
+            c.StartsAtUtc,
+            c.EndsAtUtc,
+            c.TotalDiscountRate.Value,
+            c.MealMateShareRate.Value,
+            c.RestaurantShareRate.Value,
+            c.FundingMode,
+            c.MaxSubscribers,
+            c.EnrollmentOpensAtUtc,
+            c.EnrollmentClosesAtUtc,
+            c.Programs.Select(p => p.ProgramId).ToList(),
+            c.Bundles.Select(b => b.BundleId).ToList(),
+            c.ReviewStartsAtUtc,
+            c.ReviewEndsAtUtc,
+            c.CurrentSnapshotVersion,
+            c.ApprovedSnapshotVersion,
+            c.ApprovedByUserId,
+            c.ApprovedAtUtc,
+            reviewOverdue,
+            approvalStatus);
+    }
 }

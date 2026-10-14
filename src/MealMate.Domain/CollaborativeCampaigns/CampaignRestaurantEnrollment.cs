@@ -25,5 +25,10 @@ public sealed class CampaignRestaurantEnrollment : AuditableEntity
 
     public int? DedicatedDailyCapacity { get; set; }
 
+    /// <summary>Campaign snapshot version whose terms the restaurant accepted.</summary>
+    public int? AcceptedSnapshotVersion { get; set; }
+
+    public DateTime? RespondedAtUtc { get; set; }
+
     public ICollection<CampaignRestaurantApproval> Approvals { get; set; } = new List<CampaignRestaurantApproval>();
 }

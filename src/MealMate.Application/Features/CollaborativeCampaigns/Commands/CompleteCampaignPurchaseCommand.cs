@@ -56,11 +56,35 @@ public sealed class CompleteCampaignPurchaseCommandHandler
         // Idempotency: If already completed, retrieve the existing subscription
         if (session.Status == CampaignCheckoutSessionStatus.Completed)
         {
-            var existingSub = await _db.Subscriptions
-                .FirstOrDefaultAsync(s => s.CampaignId == session.CampaignId &&
-                                          s.CustomerUserId == session.CustomerId &&
-                                          s.BundleId == session.BundleId,
-                    cancellationToken);
+            var existingSubs = await _db.Subscriptions.AsNoTracking()
+                .Where(s => s.CorrelationId == session.Id.ToString("N"))
+                .ToListAsync(cancellationToken);
+
+            // Legacy rows predate session correlation. Recover them only when the successful
+            // provider payment and all stable purchase dimensions identify exactly one row.
+            if (existingSubs.Count == 0)
+            {
+                var successfulPaymentIds = session.PaymentTransactions
+                    .Where(t => t.Status == PaymentTransactionStatus.Succeeded)
+                    .Select(t => t.ProviderTransactionId).Distinct().Take(2).ToList();
+                if (successfulPaymentIds.Count > 1)
+                    return Result.Failure<CompleteCampaignPurchaseResultDto>(
+                        Error.Conflict("Campaign.SessionPaymentAmbiguous", "Multiple successful payments match this legacy session; manual reconciliation is required."));
+                if (successfulPaymentIds.Count == 1 && !string.IsNullOrWhiteSpace(successfulPaymentIds[0]))
+                {
+                    var sessionDurationDays = session.Allocations.Select(a => a.ServiceDate).Distinct().Count();
+                    existingSubs = await _db.Subscriptions.AsNoTracking()
+                        .Where(s => s.CampaignId == session.CampaignId && s.CustomerUserId == session.CustomerId &&
+                                    s.BundleId == session.BundleId && s.PaymentId == successfulPaymentIds[0] &&
+                                    s.DurationDays == sessionDurationDays)
+                        .ToListAsync(cancellationToken);
+                }
+            }
+
+            if (existingSubs.Count > 1)
+                return Result.Failure<CompleteCampaignPurchaseResultDto>(
+                    Error.Conflict("Campaign.SessionSubscriptionAmbiguous", "Multiple subscriptions match this completed payment session; manual reconciliation is required."));
+            var existingSub = existingSubs.SingleOrDefault();
 
             if (existingSub != null)
             {
@@ -116,6 +140,7 @@ public sealed class CompleteCampaignPurchaseCommandHandler
             DeliveryAddress = request.DeliveryAddress,
             PaidAmount = new Money(tx.Amount, tx.Currency),
             PaymentId = tx.ProviderTransactionId,
+            CorrelationId = session.Id.ToString("N"),
             PaymentVerifiedAtUtc = tx.CompletedAtUtc ?? _clock.UtcNow
         };
 

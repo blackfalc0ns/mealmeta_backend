@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.CentralAccounting;
+using MealMate.Domain.Advertising;
 using MealMate.Domain.CollaborativeCampaigns;
 using MealMate.Domain.Common;
 using MealMate.Domain.Entities;
@@ -130,7 +131,9 @@ public sealed class AppDbContext
     public DbSet<FamilyMemberAccess> FamilyMemberAccesses => Set<FamilyMemberAccess>();
     public DbSet<FamilyMemberPermissions> FamilyMemberPermissions => Set<FamilyMemberPermissions>();
     public DbSet<PromoCode> PromoCodes => Set<PromoCode>();
+    public DbSet<PromoCodeRedemption> PromoCodeRedemptions => Set<PromoCodeRedemption>();
     public DbSet<ReferralCode> ReferralCodes => Set<ReferralCode>();
+    public DbSet<ReferralAttribution> ReferralAttributions => Set<ReferralAttribution>();
     public DbSet<SubscriptionTierUpgrade> SubscriptionTierUpgrades => Set<SubscriptionTierUpgrade>();
     public DbSet<SubscriptionFreezeRequest> SubscriptionFreezeRequests => Set<SubscriptionFreezeRequest>();
     public DbSet<SubscriptionRenewal> SubscriptionRenewals => Set<SubscriptionRenewal>();
@@ -296,6 +299,19 @@ public sealed class AppDbContext
     public DbSet<CampaignProfitabilitySnapshot> CampaignProfitabilitySnapshots => Set<CampaignProfitabilitySnapshot>();
     public DbSet<CampaignCheckoutSession> CampaignCheckoutSessions => Set<CampaignCheckoutSession>();
     public DbSet<CampaignReservationAllocation> CampaignReservationAllocations => Set<CampaignReservationAllocation>();
+    public DbSet<CampaignPricingPolicy> CampaignPricingPolicies => Set<CampaignPricingPolicy>();
+
+    // ── Advertising ──────────────────────────────────────────────────
+    public DbSet<AdvertisingSettings> AdvertisingSettings => Set<AdvertisingSettings>();
+    public DbSet<AdCommercialPolicy> AdCommercialPolicies => Set<AdCommercialPolicy>();
+    public DbSet<AdSpace> AdSpaces => Set<AdSpace>();
+    public DbSet<AdAuction> AdAuctions => Set<AdAuction>();
+    public DbSet<AdBid> AdBids => Set<AdBid>();
+    public DbSet<AdAuctionNextBidderOffer> AdAuctionNextBidderOffers => Set<AdAuctionNextBidderOffer>();
+    public DbSet<AdPlacement> AdPlacements => Set<AdPlacement>();
+    public DbSet<AdPaymentTransaction> AdPaymentTransactions => Set<AdPaymentTransaction>();
+    public DbSet<AdFinancialLedgerEntry> AdFinancialLedgerEntries => Set<AdFinancialLedgerEntry>();
+    public DbSet<AdPlacementEvent> AdPlacementEvents => Set<AdPlacementEvent>();
 
     // ── Offers & Promotions ──────────────────────────────────────────
     public DbSet<Offer> Offers => Set<Offer>();

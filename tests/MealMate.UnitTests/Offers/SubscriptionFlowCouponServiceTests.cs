@@ -2,8 +2,10 @@ using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.Offers.Services;
 using MealMate.Application.Features.ProgramsSubscriptions.Flow;
+using MealMate.Domain.Enums;
 using MealMate.Domain.Offers;
 using MealMate.Domain.Offers.Enums;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -173,6 +175,62 @@ public sealed class SubscriptionFlowCouponServiceTests
     }
 
     [Fact]
+    public async Task AdminPromoCode_IsUsableByCheckoutWithServerTargeting()
+    {
+        await using var db = CreateDb();
+        var promo = SeedAdminPromo(db, subscriptionType: "Individual");
+        await db.SaveChangesAsync();
+
+        var evaluation = await EvaluateAsync(db, "ADMIN10");
+
+        evaluation.IsValid.Should().BeTrue();
+        evaluation.PromoCodeId.Should().Be(promo.Id);
+        evaluation.OfferId.Should().BeNull();
+        evaluation.DiscountAmount.Should().Be(20m);
+    }
+
+    [Fact]
+    public async Task AdminPromoCode_RejectsFamilyTargetForIndividualCheckout()
+    {
+        await using var db = CreateDb();
+        SeedAdminPromo(db, subscriptionType: "Family");
+        await db.SaveChangesAsync();
+
+        (await EvaluateAsync(db, "ADMIN10")).Status.Should().Be(SubscriptionCouponStatuses.Ineligible);
+    }
+
+    [Fact]
+    public async Task ReleasingAdminPromoHold_IsDurableAndIdempotent()
+    {
+        await using var db = CreateDb();
+        var promo = SeedAdminPromo(db, subscriptionType: "Individual");
+        promo.UsedCount = 1;
+        var redemption = new PromoCodeRedemption
+        {
+            PromoCodeId = promo.Id,
+            CustomerId = CustomerId,
+            SubscriptionId = Guid.NewGuid(),
+            DiscountAppliedAmount = new Money(20m, "KWD"),
+            PlatformFundedAmount = new Money(20m, "KWD"),
+            RestaurantFundedAmount = new Money(0m, "KWD"),
+            DiscountPercentSnapshot = 0.1m,
+            TargetingSnapshotJson = promo.TargetingJson!,
+            HeldAtUtc = Now,
+        };
+        db.PromoCodeRedemptions.Add(redemption);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        await service.ReleaseCheckoutRedemptionAsync(redemption.SubscriptionId);
+        await service.ReleaseCheckoutRedemptionAsync(redemption.SubscriptionId);
+
+        var saved = await db.PromoCodeRedemptions.SingleAsync(x => x.Id == redemption.Id);
+        saved.Status.Should().Be(PromoCodeRedemptionStatus.Released);
+        saved.ReleasedAtUtc.Should().NotBeNull();
+        promo.UsedCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task ReleaseCheckoutRedemption_RemovesHoldAndRestoresUsage()
     {
         await using var db = CreateDb();
@@ -196,6 +254,132 @@ public sealed class SubscriptionFlowCouponServiceTests
         offer.CurrentUsageCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task ReleaseCheckoutRedemption_WhenCommitted_ReleasesAndDecrementsUsage()
+    {
+        await using var db = CreateDb();
+        var promo = SeedAdminPromo(db, "Individual");
+        promo.UsedCount = 1;
+        var subId = Guid.NewGuid();
+        var redemption = new PromoCodeRedemption
+        {
+            PromoCodeId = promo.Id,
+            CustomerId = CustomerId,
+            SubscriptionId = subId,
+            DiscountAppliedAmount = new Money(20m, "KWD"),
+            PlatformFundedAmount = new Money(20m, "KWD"),
+            RestaurantFundedAmount = new Money(0m, "KWD"),
+            DiscountPercentSnapshot = 0.1m,
+            TargetingSnapshotJson = promo.TargetingJson!,
+            HeldAtUtc = Now.AddDays(-1),
+        };
+        redemption.Commit(Now.AddHours(-1));
+        db.PromoCodeRedemptions.Add(redemption);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        await service.ReleaseCheckoutRedemptionAsync(subId);
+        // Second call must be idempotent
+        await service.ReleaseCheckoutRedemptionAsync(subId);
+
+        var saved = await db.PromoCodeRedemptions.SingleAsync(x => x.SubscriptionId == subId);
+        saved.Status.Should().Be(PromoCodeRedemptionStatus.Released);
+        saved.ReleasedAtUtc.Should().Be(Now);
+        saved.ReleaseReason.Should().NotBeNullOrWhiteSpace();
+        promo.UsedCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CreateCheckoutHold_WhenAlreadyHeldForSubscription_IsIdempotentAndDoesNotDoubleIncrement()
+    {
+        await using var db = CreateDb();
+        var promo = SeedAdminPromo(db, "Individual", maxUses: 1, perCustomerLimit: 1);
+        var sub = new Subscription
+        {
+            CustomerUserId = CustomerId,
+            ProgramId = ProgramId,
+            BundleId = BundleId,
+            DurationDays = 26,
+            Status = SubscriptionStatus.PendingPayment,
+            PaidAmount = new Money(180m, "KWD")
+        };
+        db.Subscriptions.Add(sub);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var eval = await service.EvaluateAsync(promo.Code, CustomerId, ProgramId, BundleId, 26, 200m);
+        eval.IsValid.Should().BeTrue();
+
+        await service.CreateCheckoutHoldAsync(eval, sub.Id, CustomerId, eval.DiscountAmount);
+        promo.UsedCount.Should().Be(1);
+
+        // Retry hold for same subscription
+        await service.CreateCheckoutHoldAsync(eval, sub.Id, CustomerId, eval.DiscountAmount);
+        promo.UsedCount.Should().Be(1, "retry must not double increment usage count");
+        var redemptions = await db.PromoCodeRedemptions.Where(x => x.SubscriptionId == sub.Id).ToListAsync();
+        redemptions.Should().ContainSingle();
+        redemptions[0].Status.Should().Be(PromoCodeRedemptionStatus.Held);
+    }
+
+    [Fact]
+    public async Task CreateCheckoutHold_WhenAlreadyReleasedForSubscription_ReholdsAndIncrements()
+    {
+        await using var db = CreateDb();
+        var promo = SeedAdminPromo(db, "Individual", maxUses: 2, perCustomerLimit: 2);
+        var sub = new Subscription
+        {
+            CustomerUserId = CustomerId,
+            ProgramId = ProgramId,
+            BundleId = BundleId,
+            DurationDays = 26,
+            Status = SubscriptionStatus.PendingPayment,
+            PaidAmount = new Money(180m, "KWD")
+        };
+        db.Subscriptions.Add(sub);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var eval = await service.EvaluateAsync(promo.Code, CustomerId, ProgramId, BundleId, 26, 200m);
+        await service.CreateCheckoutHoldAsync(eval, sub.Id, CustomerId, eval.DiscountAmount);
+        promo.UsedCount.Should().Be(1);
+
+        // Cancel / Release
+        await service.ReleaseCheckoutRedemptionAsync(sub.Id);
+        promo.UsedCount.Should().Be(0);
+
+        // Restart checkout with same subscription
+        await service.CreateCheckoutHoldAsync(eval, sub.Id, CustomerId, eval.DiscountAmount);
+        promo.UsedCount.Should().Be(1);
+        var saved = await db.PromoCodeRedemptions.SingleAsync(x => x.SubscriptionId == sub.Id);
+        saved.Status.Should().Be(PromoCodeRedemptionStatus.Held);
+        saved.ReleasedAtUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateCheckoutHold_WhenMaxUsesReached_ThrowsDbUpdateConcurrencyException()
+    {
+        await using var db = CreateDb();
+        var promo = SeedAdminPromo(db, "Individual", maxUses: 1, perCustomerLimit: 2);
+        promo.UsedCount = 1;
+        var sub = new Subscription
+        {
+            CustomerUserId = CustomerId,
+            ProgramId = ProgramId,
+            BundleId = BundleId,
+            DurationDays = 26,
+            Status = SubscriptionStatus.PendingPayment,
+            PaidAmount = new Money(180m, "KWD")
+        };
+        db.Subscriptions.Add(sub);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var eval = await service.EvaluateAsync(promo.Code, CustomerId, ProgramId, BundleId, 26, 200m);
+
+        var act = async () => await service.CreateCheckoutHoldAsync(eval, sub.Id, CustomerId, 20m);
+        await act.Should().ThrowAsync<DbUpdateConcurrencyException>();
+    }
+
     private static AppDbContext CreateDb()
         => new(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
             Substitute.For<IDomainEventDispatcher>());
@@ -216,6 +400,28 @@ public sealed class SubscriptionFlowCouponServiceTests
         configure(offer);
         db.Offers.Add(offer);
         return offer;
+    }
+
+    private static PromoCode SeedAdminPromo(AppDbContext db, string subscriptionType, int? maxUses = null, int? perCustomerLimit = null)
+    {
+        var promo = new PromoCode
+        {
+            Code = "ADMIN10",
+            DiscountPercent = Percentage.FromFraction(0.10m),
+            MaxUses = maxUses,
+            PerCustomerLimit = perCustomerLimit,
+            StartsAtUtc = Now.AddDays(-1),
+            EndsAtUtc = Now.AddDays(30),
+            TargetingJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                CustomerUserId = (Guid?)null,
+                ProgramId,
+                BundleId,
+                SubscriptionType = subscriptionType,
+            }),
+        };
+        db.PromoCodes.Add(promo);
+        return promo;
     }
 
     private static async Task<SubscriptionCouponEvaluation> EvaluateAsync(AppDbContext db, string code)

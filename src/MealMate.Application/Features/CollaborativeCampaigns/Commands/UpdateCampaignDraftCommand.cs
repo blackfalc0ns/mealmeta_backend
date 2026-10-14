@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CollaborativeCampaigns.DTOs;
@@ -25,7 +26,9 @@ public sealed record UpdateCampaignDraftCommand(
     DateTime? EnrollmentOpensAtUtc = null,
     DateTime? EnrollmentClosesAtUtc = null,
     List<Guid>? ProgramIds = null,
-    List<Guid>? BundleIds = null) : ICommand<CampaignDraftDto>;
+    List<Guid>? BundleIds = null,
+    DateTime? ReviewStartsAtUtc = null,
+    DateTime? ReviewEndsAtUtc = null) : ICommand<CampaignDraftDto>;
 
 public sealed class UpdateCampaignDraftCommandHandler : ICommandHandler<UpdateCampaignDraftCommand, CampaignDraftDto>
 {
@@ -62,22 +65,28 @@ public sealed class UpdateCampaignDraftCommandHandler : ICommandHandler<UpdateCa
             return Error.Validation("Campaign.NameRequired", "Campaign NameAr and NameEn are required.");
         }
 
-        if (request.StartsAtUtc >= request.EndsAtUtc)
-        {
-            return Error.Validation("Campaign.InvalidDates", "StartsAtUtc must be before EndsAtUtc.");
-        }
+        var scheduleValidation = Campaign.ValidateScheduleOrdering(
+            request.StartsAtUtc,
+            request.EndsAtUtc,
+            request.EnrollmentOpensAtUtc,
+            request.EnrollmentClosesAtUtc,
+            request.ReviewStartsAtUtc,
+            request.ReviewEndsAtUtc,
+            requireComplete: false);
 
-        if (request.EnrollmentOpensAtUtc.HasValue && request.EnrollmentClosesAtUtc.HasValue)
+        if (scheduleValidation.IsFailure)
         {
-            if (request.EnrollmentOpensAtUtc.Value >= request.EnrollmentClosesAtUtc.Value)
-            {
-                return Error.Validation("Campaign.InvalidEnrollmentDates", "EnrollmentOpensAtUtc must be before EnrollmentClosesAtUtc.");
-            }
+            var errorCode = (request.ReviewStartsAtUtc.HasValue != request.ReviewEndsAtUtc.HasValue)
+                ? MessageCodes.Campaign.ReviewWindowIncomplete
+                : (request.ReviewStartsAtUtc.HasValue && request.ReviewEndsAtUtc.HasValue)
+                    ? MessageCodes.Campaign.ReviewWindowOrderingInvalid
+                    : request.StartsAtUtc >= request.EndsAtUtc
+                        ? "Campaign.InvalidDates"
+                        : (request.EnrollmentOpensAtUtc.HasValue && request.EnrollmentClosesAtUtc.HasValue && request.EnrollmentOpensAtUtc.Value >= request.EnrollmentClosesAtUtc.Value)
+                            ? "Campaign.InvalidEnrollmentDates"
+                            : "Campaign.EnrollmentClosesAfterStarts";
 
-            if (request.EnrollmentClosesAtUtc.Value > request.StartsAtUtc)
-            {
-                return Error.Validation("Campaign.EnrollmentClosesAfterStarts", "EnrollmentClosesAtUtc must be before or equal to StartsAtUtc.");
-            }
+            return Error.Validation(errorCode, scheduleValidation.Error ?? "Invalid campaign schedule.");
         }
 
         if (request.TotalDiscountRate <= 0 || request.TotalDiscountRate > 1.0m ||
@@ -107,6 +116,8 @@ public sealed class UpdateCampaignDraftCommandHandler : ICommandHandler<UpdateCa
         campaign.MaxSubscribers = request.MaxSubscribers;
         campaign.EnrollmentOpensAtUtc = request.EnrollmentOpensAtUtc;
         campaign.EnrollmentClosesAtUtc = request.EnrollmentClosesAtUtc;
+        campaign.ReviewStartsAtUtc = request.ReviewStartsAtUtc;
+        campaign.ReviewEndsAtUtc = request.ReviewEndsAtUtc;
 
         if (request.ProgramIds != null)
         {
@@ -156,7 +167,9 @@ public sealed class UpdateCampaignDraftCommandHandler : ICommandHandler<UpdateCa
             campaign.EnrollmentOpensAtUtc,
             campaign.EnrollmentClosesAtUtc,
             campaign.Programs.Select(p => p.ProgramId).ToList(),
-            campaign.Bundles.Select(b => b.BundleId).ToList());
+            campaign.Bundles.Select(b => b.BundleId).ToList(),
+            campaign.ReviewStartsAtUtc,
+            campaign.ReviewEndsAtUtc);
 
         return dto;
     }

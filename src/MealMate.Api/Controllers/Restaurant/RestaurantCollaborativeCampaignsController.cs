@@ -37,33 +37,36 @@ public sealed class RestaurantCollaborativeCampaignsController : ApiControllerBa
     [HttpGet("active")]
     public async Task<IActionResult> GetActiveCampaigns([FromQuery] Guid? restaurantId, CancellationToken cancellationToken)
     {
-        try
+        // Identity comes from the token only; a client-supplied restaurantId is never trusted.
+        if (!_currentUser.RestaurantId.HasValue)
         {
-            var targetRestaurantId = restaurantId ?? _currentUser.RestaurantId;
-            var result = await Sender.Send(new GetRestaurantActiveCampaignsQuery(targetRestaurantId), cancellationToken);
-            return HandleResult(result);
+            return Forbid();
         }
-        catch (Exception ex)
+
+        if (restaurantId.HasValue && restaurantId.Value != _currentUser.RestaurantId.Value)
         {
-            _logger.LogError(ex, "Error getting active campaigns for restaurant {RestaurantId}", restaurantId ?? _currentUser.RestaurantId);
-            return StatusCode(500, new { error = ex.Message, stack = ex.StackTrace });
+            return Forbid();
         }
+
+        var result = await Sender.Send(new GetRestaurantActiveCampaignsQuery(_currentUser.RestaurantId), cancellationToken);
+        return HandleResult(result);
     }
 
     [HttpGet("invitations")]
     public async Task<IActionResult> GetInvitations([FromQuery] Guid? restaurantId, CancellationToken cancellationToken)
     {
-        try
+        if (!_currentUser.RestaurantId.HasValue)
         {
-            var targetRestaurantId = restaurantId ?? _currentUser.RestaurantId;
-            var result = await Sender.Send(new GetRestaurantCampaignInvitationsQuery(targetRestaurantId), cancellationToken);
-            return HandleResult(result);
+            return Forbid();
         }
-        catch (Exception ex)
+
+        if (restaurantId.HasValue && restaurantId.Value != _currentUser.RestaurantId.Value)
         {
-            _logger.LogError(ex, "Error getting campaign invitations for restaurant {RestaurantId}", restaurantId ?? _currentUser.RestaurantId);
-            return StatusCode(500, new { error = ex.Message, stack = ex.StackTrace });
+            return Forbid();
         }
+
+        var result = await Sender.Send(new GetRestaurantCampaignInvitationsQuery(_currentUser.RestaurantId), cancellationToken);
+        return HandleResult(result);
     }
 
     [HttpPost("invitations/{enrollmentId:guid}/respond")]
@@ -88,10 +91,16 @@ public sealed class RestaurantCollaborativeCampaignsController : ApiControllerBa
         [FromBody] UpdateCapacityRequest request,
         CancellationToken cancellationToken)
     {
-        var restaurantId = request.RestaurantId ?? _currentUser.RestaurantId;
+        // The acting restaurant is always the token's restaurant.
+        var restaurantId = _currentUser.RestaurantId;
         if (!restaurantId.HasValue)
         {
-            return BadRequest("Restaurant ID is required.");
+            return Forbid();
+        }
+
+        if (request.RestaurantId.HasValue && request.RestaurantId.Value != restaurantId.Value)
+        {
+            return Forbid();
         }
 
         var command = new UpdateRestaurantCampaignCapacityCommand(id, restaurantId.Value, request.NewDailyCapacity);

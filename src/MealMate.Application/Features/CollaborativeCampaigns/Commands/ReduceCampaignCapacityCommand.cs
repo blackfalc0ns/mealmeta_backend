@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.CollaborativeCampaigns;
+using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using Microsoft.EntityFrameworkCore;
 
@@ -68,13 +69,22 @@ public sealed class ReduceCampaignCapacityCommandHandler
 
         cap.MaxBoxes = request.NewMaxBoxes;
 
+        // Capacity is part of the approved terms: bump the snapshot version and drop any stored approval
+        // once restaurants are locked (after joining closes).
+        var campaign = await _db.Campaigns.FirstOrDefaultAsync(c => c.Id == request.CampaignId, cancellationToken);
+        if (campaign != null &&
+            campaign.Status is CampaignStatus.JoiningClosed or CampaignStatus.UnderReview or CampaignStatus.Scheduled)
+        {
+            campaign.BumpSnapshotVersion();
+        }
+
         _db.CampaignAuditLogs.Add(new CampaignAuditLog
         {
             CampaignId = request.CampaignId,
             ActorId = "System",
             Action = "CapacityReduced",
             JustificationReason = request.Reason,
-            DetailsJson = $"{{\"RestaurantId\":\"{request.RestaurantId}\",\"ServiceDate\":\"{request.ServiceDate:yyyy-MM-dd}\",\"NewMaxBoxes\":{request.NewMaxBoxes}}}",
+            DetailsJson = $"{{\"RestaurantId\":\"{request.RestaurantId}\",\"ServiceDate\":\"{request.ServiceDate:yyyy-MM-dd}\",\"NewMaxBoxes\":{request.NewMaxBoxes},\"SnapshotVersion\":{campaign?.CurrentSnapshotVersion}}}",
             CreatedAtUtc = _clock.UtcNow
         });
 

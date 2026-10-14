@@ -1041,5 +1041,37 @@
   <data name="campaign.review_window_ordering_invalid" xml:space="preserve"><value>Campaign review window ordering is invalid.</value></data>
   <data name="campaign.review_window_incomplete" xml:space="preserve"><value>Both review start and end dates must be provided.</value></data>
   <data name="campaign.enrollment_dates_required" xml:space="preserve"><value>Enrollment dates are required before opening campaign for joining.</value></data>
-  <data name="family.package_stale" xml:space="preserve"><value>The family package changed. Refresh and try again.</value></data>\r\n  <data name="family.package_upgrade_required" xml:space="preserve"><value>Choose a package with more seats than the current package.</value></data>\r\n  <data name="family.preference_none_conflict" xml:space="preserve"><value>Choose either no restrictions or specific preferences, not both.</value></data>
+  <data name="family.package_stale" xml:space="preserve"><value>The family package changed. Refresh and try again.</value></data>
+  <data name="family.package_upgrade_required" xml:space="preserve"><value>Choose a package with more seats than the current package.</value></data>
+  <data name="family.preference_none_conflict" xml:space="preserve"><value>Choose either no restrictions or specific preferences, not both.</value></data>
+  <data name="campaign.approval_stale" xml:space="preserve"><value>Campaign approval is stale: terms changed after the last approval. A new approval is required.</value></data>
+  <data name="campaign.already_responded" xml:space="preserve"><value>An invitation response has already been recorded for this campaign enrollment.</value></data>
+  <data name="campaign.enrollment_ownership_mismatch" xml:space="preserve"><value>This campaign invitation does not belong to your restaurant.</value></data>
+  <data name="campaign.pricing_policy_not_approved" xml:space="preserve"><value>No approved campaign pricing policy exists. Checkout is unavailable until a policy version is approved.</value></data>
+  <data name="campaign.pricing_policy_currency_mismatch" xml:space="preserve"><value>The approved pricing policy does not cover the campaign currency.</value></data>
+  <data name="campaign.concurrent_modification" xml:space="preserve"><value>The campaign was modified by someone else. Reload and try again.</value></data>
+  <data name="Advertising.NotRestaurantActor" xml:space="preserve"><value>Only the authorized restaurant can perform this action.</value></data>
+  <data name="Advertising.AuctionNotFound" xml:space="preserve"><value>Auction was not found.</value></data>
+  <data name="Advertising.AuctionNotAwaitingPayment" xml:space="preserve"><value>This auction is not awaiting payment.</value></data>
+  <data name="Advertising.PaymentRedirectUnavailable" xml:space="preserve"><value>Configured payment return URLs are missing or not allowed.</value></data>
+  <data name="Advertising.PaymentContactUnavailable" xml:space="preserve"><value>Verified restaurant contact details are required for payment.</value></data>
+  <data name="Advertising.PaymentCurrencyUnsupported" xml:space="preserve"><value>The configured payment gateway cannot process this auction currency.</value></data>
+  <data name="Advertising.PaymentInitializationFailed" xml:space="preserve"><value>The payment session could not be initialized.</value></data>
+  <data name="Advertising.PaymentAlreadyPending" xml:space="preserve"><value>A payment attempt is already pending for this auction.</value></data>
+  <data name="Advertising.PaymentAttemptMismatch" xml:space="preserve"><value>No matching server-created payment attempt exists for this auction.</value></data>
+  <data name="Advertising.PaymentReplayMismatch" xml:space="preserve"><value>This provider transaction is already bound to another auction.</value></data>
+  <data name="Advertising.PaymentVerificationUnavailable" xml:space="preserve"><value>Payment verification is unavailable.</value></data>
+  <data name="Advertising.PaymentNotConfirmed" xml:space="preserve"><value>The payment provider has not confirmed this payment.</value></data>
+  <data name="Advertising.PaymentFailed" xml:space="preserve"><value>The payment attempt failed or was canceled.</value></data>
+  <data name="Advertising.PaymentAmountMismatch" xml:space="preserve"><value>Payment amount or currency does not match the winning bid.</value></data>
+  <data name="Advertising.NotTheWinner" xml:space="preserve"><value>Only the winning restaurant can pay for this auction.</value></data>
+  <data name="Advertising.OfferNotFound" xml:space="preserve"><value>Offer was not found.</value></data>
+  <data name="Advertising.OfferOwnershipMismatch" xml:space="preserve"><value>This offer belongs to another restaurant.</value></data>
+  <data name="Advertising.OfferExpired" xml:space="preserve"><value>This offer is no longer pending.</value></data>
+  <data name="Advertising.OfferNoLongerAvailable" xml:space="preserve"><value>This auction offer is no longer available.</value></data>
+  <data name="Advertising.ReasonRequired" xml:space="preserve"><value>A reason is required.</value></data>
+  <data name="Campaign.SessionSubscriptionAmbiguous" xml:space="preserve"><value>Multiple subscriptions match this completed payment session; manual reconciliation is required.</value></data>
+  <data name="Campaign.SessionPaymentAmbiguous" xml:space="preserve"><value>Multiple successful payments match this legacy session; manual reconciliation is required.</value></data>
+  <data name="checkout.coupon_limit_reached" xml:space="preserve"><value>The coupon is no longer available or its usage limit was reached.</value></data>
+  <data name="family.coupon_limit_reached" xml:space="preserve"><value>The coupon is no longer available or its usage limit was reached.</value></data>
 </root>

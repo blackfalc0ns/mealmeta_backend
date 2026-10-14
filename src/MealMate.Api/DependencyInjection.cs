@@ -218,6 +218,17 @@ public static class DependencyInjection
                         QueueLimit = 0,
                     });
             });
+
+            // Public discount-code validation: hardened against code enumeration.
+            options.AddPolicy("discount-code-validate", httpContext =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
         });
 
         return services;

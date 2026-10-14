@@ -16,9 +16,16 @@ public sealed class PayzahWebhookService(IAppDbContext db,
         if (attempt is null || string.IsNullOrWhiteSpace(attempt.PaymentId)) return new(400, new { error = "payment.unbound_attempt" });
         var verified = await payments.GetPaymentStatusAsync("pz-" + attempt.TrackId, "PaymentId", cancellationToken);
         if (verified is null || !Guid.TryParse(attempt.CustomerReference, out var reference)) return new(400, new { error = "payment.verification_failed" });
-        var result = verified.InvoiceStatus == "Paid"
+        var isPaid = string.Equals(verified.InvoiceStatus, "Paid", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(verified.InvoiceStatus, "Success", StringComparison.OrdinalIgnoreCase);
+        var isFailed = string.Equals(verified.InvoiceStatus, "Failed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(verified.InvoiceStatus, "Expired", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(verified.InvoiceStatus, "Canceled", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(verified.InvoiceStatus, "Cancelled", StringComparison.OrdinalIgnoreCase);
+
+        var result = isPaid
             ? await processor.VerifyAndProcessAsync(reference, "pz-" + attempt.TrackId, cancellationToken: cancellationToken)
-            : verified.InvoiceStatus == "Failed"
+            : isFailed
                 ? await processor.VerifyAndReleaseFailedAsync(reference, "pz-" + attempt.TrackId, cancellationToken: cancellationToken)
                 : null;
         return new(200, new { verified = result?.IsAccepted ?? false, status = verified.InvoiceStatus });

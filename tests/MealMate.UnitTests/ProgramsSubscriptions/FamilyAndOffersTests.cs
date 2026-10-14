@@ -44,7 +44,7 @@ public class FamilyAndOffersTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new FamilyAndOffersHandlers(db, audit, clock);
+        var handler = new FamilyAndOffersHandlers(db, audit, clock, Substitute.For<ICurrentUser>());
 
         // Add 4 members
         for (int i = 1; i <= 4; i++)
@@ -92,22 +92,49 @@ public class FamilyAndOffersTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
 
-        var handler = new FamilyAndOffersHandlers(db, audit, clock);
+        var handler = new FamilyAndOffersHandlers(db, audit, clock, Substitute.For<ICurrentUser>());
 
-        // Validate promo code (20% of 100 KWD = 20 KWD)
+        // Public validation returns the code RULE, not an amount derived from a client total.
         var promoQuery = new ValidateDiscountCodeQuery("SAVE20", TotalAmountKwd: 100.000m);
         var promoRes = await handler.Handle(promoQuery, CancellationToken.None);
 
         promoRes.IsSuccess.Should().BeTrue();
         promoRes.Value.IsValid.Should().BeTrue();
-        promoRes.Value.CalculatedDiscountKwd.Should().Be(20.000m);
+        promoRes.Value.DiscountPercent.Should().Be(0.20m);
+        promoRes.Value.CalculatedDiscountKwd.Should().Be(0m);
+        promoRes.Value.EligibilityCode.Should().Be("rule_only_amount_set_at_quote");
 
-        // Validate referral code (10% of 100 KWD = 10 KWD)
+        // Referral code with an explicit 10% reward policy returns the rule, never a computed amount.
         var refQuery = new ValidateDiscountCodeQuery("REF10", TotalAmountKwd: 100.000m);
         var refRes = await handler.Handle(refQuery, CancellationToken.None);
 
         refRes.IsSuccess.Should().BeTrue();
         refRes.Value.IsValid.Should().BeTrue();
-        refRes.Value.CalculatedDiscountKwd.Should().Be(10.000m);
+        refRes.Value.DiscountPercent.Should().Be(0.10m);
+        refRes.Value.CalculatedDiscountKwd.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task ValidateDiscountCode_TargetedCustomerCannotBeImpersonated()
+    {
+        using var db = new AppDbContext(CreateInMemoryOptions(), Substitute.For<IDomainEventDispatcher>());
+        var target = Guid.NewGuid();
+        db.PromoCodes.Add(new PromoCode
+        {
+            Code = "PRIVATE10", DiscountAmount = new Money(10m, "KWD"), IsActive = true,
+            StartsAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            TargetingJson = $"{{\"CustomerUserId\":\"{target}\"}}"
+        });
+        await db.SaveChangesAsync();
+        var current = Substitute.For<ICurrentUser>();
+        current.IsAuthenticated.Returns(true);
+        current.UserId.Returns(Guid.NewGuid());
+        var handler = new FamilyAndOffersHandlers(db, Substitute.For<IAuditLogger>(), Substitute.For<IDateTimeProvider>(), current);
+
+        var result = await handler.Handle(new ValidateDiscountCodeQuery("PRIVATE10", CustomerUserId: target), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.IsValid.Should().BeFalse();
+        result.Value.FailureReason.Should().NotBeNullOrWhiteSpace();
     }
 }

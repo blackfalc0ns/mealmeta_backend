@@ -28,8 +28,13 @@ public sealed class CampaignPaymentWebhookController : ApiControllerBase
         var expectedSecret = Config["PaymentGateways:CampaignWebhookSecret"];
         var incomingSecret = Request.Headers["X-Webhook-Secret"].ToString();
 
-        // If secret is configured, enforce strict verification
-        if (!string.IsNullOrEmpty(expectedSecret) && incomingSecret != expectedSecret)
+        // Fail closed: an unconfigured webhook secret disables the callback instead of trusting anonymous calls.
+        if (string.IsNullOrEmpty(expectedSecret))
+        {
+            return StatusCode(503);
+        }
+
+        if (incomingSecret != expectedSecret)
         {
             return Unauthorized();
         }

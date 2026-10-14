@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CollaborativeCampaigns.DTOs;
@@ -91,6 +92,29 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
                 Error.NotFound("Campaign.PricingNotFound", $"No reference price found for Bundle '{request.BundleId}' with duration {request.DurationDays} days."));
         }
 
+        // 3b. Pricing requires an explicitly approved policy covering the bundle currency.
+        //     No approved policy means checkout is unavailable — never a silent fallback price.
+        var policy = await _context.CampaignPricingPolicies
+            .Where(p => p.ApprovedByUserId != null && p.CurrencyCode == pricing.ReferenceCustomerPrice.CurrencyCode)
+            .OrderByDescending(p => p.Version)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (policy == null)
+        {
+            return Result.Failure<CampaignCheckoutSessionDto>(
+                Error.Validation(MessageCodes.Campaign.PricingPolicyNotApproved,
+                    "No approved campaign pricing policy exists for this currency."));
+        }
+
+        // 3c. Single pricing source: the campaign pricing calculator, under the approved policy.
+        var discountSplit = Domain.CollaborativeCampaigns.ValueObjects.CampaignDiscountSplit.Of(
+            Domain.ValueObjects.Percentage.FromFraction(campaign.TotalDiscountRate.Value),
+            Domain.ValueObjects.Percentage.FromFraction(campaign.RestaurantShareRate.Value),
+            Domain.ValueObjects.Percentage.FromFraction(campaign.MealMateShareRate.Value));
+
+        var priceResult = new Domain.CollaborativeCampaigns.Services.CampaignPricingCalculator()
+            .Calculate(pricing.ReferenceCustomerPrice, discountSplit, request.DurationDays);
+
         // 4. Validate Customer Eligibility
         var profile = new CustomerEligibilityProfile(
             request.CustomerId,
@@ -157,7 +181,12 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
             CustomerId = request.CustomerId,
             Status = CampaignCheckoutSessionStatus.Pending,
             ExpiresAtUtc = expiresAtUtc,
-            PriceQuoteSnapshotId = pricing.Id
+            PriceQuoteSnapshotId = pricing.Id,
+            FinalAmount = priceResult.CampaignCustomerPrice.Amount,
+            CurrencyCode = priceResult.CampaignCustomerPrice.CurrencyCode,
+            PricingPolicyId = policy.Id,
+            PricingPolicyVersion = policy.Version,
+            CampaignSnapshotVersion = campaign.CurrentSnapshotVersion
         };
 
         var allocationDtos = new List<CampaignReservationAllocationDto>(reservationResult.Allocations.Count);
@@ -183,18 +212,14 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
             allocationDtos.Add(new CampaignReservationAllocationDto(alloc.ServiceDate, alloc.RestaurantId, alloc.Units));
         }
 
-        var refPrice = pricing.ReferenceCustomerPrice.Amount;
-        var discountPct = campaign.TotalDiscountRate?.Value ?? 0m;
-        var finalPrice = Math.Round(refPrice * (1m - discountPct), 3, MidpointRounding.AwayFromZero);
-
         var dto = new CampaignCheckoutSessionDto(
             sessionId,
             campaign.Id,
             request.BundleId,
             request.CustomerId,
             request.DurationDays,
-            finalPrice,
-            pricing.ReferenceCustomerPrice.CurrencyCode,
+            priceResult.CampaignCustomerPrice.Amount,
+            priceResult.CampaignCustomerPrice.CurrencyCode,
             expiresAtUtc,
             nameof(CampaignCheckoutSessionStatus.Pending),
             allocationDtos);

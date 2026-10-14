@@ -79,6 +79,14 @@ public class CreateCampaignCheckoutSessionTests
             ReservedBoxes = 0
         };
         _context.CampaignRestaurantCapacities.Add(capacity);
+
+        // Checkout requires an explicitly approved pricing policy for the bundle currency.
+        var policy = CampaignPricingPolicy.Create(
+            1, CampaignPricingPolicy.ModelReferenceCustomerDiscount, "KWD",
+            CampaignPricingPolicy.RoundingAwayFromZero,
+            "{\"restaurantShare\":0.5}", "{\"stacking\":\"exclusive\"}", "{\"basis\":\"undeliveredDays\"}").Value;
+        policy.Approve(Guid.NewGuid(), _now);
+        _context.CampaignPricingPolicies.Add(policy);
         _context.SaveChanges();
 
         return (campaign, bundleId, restA, date1);

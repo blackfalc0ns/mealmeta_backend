@@ -24,6 +24,36 @@ public sealed class CustomerOffersController : ApiControllerBase
 
     private ICurrentUser CurrentUser => _currentUser ??= HttpContext.RequestServices.GetRequiredService<ICurrentUser>();
 
+    /// <summary>
+    /// Offers hub for the mobile client: the same visible offers as GET available
+    /// plus the authoritative server clock. The response shape is additive — the
+    /// legacy /available contract stays untouched.
+    /// </summary>
+    [AllowAnonymous]
+    [HttpGet("hub")]
+    public async Task<IActionResult> GetOffersHub(
+        [FromQuery] decimal cartAmount = 0m,
+        [FromQuery] int durationDays = 0,
+        [FromQuery] string? deliveryGovernorate = null,
+        [FromQuery] Guid? programId = null,
+        [FromQuery] Guid? bundleId = null,
+        [FromQuery] Guid? restaurantId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var customerId = ResolveCustomerId();
+
+        var result = await Sender.Send(new GetCustomerOffersHubQuery(
+            CustomerId: customerId,
+            CartAmount: cartAmount,
+            DurationDays: durationDays,
+            DeliveryGovernorate: deliveryGovernorate,
+            ProgramId: programId,
+            BundleId: bundleId,
+            RestaurantId: restaurantId
+        ), cancellationToken);
+        return HandleResult(result);
+    }
+
     [AllowAnonymous]
     [HttpGet("available")]
     public async Task<IActionResult> GetAvailableOffers(

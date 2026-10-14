@@ -110,4 +110,79 @@ public class CampaignListAndDetailsQueriesTests
         var result = await handler.Handle(new GetCampaignByIdQuery(Guid.NewGuid()), CancellationToken.None);
         result.IsFailure.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task GetCampaignsListQuery_And_GetCampaignByIdQuery_WithSavedReviewWindow_ReturnsBothDates()
+    {
+        var reviewStarts = new DateTime(2026, 10, 20, 9, 0, 0, DateTimeKind.Utc);
+        var reviewEnds = new DateTime(2026, 10, 20, 11, 0, 0, DateTimeKind.Utc);
+
+        var c = new Campaign
+        {
+            NameAr = "حملة بنافذة مراجعة",
+            NameEn = "Campaign With Review Window",
+            Status = CampaignStatus.UnderReview,
+            StartsAtUtc = new DateTime(2026, 10, 21, 0, 0, 0, DateTimeKind.Utc),
+            EndsAtUtc = new DateTime(2026, 11, 5, 0, 0, 0, DateTimeKind.Utc),
+            TotalDiscountRate = Percentage.FromFraction(0.15m),
+            MealMateShareRate = Percentage.FromFraction(0.08m),
+            RestaurantShareRate = Percentage.FromFraction(0.07m),
+            FundingMode = CampaignFundingMode.Shared,
+            ReviewStartsAtUtc = reviewStarts,
+            ReviewEndsAtUtc = reviewEnds
+        };
+        _context.Campaigns.Add(c);
+        await _context.SaveChangesAsync();
+
+        var listHandler = new GetCampaignsListQueryHandler(_context);
+        var listResult = await listHandler.Handle(new GetCampaignsListQuery(), CancellationToken.None);
+
+        listResult.IsSuccess.Should().BeTrue();
+        var listItem = listResult.Value!.Items.First(x => x.Id == c.Id);
+        listItem.ReviewStartsAtUtc.Should().Be(reviewStarts);
+        listItem.ReviewEndsAtUtc.Should().Be(reviewEnds);
+
+        var byIdHandler = new GetCampaignByIdQueryHandler(_context);
+        var byIdResult = await byIdHandler.Handle(new GetCampaignByIdQuery(c.Id), CancellationToken.None);
+
+        byIdResult.IsSuccess.Should().BeTrue();
+        byIdResult.Value!.ReviewStartsAtUtc.Should().Be(reviewStarts);
+        byIdResult.Value.ReviewEndsAtUtc.Should().Be(reviewEnds);
+    }
+
+    [Fact]
+    public async Task GetCampaignsListQuery_And_GetCampaignByIdQuery_ForLegacyCampaignWithoutReviewWindow_ReturnsNullDatesWithoutFabrication()
+    {
+        var legacy = new Campaign
+        {
+            NameAr = "حملة قديمة",
+            NameEn = "Legacy Campaign",
+            Status = CampaignStatus.Draft,
+            StartsAtUtc = DateTime.UtcNow.AddDays(5),
+            EndsAtUtc = DateTime.UtcNow.AddDays(25),
+            TotalDiscountRate = Percentage.FromFraction(0.20m),
+            MealMateShareRate = Percentage.FromFraction(0.10m),
+            RestaurantShareRate = Percentage.FromFraction(0.10m),
+            FundingMode = CampaignFundingMode.Shared,
+            ReviewStartsAtUtc = null,
+            ReviewEndsAtUtc = null
+        };
+        _context.Campaigns.Add(legacy);
+        await _context.SaveChangesAsync();
+
+        var listHandler = new GetCampaignsListQueryHandler(_context);
+        var listResult = await listHandler.Handle(new GetCampaignsListQuery(), CancellationToken.None);
+
+        listResult.IsSuccess.Should().BeTrue();
+        var listItem = listResult.Value!.Items.First(x => x.Id == legacy.Id);
+        listItem.ReviewStartsAtUtc.Should().BeNull();
+        listItem.ReviewEndsAtUtc.Should().BeNull();
+
+        var byIdHandler = new GetCampaignByIdQueryHandler(_context);
+        var byIdResult = await byIdHandler.Handle(new GetCampaignByIdQuery(legacy.Id), CancellationToken.None);
+
+        byIdResult.IsSuccess.Should().BeTrue();
+        byIdResult.Value!.ReviewStartsAtUtc.Should().BeNull();
+        byIdResult.Value.ReviewEndsAtUtc.Should().BeNull();
+    }
 }

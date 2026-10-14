@@ -64,10 +64,14 @@ public sealed class CloseCampaignJoiningCommandHandler : ICommandHandler<CloseCa
 
         campaign.TransitionTo(CampaignStatus.JoiningClosed, actorId, reason);
 
+        // Participants are now fixed: capture this as a new snapshot version for the admin approval.
+        campaign.BumpSnapshotVersion();
+
         var snapshotOffers = new List<AcceptedRestaurantOffer>();
         foreach (var enrollment in acceptedEnrollments)
         {
             enrollment.ParticipationStatus = CampaignRestaurantParticipationStatus.Locked;
+            enrollment.AcceptedSnapshotVersion ??= campaign.CurrentSnapshotVersion;
             snapshotOffers.Add(new AcceptedRestaurantOffer(
                 enrollment.RestaurantId,
                 enrollment.DedicatedDailyCapacity ?? 0));
@@ -75,7 +79,7 @@ public sealed class CloseCampaignJoiningCommandHandler : ICommandHandler<CloseCa
 
         var snapshot = new CampaignOfferSnapshot(
             campaign.Id,
-            OffersVersion: 1,
+            OffersVersion: campaign.CurrentSnapshotVersion,
             CapturedAtUtc: DateTime.UtcNow,
             AcceptedOffers: snapshotOffers);
 

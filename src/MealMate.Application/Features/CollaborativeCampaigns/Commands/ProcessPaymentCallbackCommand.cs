@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CollaborativeCampaigns.Services;
@@ -87,6 +88,23 @@ public sealed class ProcessPaymentCallbackCommandHandler
         // 3. Handle Successful Payment
         if (request.IsSuccess)
         {
+            // Amount and currency are verified against the server-issued quote; a callback that
+            // does not match the stored amount never marks the session paid.
+            if (!session.FinalAmount.HasValue || string.IsNullOrWhiteSpace(session.CurrencyCode))
+            {
+                return Result.Failure<ProcessPaymentCallbackResultDto>(
+                    Error.Validation(MessageCodes.Payment.WebhookAmountInvalid,
+                        "Checkout session has no server-computed amount; payment cannot be accepted."));
+            }
+
+            if (request.Amount != session.FinalAmount.Value ||
+                !string.Equals(request.Currency, session.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+            {
+                return Result.Failure<ProcessPaymentCallbackResultDto>(
+                    Error.Validation(MessageCodes.Payment.WebhookAmountInvalid,
+                        $"Callback amount/currency does not match the checkout quote."));
+            }
+
             var tx = new CampaignPaymentTransaction
             {
                 CheckoutSessionId = session.Id,

@@ -9,7 +9,7 @@ namespace MealMate.Domain.ProgramsSubscriptions;
 /// the money/address/restaurant snapshot freezes when the batch moves to
 /// PaymentPending and then never tracks later profile/plan/address edits.
 /// Amounts are real currency decimals; allocations must satisfy
-/// NetPaidAmount = PriceBeforeFamilyDiscount - FamilyDiscountAllocated.
+/// NetPaidAmount = PriceBeforeFamilyDiscount - FamilyDiscountAllocated - PromoCodeDiscountAllocated.
 /// </summary>
 public sealed class FamilyCheckoutBatchLine : BaseEntity
 {
@@ -60,6 +60,7 @@ public sealed class FamilyCheckoutBatchLine : BaseEntity
     // Frozen money.
     public decimal PriceBeforeFamilyDiscount { get; set; }
     public decimal FamilyDiscountAllocated { get; set; }
+    public decimal PromoCodeDiscountAllocated { get; set; }
     public decimal NetPaidAmount { get; set; }
     public string CurrencyCode { get; set; } = "KWD";
 

@@ -154,4 +154,6 @@ public sealed record PreviewCustomerPricingQuery(
     int FridayDays = 0,
     Guid? OfferId = null,
     Guid? CustomerId = null,
-    string? PromoCode = null) : IQuery<Pricing.PricingEngineResult>;
+    string? PromoCode = null,
+    string? CustomerSubscriptionType = "Individual",
+    Guid ExcludeSubscriptionId = default) : IQuery<Pricing.PricingEngineResult>;

@@ -18,10 +18,36 @@ public sealed class CampaignConfiguration : IEntityTypeConfiguration<Campaign>
         builder.Property(x => x.MealMateShareRate).HasPercentageConversion();
         builder.Property(x => x.RestaurantShareRate).HasPercentageConversion();
 
+        builder.Property(x => x.ReviewStartsAtUtc);
+        builder.Property(x => x.ReviewEndsAtUtc);
+        builder.Property(x => x.CurrentSnapshotVersion).HasDefaultValue(1);
+        builder.Property(x => x.ApprovedSnapshotVersion);
+        builder.Property(x => x.RowVersion).IsRowVersion();
+
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => new { x.StartsAtUtc, x.EndsAtUtc });
         builder.HasIndex(x => x.FundingMode);
         builder.HasIndex(x => new { x.EnrollmentOpensAtUtc, x.EnrollmentClosesAtUtc });
+    }
+}
+
+public sealed class CampaignPricingPolicyConfiguration : IEntityTypeConfiguration<CampaignPricingPolicy>
+{
+    public void Configure(EntityTypeBuilder<CampaignPricingPolicy> builder)
+    {
+        builder.ToTable("CampaignPricingPolicies");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Version).IsRequired();
+        builder.Property(x => x.Model).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsRequired();
+        builder.Property(x => x.RoundingRule).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.ContributionRulesJson).IsRequired();
+        builder.Property(x => x.StackingRulesJson).IsRequired();
+        builder.Property(x => x.RefundRulesJson).IsRequired();
+
+        builder.HasIndex(x => x.Version).IsUnique();
+        builder.HasIndex(x => new { x.CurrencyCode, x.ApprovedAtUtc });
     }
 }
 

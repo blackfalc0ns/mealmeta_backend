@@ -13,6 +13,8 @@ public sealed class PromoCode : AuditableEntity
 
     public int? MaxUses { get; set; }
 
+    public int? PerCustomerLimit { get; set; }
+
     public int UsedCount { get; set; }
 
     public DateTime StartsAtUtc { get; set; }
@@ -22,4 +24,7 @@ public sealed class PromoCode : AuditableEntity
     public bool IsActive { get; set; } = true;
 
     public string? EligibleDurationDaysJson { get; set; }
+
+    /// <summary>Server-owned targeting contract: customer, program, bundle and subscription type.</summary>
+    public string? TargetingJson { get; set; }
 }

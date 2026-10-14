@@ -31,7 +31,7 @@ public class CampaignLifecycleSchedulerJobTests
         _service = new CampaignLifecycleSchedulerService(_context, _clock);
     }
 
-    private Campaign CreateCampaign(CampaignStatus status, DateTime startsAt, DateTime endsAt)
+    private Campaign CreateCampaign(CampaignStatus status, DateTime startsAt, DateTime endsAt, bool approved = false)
     {
         var campaign = new Campaign
         {
@@ -44,6 +44,16 @@ public class CampaignLifecycleSchedulerJobTests
             MealMateShareRate = Percentage.FromFraction(0.10m),
             RestaurantShareRate = Percentage.FromFraction(0.10m)
         };
+
+        // Simulate an approval recorded earlier while the campaign was under review:
+        // bound to the current snapshot version with a known approver.
+        if (approved)
+        {
+            campaign.ApprovedSnapshotVersion = campaign.CurrentSnapshotVersion;
+            campaign.ApprovedByUserId = Guid.NewGuid();
+            campaign.ApprovedAtUtc = _now.AddHours(-1);
+        }
+
         _context.Campaigns.Add(campaign);
         return campaign;
     }
@@ -52,7 +62,7 @@ public class CampaignLifecycleSchedulerJobTests
     public async Task ProcessLifecycleTransitionsAsync_WhenCampaignScheduledAndStartTimeReached_TransitionsToActive()
     {
         // Arrange
-        var campaign = CreateCampaign(CampaignStatus.Scheduled, _now.AddMinutes(-5), _now.AddDays(7));
+        var campaign = CreateCampaign(CampaignStatus.Scheduled, _now.AddMinutes(-5), _now.AddDays(7), approved: true);
         await _context.SaveChangesAsync();
 
         // Act
@@ -138,7 +148,7 @@ public class CampaignLifecycleSchedulerJobTests
     public async Task ProcessLifecycleTransitionsAsync_IsIdempotentAndReconciliationSafe()
     {
         // Arrange
-        var c1 = CreateCampaign(CampaignStatus.Scheduled, _now.AddMinutes(-30), _now.AddDays(5)); // Should activate
+        var c1 = CreateCampaign(CampaignStatus.Scheduled, _now.AddMinutes(-30), _now.AddDays(5), approved: true); // Should activate
         var c2 = CreateCampaign(CampaignStatus.Active, _now.AddDays(-10), _now.AddMinutes(-5));   // Should end
         var c3 = CreateCampaign(CampaignStatus.Draft, _now.AddMinutes(-10), _now.AddDays(5));     // Untouched (Draft)
         var c4 = CreateCampaign(CampaignStatus.Active, _now.AddDays(-2), _now.AddDays(3));        // Untouched (Still active)

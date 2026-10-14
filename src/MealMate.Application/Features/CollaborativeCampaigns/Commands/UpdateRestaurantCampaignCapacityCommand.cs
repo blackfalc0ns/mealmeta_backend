@@ -56,6 +56,20 @@ public sealed class UpdateRestaurantCampaignCapacityCommandHandler
             }
         }
 
+        // A committed capacity change is a terms change: new snapshot version, approval dropped.
+        if (enrollment != null)
+        {
+            var campaign = await _context.Campaigns
+                .FirstOrDefaultAsync(c => c.Id == request.CampaignId, cancellationToken);
+            if (campaign != null &&
+                campaign.Status is Domain.Enums.CampaignStatus.JoiningClosed
+                    or Domain.Enums.CampaignStatus.UnderReview
+                    or Domain.Enums.CampaignStatus.Scheduled)
+            {
+                campaign.BumpSnapshotVersion();
+            }
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
         return true;
     }

@@ -10,6 +10,7 @@ using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
+using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions.Cancellation;
 
@@ -21,6 +22,7 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
     private readonly IAuditLogger? _audit;
     private readonly IOperationalPolicyService? _policyService;
     private readonly IHostEnvironment? _environment;
+    private readonly ISubscriptionFlowCouponService? _coupons;
 
     public SubscriptionCancellationService(
         IAppDbContext db,
@@ -28,7 +30,8 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
         IAuditLogger? audit = null,
         IOperationalPolicyService? policyService = null,
         IHostEnvironment? environment = null,
-        IFamilyCancellationSettlement? familySettlement = null)
+        IFamilyCancellationSettlement? familySettlement = null,
+        ISubscriptionFlowCouponService? coupons = null)
     {
         _db = db;
         _clock = clock;
@@ -36,6 +39,7 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
         _audit = audit;
         _policyService = policyService;
         _environment = environment;
+        _coupons = coupons;
     }
 
     public async Task<Result<CustomerCancellationQuoteDto>> GetQuoteAsync(
@@ -146,6 +150,9 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
             ? SubscriptionStatus.CancellationPending
             : SubscriptionStatus.Cancelled;
         subscription.LastOperationAtUtc = _clock.UtcNow;
+
+        if (_coupons is not null)
+            await _coupons.ReleaseCheckoutRedemptionAsync(subscription.Id, cancellationToken);
 
         var refundedToWallet = false;
         if (quote.RefundToCashWallet && quote.NetRefundAmount > 0)
@@ -407,6 +414,9 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
             refundedToWallet = true;
         }
 
+        if (_coupons is not null)
+            await _coupons.ReleaseCheckoutRedemptionAsync(subscription.Id, cancellationToken);
+
         var opType = forceImmediate ? "ADMIN_CANCELLED_IMMEDIATE" : "ADMIN_CANCELLED";
 
         var operation = new SubscriptionOperation
@@ -523,6 +533,9 @@ public sealed class SubscriptionCancellationService : ISubscriptionCancellationS
             hold.Status = CapacityHoldStatus.Released;
             hold.ReleasedAtUtc = _clock.UtcNow;
         }
+
+        if (_coupons is not null)
+            await _coupons.ReleaseCheckoutRedemptionAsync(subscriptionId, cancellationToken);
 
         var previousStatus = subscription.Status;
         subscription.Status = SubscriptionStatus.Cancelled;

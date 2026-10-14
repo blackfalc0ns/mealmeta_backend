@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.Offers.Services;
 using MealMate.Domain.Offers;
 using MealMate.Domain.Offers.Enums;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,7 +16,10 @@ public sealed record SubscriptionCouponEvaluation(
     decimal DiscountAmount,
     string MessageAr,
     string MessageEn,
-    Offer? Offer)
+    Offer? Offer,
+    Guid? PromoCodeId = null,
+    PromoCode? PromoCode = null,
+    string SubscriptionType = "Individual")
 {
     public bool IsValid => Status == SubscriptionCouponStatuses.Valid;
 }
@@ -43,7 +47,11 @@ public interface ISubscriptionFlowCouponService
         int durationDays,
         decimal grossCartAmount,
         CancellationToken ct = default,
-        Guid excludeSubscriptionId = default);
+        Guid excludeSubscriptionId = default,
+        string subscriptionType = "Individual");
+
+    Task CreateCheckoutHoldAsync(SubscriptionCouponEvaluation evaluation, Guid subscriptionId, Guid customerUserId,
+        decimal discountAmount, CancellationToken ct = default);
 
     /// <summary>
     /// Records the checkout hold redemption for a subscription inside the checkout transaction.
@@ -53,23 +61,23 @@ public interface ISubscriptionFlowCouponService
 
     /// <summary>Removes the checkout hold redemption for a subscription and restores the offer usage count.</summary>
     Task ReleaseCheckoutRedemptionAsync(Guid subscriptionId, CancellationToken ct = default);
+    Task CommitCheckoutRedemptionAsync(Guid subscriptionId, CancellationToken ct = default);
 }
 
-/// <remarks>
-/// The Offers table is the only accepted coupon source: it is what the pricing preview resolves, so summary,
-/// checkout and the gateway amount all evaluate the same offer. The legacy PromoCodes table is not consulted.
-/// </remarks>
 public sealed class SubscriptionFlowCouponService : ISubscriptionFlowCouponService
 {
     private readonly IAppDbContext _db;
     private readonly IOfferEligibilityEngine _engine;
     private readonly IDateTimeProvider? _clock;
+    private readonly IApplicationLockManager? _locks;
 
-    public SubscriptionFlowCouponService(IAppDbContext db, IOfferEligibilityEngine engine, IDateTimeProvider? clock = null)
+    public SubscriptionFlowCouponService(IAppDbContext db, IOfferEligibilityEngine engine, IDateTimeProvider? clock = null,
+        IApplicationLockManager? locks = null)
     {
         _db = db;
         _engine = engine;
         _clock = clock;
+        _locks = locks;
     }
 
     public async Task<SubscriptionCouponEvaluation> EvaluateAsync(
@@ -80,11 +88,47 @@ public sealed class SubscriptionFlowCouponService : ISubscriptionFlowCouponServi
         int durationDays,
         decimal grossCartAmount,
         CancellationToken ct = default,
-        Guid excludeSubscriptionId = default)
+        Guid excludeSubscriptionId = default,
+        string subscriptionType = "Individual")
     {
         var code = (promoCode ?? string.Empty).Trim().ToUpper();
         if (code.Length == 0)
             return Rejected(null, null, SubscriptionCouponStatuses.NotFound);
+
+        var adminCode = await _db.PromoCodes.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Code.ToUpper() == code, ct);
+        if (adminCode is not null)
+        {
+            var adminNow = _clock?.UtcNow ?? DateTime.UtcNow;
+            if (!adminCode.IsActive) return RejectedAdmin(code, adminCode, SubscriptionCouponStatuses.Inactive);
+            if (adminCode.StartsAtUtc > adminNow) return RejectedAdmin(code, adminCode, SubscriptionCouponStatuses.NotStarted);
+            if (adminCode.EndsAtUtc is { } end && end < adminNow) return RejectedAdmin(code, adminCode, SubscriptionCouponStatuses.Expired);
+            var ownHold = excludeSubscriptionId != Guid.Empty && await _db.PromoCodeRedemptions.AnyAsync(x =>
+                x.PromoCodeId == adminCode.Id && x.SubscriptionId == excludeSubscriptionId
+                && x.Status == PromoCodeRedemptionStatus.Held, ct);
+            if (adminCode.MaxUses is { } max && adminCode.UsedCount - (ownHold ? 1 : 0) >= max)
+                return RejectedAdmin(code, adminCode, SubscriptionCouponStatuses.UsageExhausted);
+            var target = ReadTargeting(adminCode);
+            if (target is null || (target.CustomerUserId.HasValue && target.CustomerUserId != customerUserId)
+                || (target.ProgramId.HasValue && target.ProgramId != programId)
+                || (target.BundleId.HasValue && target.BundleId != bundleId)
+                || (target.SubscriptionType is { Length: > 0 } type && !string.Equals(type, subscriptionType, StringComparison.Ordinal)))
+                return RejectedAdmin(code, adminCode, SubscriptionCouponStatuses.Ineligible);
+            if (!IsDurationEligible(adminCode.EligibleDurationDaysJson, durationDays))
+                return RejectedAdmin(code, adminCode, SubscriptionCouponStatuses.Ineligible);
+            var usedByCustomer = await _db.PromoCodeRedemptions.CountAsync(x => x.PromoCodeId == adminCode.Id
+                && x.CustomerId == customerUserId && x.Status != PromoCodeRedemptionStatus.Released
+                && x.SubscriptionId != excludeSubscriptionId, ct);
+            if (adminCode.PerCustomerLimit is { } customerLimit && usedByCustomer >= customerLimit)
+                return RejectedAdmin(code, adminCode, SubscriptionCouponStatuses.UsageExhausted);
+            var percent = adminCode.DiscountPercent?.Value;
+            var fixedAmount = adminCode.DiscountAmount?.Amount;
+            var amount = fixedAmount ?? Math.Round(grossCartAmount * (percent ?? 0m), 3, MidpointRounding.AwayFromZero);
+            amount = Math.Min(grossCartAmount, amount);
+            if (amount <= 0m) return RejectedAdmin(code, adminCode, SubscriptionCouponStatuses.Ineligible);
+            return new SubscriptionCouponEvaluation(code, null, SubscriptionCouponStatuses.Valid, amount,
+                MessageAr(SubscriptionCouponStatuses.Valid), MessageEn(SubscriptionCouponStatuses.Valid), null, adminCode.Id, adminCode, subscriptionType);
+        }
 
         var offer = await _db.Offers.AsNoTracking()
             .Include(o => o.EligiblePrograms)
@@ -156,6 +200,23 @@ public sealed class SubscriptionFlowCouponService : ISubscriptionFlowCouponServi
 
     public async Task ReleaseCheckoutRedemptionAsync(Guid subscriptionId, CancellationToken ct = default)
     {
+        var redemptionInfo = await _db.PromoCodeRedemptions.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscriptionId).Select(x => new { x.Id, x.PromoCodeId }).FirstOrDefaultAsync(ct);
+        if (redemptionInfo is not null)
+        {
+            if (_locks is not null) await _locks.LockPromoCodeAsync(redemptionInfo.PromoCodeId, ct);
+            var promoRedemption = await _db.PromoCodeRedemptions.FirstOrDefaultAsync(x => x.Id == redemptionInfo.Id, ct);
+            if (promoRedemption is null) return;
+            if (promoRedemption.Status == PromoCodeRedemptionStatus.Released) return;
+            var wasReleased = promoRedemption.Release(_clock?.UtcNow ?? DateTime.UtcNow, "cancelled_or_payment_failed");
+            if (wasReleased)
+            {
+                var promoCode = await _db.PromoCodes.FirstOrDefaultAsync(x => x.Id == promoRedemption.PromoCodeId, ct);
+                if (promoCode is not null && promoCode.UsedCount > 0) promoCode.UsedCount--;
+                await _db.SaveChangesAsync(ct);
+            }
+            return;
+        }
         var redemption = await _db.OfferRedemptions
             .FirstOrDefaultAsync(x => x.SubscriptionId == subscriptionId, ct);
         if (redemption is null) return;
@@ -166,6 +227,105 @@ public sealed class SubscriptionFlowCouponService : ISubscriptionFlowCouponServi
 
         _db.OfferRedemptions.Remove(redemption);
         await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task CreateCheckoutHoldAsync(SubscriptionCouponEvaluation evaluation, Guid subscriptionId,
+        Guid customerUserId, decimal discountAmount, CancellationToken ct = default)
+    {
+        if (evaluation.PromoCodeId is not { } promoCodeId)
+        {
+            if (evaluation.Offer is null) throw new InvalidOperationException("A valid coupon evaluation must identify its source.");
+            await CreateCheckoutHoldAsync(evaluation.Offer, subscriptionId, customerUserId, discountAmount, ct);
+            return;
+        }
+
+        var promo = await _db.PromoCodes.FirstAsync(x => x.Id == promoCodeId, ct);
+        if (_locks is not null) await _locks.LockPromoCodeAsync(promoCodeId, ct);
+        promo = await _db.PromoCodes.FirstAsync(x => x.Id == promoCodeId, ct);
+        var now = _clock?.UtcNow ?? DateTime.UtcNow;
+
+        var existing = await _db.PromoCodeRedemptions.FirstOrDefaultAsync(x => x.PromoCodeId == promo.Id && x.SubscriptionId == subscriptionId, ct);
+        if (existing is not null)
+        {
+            if (existing.Status == PromoCodeRedemptionStatus.Held)
+            {
+                var appliedExisting = Math.Min(discountAmount, evaluation.DiscountAmount);
+                if (appliedExisting <= 0m) throw new DbUpdateConcurrencyException("The promo code discount is no longer eligible.");
+                existing.DiscountAppliedAmount = new Money(appliedExisting, promo.DiscountAmount?.CurrencyCode ?? "KWD");
+                existing.PlatformFundedAmount = new Money(appliedExisting, promo.DiscountAmount?.CurrencyCode ?? "KWD");
+                existing.HeldAtUtc = now;
+                await _db.SaveChangesAsync(ct);
+                return;
+            }
+            if (existing.Status == PromoCodeRedemptionStatus.Committed)
+            {
+                return;
+            }
+        }
+
+        if (!promo.IsActive || promo.StartsAtUtc > now || (promo.EndsAtUtc is { } end && end < now)
+            || (promo.MaxUses is { } max && promo.UsedCount >= max))
+            throw new DbUpdateConcurrencyException("The promo code is no longer eligible for checkout.");
+        var target = ReadTargeting(promo);
+        var subscription = await _db.Subscriptions.FirstAsync(x => x.Id == subscriptionId, ct);
+        var actualFamilyType = subscription.FamilyGroupId.HasValue ? "Family" : "Individual";
+        var familyBundleTypeValid = evaluation.SubscriptionType != "FamilyBundle" ||
+            (subscription.FamilyGroupId.HasValue && subscription.FamilyMemberId.HasValue);
+        var typeValid = evaluation.SubscriptionType switch
+        {
+            "Individual" => actualFamilyType == "Individual",
+            "Family" => actualFamilyType == "Family",
+            "FamilyBundle" => familyBundleTypeValid,
+            _ => false,
+        };
+        if (target is null
+            || (target.CustomerUserId.HasValue && target.CustomerUserId != customerUserId)
+            || (target.ProgramId.HasValue && target.ProgramId != subscription.ProgramId)
+            || (target.BundleId.HasValue && target.BundleId != subscription.BundleId)
+            || (!string.IsNullOrWhiteSpace(target.SubscriptionType)
+                && !string.Equals(target.SubscriptionType, evaluation.SubscriptionType, StringComparison.Ordinal))
+            || !typeValid)
+            throw new DbUpdateConcurrencyException("The promo code target no longer matches this subscription.");
+        var count = await _db.PromoCodeRedemptions.CountAsync(x => x.PromoCodeId == promo.Id
+            && x.CustomerId == customerUserId && x.Status != PromoCodeRedemptionStatus.Released && x.SubscriptionId != subscriptionId, ct);
+        if (promo.PerCustomerLimit is { } customerLimit && count >= customerLimit)
+            throw new DbUpdateConcurrencyException("The promo code per-customer usage limit was reached.");
+        var applied = Math.Min(discountAmount, evaluation.DiscountAmount);
+        if (applied <= 0m) throw new DbUpdateConcurrencyException("The promo code discount is no longer eligible.");
+
+        if (existing is not null && existing.Status == PromoCodeRedemptionStatus.Released)
+        {
+            existing.Rehold(now, new Money(applied, promo.DiscountAmount?.CurrencyCode ?? "KWD"));
+        }
+        else
+        {
+            _db.PromoCodeRedemptions.Add(new PromoCodeRedemption
+            {
+                PromoCodeId = promo.Id,
+                CustomerId = customerUserId,
+                SubscriptionId = subscriptionId,
+                DiscountAppliedAmount = new Money(applied, promo.DiscountAmount?.CurrencyCode ?? "KWD"),
+                PlatformFundedAmount = new Money(applied, promo.DiscountAmount?.CurrencyCode ?? "KWD"),
+                RestaurantFundedAmount = new Money(0m, promo.DiscountAmount?.CurrencyCode ?? "KWD"),
+                DiscountPercentSnapshot = promo.DiscountPercent?.Value,
+                DiscountAmountSnapshot = promo.DiscountAmount?.Amount,
+                TargetingSnapshotJson = promo.TargetingJson ?? "{}",
+                HeldAtUtc = now,
+            });
+        }
+        promo.UsedCount++;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task CommitCheckoutRedemptionAsync(Guid subscriptionId, CancellationToken ct = default)
+    {
+        var redemptionInfo = await _db.PromoCodeRedemptions.AsNoTracking()
+            .Where(x => x.SubscriptionId == subscriptionId).Select(x => new { x.Id, x.PromoCodeId }).FirstOrDefaultAsync(ct);
+        if (redemptionInfo is null) return;
+        if (_locks is not null) await _locks.LockPromoCodeAsync(redemptionInfo.PromoCodeId, ct);
+        var redemption = await _db.PromoCodeRedemptions.FirstOrDefaultAsync(x => x.Id == redemptionInfo.Id, ct);
+        if (redemption is null) return;
+        if (redemption.Commit(_clock?.UtcNow ?? DateTime.UtcNow)) await _db.SaveChangesAsync(ct);
     }
 
     private static (decimal Platform, decimal Restaurant) SplitFunding(Offer offer, decimal discount)
@@ -201,6 +361,25 @@ public sealed class SubscriptionFlowCouponService : ISubscriptionFlowCouponServi
 
     private static SubscriptionCouponEvaluation Rejected(string? code, Guid? offerId, string status)
         => new(code, offerId, status, 0m, MessageAr(status), MessageEn(status), null);
+
+    private static SubscriptionCouponEvaluation RejectedAdmin(string code, PromoCode promo, string status)
+        => new(code, null, status, 0m, MessageAr(status), MessageEn(status), null, promo.Id, promo);
+
+    private static PromoTargeting? ReadTargeting(PromoCode promo)
+    {
+        if (string.IsNullOrWhiteSpace(promo.TargetingJson)) return new(null, null, null, null);
+        try { return System.Text.Json.JsonSerializer.Deserialize<PromoTargeting>(promo.TargetingJson); }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    private static bool IsDurationEligible(string? json, int durationDays)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return true;
+        try { return System.Text.Json.JsonSerializer.Deserialize<HashSet<int>>(json)?.Contains(durationDays) == true; }
+        catch (System.Text.Json.JsonException) { return false; }
+    }
+
+    private sealed record PromoTargeting(Guid? CustomerUserId, Guid? ProgramId, Guid? BundleId, string? SubscriptionType);
 
     private static string MessageAr(string status) => status switch
     {

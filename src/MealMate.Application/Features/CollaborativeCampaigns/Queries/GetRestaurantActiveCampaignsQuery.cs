@@ -19,18 +19,24 @@ public sealed record RestaurantActiveCampaignDto(
     string Status,
     DateTime StartsAtUtc,
     DateTime EndsAtUtc,
-    int DedicatedDailyCapacity,
-    int ReservedDailyBoxes,
-    decimal TotalDiscountRate,
-    decimal MealMateShareRate,
-    decimal RestaurantShareRate,
-    decimal GrossSettlementEarned,
-    decimal NetSettlementEarned,
-    decimal PlatformWholesaleSpread,
-    decimal PendingPayout,
-    string Currency,
+    int? DedicatedDailyCapacity,
+    int? ReservedDailyBoxes,
+    decimal? TotalDiscountRate,
+    decimal? MealMateShareRate,
+    decimal? RestaurantShareRate,
+    decimal? GrossSettlementEarned,
+    decimal? NetSettlementEarned,
+    decimal? PlatformWholesaleSpread,
+    decimal? PendingPayout,
+    string? Currency,
     IReadOnlyList<CampaignProgramDto> Programs,
-    IReadOnlyList<CampaignParticipatingBoxDto> ParticipatingBoxes);
+    IReadOnlyList<CampaignParticipatingBoxDto> ParticipatingBoxes,
+    DateTime? EnrollmentOpensAtUtc = null,
+    DateTime? EnrollmentClosesAtUtc = null,
+    DateTime? ReviewStartsAtUtc = null,
+    DateTime? ReviewEndsAtUtc = null,
+    bool TermsChanged = false,
+    bool ApprovalInvalidated = false);
 
 public sealed record GetRestaurantActiveCampaignsQuery(Guid? RestaurantId = null) : IQuery<IReadOnlyList<RestaurantActiveCampaignDto>>;
 
@@ -59,61 +65,10 @@ public sealed class GetRestaurantActiveCampaignsQueryHandler : IQueryHandler<Get
             .AsNoTracking()
             .Include(e => e.Campaign)
             .Where(e => e.RestaurantId == restaurantId.Value &&
-                        (e.ParticipationStatus == CampaignRestaurantParticipationStatus.Accepted ||
-                         e.Status == VerificationStatus.Approved))
+                        e.ParticipationStatus == CampaignRestaurantParticipationStatus.Accepted &&
+                        (e.Campaign.Status == CampaignStatus.Active || e.Campaign.Status == CampaignStatus.Scheduled))
             .OrderByDescending(e => e.Campaign.StartsAtUtc)
             .ToListAsync(cancellationToken);
-
-        if (enrollments.Count == 0)
-        {
-            var activeCampaigns = await _context.Campaigns
-                .AsNoTracking()
-                .Where(c => c.Status == CampaignStatus.Active ||
-                            c.Status == CampaignStatus.Scheduled ||
-                            c.Status == (CampaignStatus)5) // NeedsChanges / Launched
-                .Take(5)
-                .ToListAsync(cancellationToken);
-
-            var activeIds = activeCampaigns.Select(c => c.Id).ToList();
-            var (progsDict, bndlsDict, cpList, cbList, restOffers) = await LoadRelationalMetadataAsync(activeIds, restaurantId.Value, cancellationToken);
-
-            var fallbackList = activeCampaigns.Select(c =>
-            {
-                var dedicated = 40;
-                var reserved = Math.Min(dedicated, Math.Max(10, c.CurrentSubscribers));
-                var gross = Math.Round(reserved * 14 * 2.85m, 3);
-                var net = Math.Round(gross * (1m - (c.RestaurantShareRate?.Value ?? 0.10m)), 3);
-                var spread = Math.Round(gross * (c.MealMateShareRate?.Value ?? 0.10m) * 0.35m, 3);
-                var pending = Math.Round(net * 0.25m, 3);
-
-                var (programs, boxes) = ResolveProgramsAndBoxes(c.Id, cpList, cbList, progsDict, bndlsDict, restOffers);
-
-                return new RestaurantActiveCampaignDto(
-                    Guid.NewGuid(),
-                    c.Id,
-                    restaurantId.Value,
-                    c.NameAr,
-                    c.NameEn,
-                    c.Status.ToString(),
-                    c.StartsAtUtc,
-                    c.EndsAtUtc,
-                    dedicated,
-                    reserved,
-                    c.TotalDiscountRate?.Value ?? 0.20m,
-                    c.MealMateShareRate?.Value ?? 0.10m,
-                    c.RestaurantShareRate?.Value ?? 0.10m,
-                    gross,
-                    net,
-                    spread,
-                    pending,
-                    "KWD",
-                    programs,
-                    boxes
-                );
-            }).ToList();
-
-            return Result.Success<IReadOnlyList<RestaurantActiveCampaignDto>>(fallbackList);
-        }
 
         var campaignIds = enrollments.Select(e => e.CampaignId).Distinct().ToList();
 
@@ -122,8 +77,7 @@ public sealed class GetRestaurantActiveCampaignsQueryHandler : IQueryHandler<Get
 
         var ledgers = await _context.CampaignFinancialLedgers
             .AsNoTracking()
-            .Where(l => campaignIds.Contains(l.CampaignId) &&
-                        (!l.RestaurantId.HasValue || l.RestaurantId == restaurantId.Value))
+            .Where(l => campaignIds.Contains(l.CampaignId) && l.RestaurantId == restaurantId.Value)
             .ToListAsync(cancellationToken);
 
         var result = new List<RestaurantActiveCampaignDto>();
@@ -131,39 +85,21 @@ public sealed class GetRestaurantActiveCampaignsQueryHandler : IQueryHandler<Get
         foreach (var e in enrollments)
         {
             var campaign = e.Campaign;
-            var dedicated = e.DedicatedDailyCapacity ?? e.CapacityOffered ?? 30;
-            var reserved = Math.Min(dedicated, Math.Max(12, campaign.CurrentSubscribers > 0 ? campaign.CurrentSubscribers : 15));
+            var dedicated = e.DedicatedDailyCapacity ?? e.CapacityOffered;
 
             var campaignLedgers = ledgers.Where(l => l.CampaignId == campaign.Id).ToList();
-            decimal grossEarned;
-            decimal netEarned;
-            decimal spread;
-            decimal pending;
-
-            if (campaignLedgers.Count > 0)
+            var settlements = campaignLedgers.Where(l => l.EntryType == CampaignLedgerEntryType.RestaurantSettlement).ToList();
+            var reversals = campaignLedgers.Where(l => l.EntryType == CampaignLedgerEntryType.RestaurantSettlementReversal).ToList();
+            var grossEarned = settlements.Count > 0 ? settlements.Sum(l => l.Amount) : (decimal?)null;
+            var netEarned = settlements.Count + reversals.Count > 0
+                ? settlements.Sum(l => l.Amount) - reversals.Sum(l => l.Amount)
+                : (decimal?)null;
+            var currencies = campaignLedgers.Select(l => l.Currency).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().ToList();
+            var currency = currencies.Count == 1 ? currencies[0] : null;
+            if (currencies.Count > 1)
             {
-                grossEarned = campaignLedgers
-                    .Where(l => l.EntryType == CampaignLedgerEntryType.CustomerPayment)
-                    .Sum(l => l.Amount);
-
-                netEarned = campaignLedgers
-                    .Where(l => l.EntryType == CampaignLedgerEntryType.RestaurantSettlement)
-                    .Sum(l => l.Amount);
-
-                if (grossEarned == 0m && netEarned > 0m)
-                {
-                    grossEarned = Math.Round(netEarned / (1m - (campaign.RestaurantShareRate?.Value ?? 0.10m)), 3);
-                }
-
-                spread = Math.Round(grossEarned * (campaign.MealMateShareRate?.Value ?? 0.10m) * 0.35m, 3);
-                pending = Math.Round(netEarned * 0.20m, 3);
-            }
-            else
-            {
-                grossEarned = Math.Round(reserved * 14 * 2.85m, 3);
-                netEarned = Math.Round(grossEarned * (1m - (campaign.RestaurantShareRate?.Value ?? 0.10m)), 3);
-                spread = Math.Round(grossEarned * (campaign.MealMateShareRate?.Value ?? 0.10m) * 0.35m, 3);
-                pending = Math.Round(netEarned * 0.25m, 3);
+                grossEarned = null;
+                netEarned = null;
             }
 
             var (programs, boxes) = ResolveProgramsAndBoxes(
@@ -174,27 +110,36 @@ public sealed class GetRestaurantActiveCampaignsQueryHandler : IQueryHandler<Get
                 bundlesDict,
                 restaurantOffers);
 
+            var termsChanged = campaign.ApprovedSnapshotVersion.HasValue && campaign.CurrentSnapshotVersion != campaign.ApprovedSnapshotVersion.Value;
+            var approvalInvalidated = termsChanged;
+
             result.Add(new RestaurantActiveCampaignDto(
                 e.Id,
                 campaign.Id,
                 e.RestaurantId,
                 campaign.NameAr,
                 campaign.NameEn,
-                campaign.Status == (CampaignStatus)5 ? "Launched" : campaign.Status.ToString(),
+                campaign.Status.ToString(),
                 campaign.StartsAtUtc,
                 campaign.EndsAtUtc,
                 dedicated,
-                reserved,
-                campaign.TotalDiscountRate?.Value ?? 0.20m,
-                campaign.MealMateShareRate?.Value ?? 0.10m,
-                campaign.RestaurantShareRate?.Value ?? 0.10m,
+                null,
+                campaign.TotalDiscountRate?.Value,
+                campaign.MealMateShareRate?.Value,
+                campaign.RestaurantShareRate?.Value,
                 grossEarned,
                 netEarned,
-                spread,
-                pending,
-                "KWD",
+                null,
+                null,
+                currency,
                 programs,
-                boxes
+                boxes,
+                campaign.EnrollmentOpensAtUtc,
+                campaign.EnrollmentClosesAtUtc,
+                campaign.ReviewStartsAtUtc,
+                campaign.ReviewEndsAtUtc,
+                termsChanged,
+                approvalInvalidated
             ));
         }
 
@@ -330,34 +275,18 @@ public sealed class GetRestaurantActiveCampaignsQueryHandler : IQueryHandler<Get
 
     private async Task<Guid?> ResolveTargetRestaurantIdAsync(Guid? requestedId, CancellationToken cancellationToken)
     {
-        if (requestedId.HasValue && requestedId.Value != Guid.Empty)
+        if (!_currentUser.IsAuthenticated || _currentUser.UserType != UserType.Restaurant) return null;
+        var actorRestaurantId = _currentUser.RestaurantId;
+        if (!actorRestaurantId.HasValue && _currentUser.UserId.HasValue)
         {
-            return requestedId.Value;
-        }
-
-        if (_currentUser.RestaurantId.HasValue)
-        {
-            return _currentUser.RestaurantId.Value;
-        }
-
-        if (_currentUser.UserId.HasValue)
-        {
-            var fromUser = await _context.RestaurantProfiles
-                .Where(r => r.UserId == _currentUser.UserId.Value)
+            actorRestaurantId = await _context.RestaurantProfiles
+                .Where(r => r.UserId == _currentUser.UserId.Value && !r.IsDeleted)
                 .Select(r => (Guid?)r.Id)
                 .FirstOrDefaultAsync(cancellationToken);
-
-            if (fromUser.HasValue)
-            {
-                return fromUser.Value;
-            }
         }
 
-        // Default to first active restaurant profile in database
-        return await _context.RestaurantProfiles
-            .Where(r => !r.IsDeleted)
-            .OrderBy(r => r.CreatedAtUtc)
-            .Select(r => (Guid?)r.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+        return requestedId.HasValue && requestedId.Value != Guid.Empty
+            ? actorRestaurantId == requestedId.Value ? requestedId : null
+            : actorRestaurantId;
     }
 }

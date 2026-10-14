@@ -113,6 +113,35 @@ public sealed class AdminCollaborativeCampaignsController : ApiControllerBase
         return HandleResult(result);
     }
 
+    [HttpPost("pricing-policy")]
+    [HasPermission(PermissionCodes.CampaignsManage)]
+    public async Task<IActionResult> ApprovePricingPolicy([FromBody] ApproveCampaignPricingPolicyCommand command, CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(command, cancellationToken);
+        return HandleCreated(result, $"api/v1/admin/campaigns/pricing-policy/{result.Value?.Id}");
+    }
+
+    [HttpGet("pricing-policy")]
+    [HasPermission(PermissionCodes.CampaignsView)]
+    public async Task<IActionResult> GetPricingPolicy(CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new GetCampaignPricingPolicyQuery(), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpPost("{id:guid}/reschedule-review")]
+    [HasPermission(PermissionCodes.CampaignsManage)]
+    public async Task<IActionResult> RescheduleReview(Guid id, [FromBody] RescheduleCampaignReviewCommand command, CancellationToken cancellationToken)
+    {
+        if (id != command.CampaignId)
+        {
+            command = command with { CampaignId = id };
+        }
+
+        var result = await Sender.Send(command, cancellationToken);
+        return HandleResult(result);
+    }
+
     [HttpGet]
     [HasPermission(PermissionCodes.CampaignsView)]
     public async Task<IActionResult> List([FromQuery] CampaignStatus? status, [FromQuery] PageRequest? page, [FromQuery] string? search, CancellationToken cancellationToken)

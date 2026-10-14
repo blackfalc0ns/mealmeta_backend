@@ -519,4 +519,21 @@ public static class MessageCodes
         /// <summary>Localized participant role shown on the customer call screen.</summary>
         public const string CallScreenDriverRole = "voice.call_screen.driver_role";
     }
+
+    public static class Campaign
+    {
+        public const string ReviewWindowMissing = "campaign.review_window_missing";
+        public const string ReviewWindowNotStarted = "campaign.review_window_not_started";
+        public const string ReviewWindowExpired = "campaign.review_window_expired";
+        public const string ReviewWindowNotOpen = "campaign.review_window_not_open";
+        public const string ReviewWindowOrderingInvalid = "campaign.review_window_ordering_invalid";
+        public const string ReviewWindowIncomplete = "campaign.review_window_incomplete";
+        public const string EnrollmentDatesRequired = "campaign.enrollment_dates_required";
+        public const string ApprovalStale = "campaign.approval_stale";
+        public const string AlreadyResponded = "campaign.already_responded";
+        public const string EnrollmentOwnershipMismatch = "campaign.enrollment_ownership_mismatch";
+        public const string PricingPolicyNotApproved = "campaign.pricing_policy_not_approved";
+        public const string PricingPolicyCurrencyMismatch = "campaign.pricing_policy_currency_mismatch";
+        public const string ConcurrentModification = "campaign.concurrent_modification";
+    }
 }

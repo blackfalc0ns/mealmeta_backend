@@ -69,6 +69,7 @@ public sealed class FamilyCheckoutBatchLineConfiguration : IEntityTypeConfigurat
         builder.Property(x => x.CurrencyCode).HasMaxLength(3).IsRequired();
         builder.Property(x => x.PriceBeforeFamilyDiscount).HasPrecision(18, 3);
         builder.Property(x => x.FamilyDiscountAllocated).HasPrecision(18, 3);
+        builder.Property(x => x.PromoCodeDiscountAllocated).HasPrecision(18, 3);
         builder.Property(x => x.NetPaidAmount).HasPrecision(18, 3);
         builder.Property(x => x.AddressLine).HasMaxLength(300);
         builder.Property(x => x.AddressLabel).HasMaxLength(120);
@@ -92,8 +93,9 @@ public sealed class FamilyCheckoutBatchLineConfiguration : IEntityTypeConfigurat
             "CK_FamilyCheckoutBatchLines_NetPaid",
             $"\"{nameof(FamilyCheckoutBatchLine.NetPaidAmount)}\" >= 0 AND "
             + $"\"{nameof(FamilyCheckoutBatchLine.FamilyDiscountAllocated)}\" >= 0 AND "
+            + $"\"{nameof(FamilyCheckoutBatchLine.PromoCodeDiscountAllocated)}\" >= 0 AND "
             + $"\"{nameof(FamilyCheckoutBatchLine.PriceBeforeFamilyDiscount)}\" >= 0 AND "
-            + $"\"{nameof(FamilyCheckoutBatchLine.NetPaidAmount)}\" <= \"{nameof(FamilyCheckoutBatchLine.PriceBeforeFamilyDiscount)}\""));
+            + $"\"{nameof(FamilyCheckoutBatchLine.NetPaidAmount)}\" = \"{nameof(FamilyCheckoutBatchLine.PriceBeforeFamilyDiscount)}\" - \"{nameof(FamilyCheckoutBatchLine.FamilyDiscountAllocated)}\" - \"{nameof(FamilyCheckoutBatchLine.PromoCodeDiscountAllocated)}\""));
 
         // Financial history survives member/subscription/batch removals.
         builder.HasOne(x => x.FamilyMember)

@@ -86,6 +86,92 @@ public sealed class FamilyManagerHandlerTests
     }
 
     [Fact]
+    public async Task Members_list_exposes_real_plan_usage_and_today_selection_summary()
+    {
+        var fx = await SeedAsync();
+        var access = await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        access.HasSeparateAccount = true;
+        access.IsPaused = true;
+        access.LinkedCustomerUserId = fx.LinkedUserId;
+        fx.Db.CustomerProfiles.AddRange(
+            new MealMate.Domain.IdentityAccess.CustomerProfile { UserId = fx.LinkedUserId, ProfileImageStorageKey = "uploads/customers/profile/member.png" },
+            new MealMate.Domain.IdentityAccess.CustomerProfile { UserId = fx.User.UserId!.Value, ProfileImageStorageKey = "uploads/customers/profile/manager.png" });
+        await fx.Db.SaveChangesAsync();
+        var result = await fx.Handlers.Handle(new FamilyMembersQuery(), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var member = result.Value.Single(x => x.MemberId == fx.MemberId);
+        member.ProfileImageUrl.Should().Be("/api/v1/uploads/content?key=uploads%2Fcustomers%2Fprofile%2Fmember.png");
+        member.HasSeparateAccount.Should().BeTrue();
+        member.IsPaused.Should().BeTrue();
+        member.PlanSummary.Should().BeEquivalentTo(new FamilyPlanSummaryDto(
+            3, 26, new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 31), new DateOnly(2026, 9, 1),
+            7, 0, 0m));
+        member.TodayMealSelection.Should().BeEquivalentTo(new FamilyTodayMealSelectionDto(
+            new DateOnly(2026, 8, 25), nameof(SubscriptionDayStatus.Open), 0, 3, false));
+        var manager = result.Value.Single(x => x.MemberId == fx.ManagerMemberId);
+        manager.ProfileImageUrl.Should().Be("/api/v1/uploads/content?key=uploads%2Fcustomers%2Fprofile%2Fmanager.png");
+    }
+
+    [Fact]
+    public async Task Deferred_member_plan_keeps_progress_and_unpersisted_dates_null()
+    {
+        var fx = await SeedAsync();
+        var member = new FamilyMember
+        {
+            FamilyGroupId = fx.GroupId, Role = FamilyMemberRole.Member, DisplayName = "Deferred",
+            RelationshipCode = "son", Gender = FamilyMemberGender.Male, AgeYears = 9,
+            NutritionalGoalCode = "balanced", ActivityLevel = FamilyActivityLevel.Moderate,
+            SetupStatus = FamilyMemberSetupStatus.InProgress, ProgramId = (await fx.Db.Programs.SingleAsync()).Id,
+            BundleId = (await fx.Db.Bundles.SingleAsync()).Id, DurationDays = 21,
+            StartDate = new DateOnly(2026, 11, 1)
+        };
+        fx.Db.FamilyMembers.Add(member);
+        await fx.Db.SaveChangesAsync();
+        var result = await fx.Handlers.Handle(new FamilyMembersQuery(), CancellationToken.None);
+
+        var summary = result.Value.Single(x => x.MemberId == member.Id).PlanSummary;
+        summary.Should().BeEquivalentTo(new FamilyPlanSummaryDto(3, 21,
+            new DateOnly(2026, 11, 1), null, null, null, null, null));
+        result.Value.Single(x => x.MemberId == member.Id).TodayMealSelection.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Delivered_usage_counts_only_actual_delivered_calendar_days()
+    {
+        var fx = await SeedAsync();
+        var days = await fx.Db.SubscriptionDays.Where(x => x.SubscriptionId == fx.MemberSubscriptionId)
+            .OrderBy(x => x.ServiceDate).ToListAsync();
+        days[0].Status = SubscriptionDayStatus.Delivered;
+        days[1].Status = SubscriptionDayStatus.Cancelled;
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Handlers.Handle(new FamilyMembersQuery(), CancellationToken.None);
+        result.Value.Single(x => x.MemberId == fx.MemberId).PlanSummary.Should().BeEquivalentTo(
+            new FamilyPlanSummaryDto(3, 26, new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 31),
+                new DateOnly(2026, 9, 1), 6, 1, 16.67m));
+    }
+
+    [Fact]
+    public async Task Funded_service_bundle_is_used_when_saved_plan_pointer_has_advanced()
+    {
+        var fx = await SeedAsync();
+        var originalBundle = await fx.Db.Bundles.SingleAsync();
+        var draftBundle = new Bundle
+        {
+            ProgramId = originalBundle.ProgramId, Code = "DRAFT-PLAN", NameAr = "خطة", NameEn = "Plan",
+            BreakfastCount = 1, LunchCount = 1, DinnerCount = 1, SnackCount = 1,
+            MealsPerDay = 4, Status = ProgramStatus.Active, IsActive = true
+        };
+        fx.Db.Bundles.Add(draftBundle);
+        (await fx.Db.FamilyMembers.SingleAsync(x => x.Id == fx.MemberId)).BundleId = draftBundle.Id;
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Handlers.Handle(new FamilyMembersQuery(), CancellationToken.None);
+        result.Value.Single(x => x.MemberId == fx.MemberId).PlanSummary!.MealsPerDay.Should().Be(3);
+    }
+
+    [Fact]
     public async Task Old_client_permission_update_preserves_omitted_new_grants()
     {
         var fx = await SeedAsync();
@@ -290,6 +376,9 @@ public sealed class FamilyManagerHandlerTests
         listMember.MemberSubscriptionId.Should().BeNull();
         listMember.UpcomingSubscriptionId.Should().Be(upcoming.Id);
         listMember.RemainingDays.Should().Be(2);
+        listMember.PlanSummary.Should().BeEquivalentTo(new FamilyPlanSummaryDto(
+            3, 2, upcoming.StartDate, upcoming.EndDate, new DateOnly(2026, 10, 19), 2, 0, 0m));
+        listMember.TodayMealSelection.Should().BeNull();
         detail.Value.MemberSubscriptionId.Should().BeNull();
         detail.Value.UpcomingSubscriptionId.Should().Be(upcoming.Id);
         detail.Value.RemainingDays.Should().Be(2);
@@ -405,6 +494,10 @@ public sealed class FamilyManagerHandlerTests
             MemberSubscriptionId = null,
         };
         fx.Db.FamilyMembers.Add(unSub);
+        fx.Db.CustomerProfiles.Add(new MealMate.Domain.IdentityAccess.CustomerProfile
+        {
+            UserId = fx.User.UserId!.Value, ProfileImageStorageKey = "uploads/customers/profile/manager.png"
+        });
         await fx.Db.SaveChangesAsync();
         var unSubId = unSub.Id;
 
@@ -417,6 +510,8 @@ public sealed class FamilyManagerHandlerTests
         unSubListItem.MemberSubscriptionId.Should().BeNull();
         unSubListItem.ProgramNameAr.Should().BeNull();
         unSubListItem.SetupStatus.Should().Be(FamilyMemberSetupStatus.NotStarted);
+        unSubListItem.HasSeparateAccount.Should().BeFalse();
+        unSubListItem.ProfileImageUrl.Should().BeNull();
 
         var homeResult = await fx.Handlers.Handle(new GetFamilyHomeQuery(), CancellationToken.None);
         homeResult.IsSuccess.Should().BeTrue();

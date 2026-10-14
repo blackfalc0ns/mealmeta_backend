@@ -675,10 +675,19 @@ public sealed class PricingAndClassificationHandlers :
             : settings.Global;
         var durationRate = profile.ResolveRate(request.DurationDays);
 
+        var grossCartAmount = PricingEngine.Calculate(new PricingEngineRequest(
+            MeanReferenceDailyPrice: meanA_t,
+            DurationDays: request.DurationDays,
+            DurationRatesPct: new Dictionary<int, decimal> { [request.DurationDays] = durationRate },
+            FridayDays: request.IncludeFriday ? Math.Max(0, request.FridayDays) : 0,
+            FridayRatePct: profile.FridayRate)).FinalCustomerPrice;
+
         var effectiveCampaignDiscount = request.CampaignDiscountKwd;
         var effectivePromoCodeDiscount = request.PromoCodeDiscountKwd;
+        var hasCanonicalAdminCode = !string.IsNullOrWhiteSpace(request.PromoCode)
+            && await _db.PromoCodes.AsNoTracking().AnyAsync(x => x.Code.ToUpper() == request.PromoCode.Trim().ToUpper(), cancellationToken);
 
-        if ((request.OfferId.HasValue || !string.IsNullOrWhiteSpace(request.PromoCode)) && _offerEngine != null)
+        if ((request.OfferId.HasValue || (!string.IsNullOrWhiteSpace(request.PromoCode) && !hasCanonicalAdminCode)) && _offerEngine != null)
         {
             Offer? offer = null;
             if (request.OfferId.HasValue)
@@ -703,17 +712,6 @@ public sealed class PricingAndClassificationHandlers :
 
             if (offer != null)
             {
-                var grossReq = new PricingEngineRequest(
-                    MeanReferenceDailyPrice: meanA_t,
-                    DurationDays: request.DurationDays,
-                    CampaignDiscountKwd: 0m,
-                    PromoCodeDiscountKwd: 0m,
-                    DurationRatesPct: new Dictionary<int, decimal> { [request.DurationDays] = durationRate },
-                    FridayDays: request.IncludeFriday ? Math.Max(0, request.FridayDays) : 0,
-                    FridayRatePct: profile.FridayRate);
-                var grossCalc = PricingEngine.Calculate(grossReq);
-                var grossCartAmount = grossCalc.FinalCustomerPrice;
-
                 var customerId = request.CustomerId ?? Guid.Empty;
                 var priorSubsCount = customerId != Guid.Empty
                     ? await _db.Subscriptions.CountAsync(s => s.CustomerUserId == customerId, cancellationToken)
@@ -748,6 +746,58 @@ public sealed class PricingAndClassificationHandlers :
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(request.PromoCode))
+        {
+            var code = request.PromoCode.Trim().ToUpperInvariant();
+            var promo = await _db.PromoCodes.AsNoTracking().FirstOrDefaultAsync(x => x.Code.ToUpper() == code, cancellationToken);
+            if (promo is not null)
+            {
+                var now = _clock.UtcNow;
+                var target = ReadPromoTargeting(promo.TargetingJson);
+                var durationAllowed = string.IsNullOrWhiteSpace(promo.EligibleDurationDaysJson)
+                    || IsDurationEligible(promo.EligibleDurationDaysJson, request.DurationDays);
+                var customerUses = request.CustomerId is { } customerId
+                    ? await _db.PromoCodeRedemptions.CountAsync(x => x.PromoCodeId == promo.Id && x.CustomerId == customerId
+                        && x.Status != PromoCodeRedemptionStatus.Released
+                        && x.SubscriptionId != request.ExcludeSubscriptionId, cancellationToken)
+                    : 0;
+                var ownHold = request.ExcludeSubscriptionId != Guid.Empty && await _db.PromoCodeRedemptions.AnyAsync(x =>
+                    x.PromoCodeId == promo.Id && x.SubscriptionId == request.ExcludeSubscriptionId
+                    && x.Status == PromoCodeRedemptionStatus.Held, cancellationToken);
+                var eligible = promo.IsActive && promo.StartsAtUtc <= now && (promo.EndsAtUtc is null || promo.EndsAtUtc >= now)
+                    && (promo.MaxUses is null || promo.UsedCount - (ownHold ? 1 : 0) < promo.MaxUses)
+                    && (promo.PerCustomerLimit is null || customerUses < promo.PerCustomerLimit)
+                    && durationAllowed && target is not null
+                    && (!target.CustomerUserId.HasValue || target.CustomerUserId == request.CustomerId)
+                    && (!target.ProgramId.HasValue || target.ProgramId == request.ProgramId)
+                    && (!target.BundleId.HasValue || target.BundleId == request.BundleId)
+                    && (string.IsNullOrWhiteSpace(target.SubscriptionType)
+                        || string.Equals(target.SubscriptionType, request.CustomerSubscriptionType, StringComparison.Ordinal));
+                if (eligible)
+                {
+                    var discount = promo.DiscountAmount?.Amount
+                        ?? Math.Round(grossCartAmount * (promo.DiscountPercent?.Value ?? 0m), 3, MidpointRounding.AwayFromZero);
+                    discount = Math.Min(grossCartAmount, Math.Max(0m, discount));
+                    effectiveCampaignDiscount = Math.Max(0m, effectiveCampaignDiscount);
+                    effectivePromoCodeDiscount = Math.Max(0m, effectivePromoCodeDiscount);
+                    // Campaigns and coupon codes do not stack; retain the larger eligible saving.
+                    if (discount > effectiveCampaignDiscount + effectivePromoCodeDiscount)
+                    {
+                        effectiveCampaignDiscount = 0m;
+                        effectivePromoCodeDiscount = discount;
+                    }
+                }
+            }
+        }
+
+        // A campaign and a coupon are alternative savings. Keep only the larger eligible
+        // one so preview, checkout and the eventual payment amount use the same source.
+        if (effectiveCampaignDiscount > 0m && effectivePromoCodeDiscount > 0m)
+        {
+            if (effectivePromoCodeDiscount > effectiveCampaignDiscount) effectiveCampaignDiscount = 0m;
+            else effectivePromoCodeDiscount = 0m;
+        }
+
         var pricingReq = new PricingEngineRequest(
             MeanReferenceDailyPrice: meanA_t,
             DurationDays: request.DurationDays,
@@ -776,6 +826,25 @@ public sealed class PricingAndClassificationHandlers :
 
         return result.FinalCustomerPrice;
     }
+
+    private static PromoTargeting? ReadPromoTargeting(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new(null, null, null, null);
+        try { return JsonSerializer.Deserialize<PromoTargeting>(json); }
+        catch (JsonException) { return null; }
+    }
+
+    private static bool IsDurationEligible(string json, int durationDays)
+    {
+        try
+        {
+            var durations = JsonSerializer.Deserialize<HashSet<int>>(json);
+            return durations?.Contains(durationDays) == true;
+        }
+        catch (JsonException) { return false; }
+    }
+
+    private sealed record PromoTargeting(Guid? CustomerUserId, Guid? ProgramId, Guid? BundleId, string? SubscriptionType);
 
     private static RestaurantBundlePricingDto MapPricingDto(RestaurantBundlePricing p) => new(
         p.Id,

@@ -193,4 +193,78 @@ public class CampaignAuthorizationTests
         var okResult = result.Should().BeOfType<OkObjectResult>().Subject;
         okResult.Value.Should().Be(expectedDto);
     }
+
+    [Fact]
+    public async Task RestaurantController_GetActiveCampaigns_WhenQueryRestaurantDiffersFromToken_ReturnsForbid()
+    {
+        _currentUser.UserType.Returns(UserType.Restaurant);
+        _currentUser.UserId.Returns(Guid.NewGuid());
+        _currentUser.RestaurantId.Returns(Guid.NewGuid());
+
+        var controller = InitController(new RestaurantCollaborativeCampaignsController(
+            _currentUser, NSubstitute.Substitute.For<Microsoft.Extensions.Logging.ILogger<RestaurantCollaborativeCampaignsController>>()));
+
+        var result = await controller.GetActiveCampaigns(Guid.NewGuid(), CancellationToken.None);
+
+        result.Should().BeOfType<ForbidResult>();
+        await _sender.DidNotReceive().Send(Arg.Any<object>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RestaurantController_GetInvitations_WhenTokenHasNoRestaurant_ReturnsForbid()
+    {
+        _currentUser.UserType.Returns(UserType.Customer);
+        _currentUser.UserId.Returns(Guid.NewGuid());
+        _currentUser.RestaurantId.Returns((Guid?)null);
+
+        var controller = InitController(new RestaurantCollaborativeCampaignsController(
+            _currentUser, NSubstitute.Substitute.For<Microsoft.Extensions.Logging.ILogger<RestaurantCollaborativeCampaignsController>>()));
+
+        var result = await controller.GetInvitations(null, CancellationToken.None);
+
+        result.Should().BeOfType<ForbidResult>();
+        await _sender.DidNotReceive().Send(Arg.Any<object>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RestaurantController_ReduceCapacity_WhenBodyRestaurantDiffersFromToken_ReturnsForbid()
+    {
+        _currentUser.UserType.Returns(UserType.Restaurant);
+        _currentUser.UserId.Returns(Guid.NewGuid());
+        _currentUser.RestaurantId.Returns(Guid.NewGuid());
+
+        var controller = InitController(new RestaurantCollaborativeCampaignsController(
+            _currentUser, NSubstitute.Substitute.For<Microsoft.Extensions.Logging.ILogger<RestaurantCollaborativeCampaignsController>>()));
+
+        var request = new UpdateCapacityRequest(Guid.NewGuid(), 30);
+
+        var result = await controller.ReduceCapacity(Guid.NewGuid(), request, CancellationToken.None);
+
+        result.Should().BeOfType<ForbidResult>();
+        await _sender.DidNotReceive().Send(Arg.Any<object>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public void AdminController_NewPolicyAndRescheduleEndpoints_HaveCampaignPermissionAttributes()
+    {
+        var controllerType = typeof(AdminCollaborativeCampaignsController);
+
+        var manageMethods = new[]
+        {
+            nameof(AdminCollaborativeCampaignsController.ApprovePricingPolicy),
+            nameof(AdminCollaborativeCampaignsController.RescheduleReview),
+        };
+
+        foreach (var methodName in manageMethods)
+        {
+            var method = controllerType.GetMethod(methodName);
+            method.Should().NotBeNull($"Method {methodName} must exist on admin controller.");
+            var permAttr = method!.GetCustomAttribute<HasPermissionAttribute>();
+            permAttr.Should().NotBeNull($"Method {methodName} must have [HasPermission].");
+            permAttr!.Policy.Should().Contain(PermissionCodes.CampaignsManage);
+        }
+
+        var viewMethod = controllerType.GetMethod(nameof(AdminCollaborativeCampaignsController.GetPricingPolicy));
+        viewMethod!.GetCustomAttribute<HasPermissionAttribute>()!.Policy.Should().Contain(PermissionCodes.CampaignsView);
+    }
 }

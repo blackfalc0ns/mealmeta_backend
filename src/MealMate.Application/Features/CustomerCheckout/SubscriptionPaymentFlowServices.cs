@@ -81,7 +81,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         IApplicationLockManager? locks = null)
         => (_db, _payments, _transactions, _capacityLock, _schedule, _fulfillment, _clock, _customerPush, _coupons, _locks)
             = (db, payments, transactions, capacityLock, schedule, fulfillment, clock, customerPush ?? NullCustomerPushNotifier.Instance,
-                couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock), locks);
+                couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock, locks), locks);
 
     public async Task<PaymentProcessingResult> VerifyAndProcessAsync(
         Guid subscriptionId,
@@ -363,7 +363,10 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         var verified = await _payments.GetPaymentStatusAsync(paymentId, "PaymentId", cancellationToken);
         if (verified is null)
             return new(false, false, "payment.gateway_verification_unavailable", null, "NotStarted");
-        if (!verified.InvoiceStatus.Equals("Failed", StringComparison.OrdinalIgnoreCase))
+        if (!verified.InvoiceStatus.Equals("Failed", StringComparison.OrdinalIgnoreCase)
+            && !verified.InvoiceStatus.Equals("Expired", StringComparison.OrdinalIgnoreCase)
+            && !verified.InvoiceStatus.Equals("Canceled", StringComparison.OrdinalIgnoreCase)
+            && !verified.InvoiceStatus.Equals("Cancelled", StringComparison.OrdinalIgnoreCase))
             return new(false, false, "payment.gateway_status_conflict", null, "NotStarted");
         if (!string.IsNullOrWhiteSpace(observedInvoiceId) && observedInvoiceId != verified.InvoiceId)
             return new(false, false, "payment.invoice_id_mismatch", null, "NotStarted");
@@ -750,6 +753,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
 
         var oldStatus = subscription.Status;
         subscription.Status = SubscriptionStatus.Paid;
+        await _coupons.CommitCheckoutRedemptionAsync(subscription.Id, transactionCt);
         // Family siblings share one Payzah payment. Subscriptions.PaymentId is unique,
         // so only the receipt-owning row (the payment anchor) stores the gateway id.
         if (writeReceipt)

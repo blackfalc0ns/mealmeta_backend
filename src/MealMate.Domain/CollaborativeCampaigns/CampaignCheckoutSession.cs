@@ -28,6 +28,19 @@ public sealed class CampaignCheckoutSession : AuditableEntity
 
     public Guid? PriceQuoteSnapshotId { get; set; }
 
+    /// <summary>Server-computed amount the customer must pay; webhook callbacks are verified against this.</summary>
+    public decimal? FinalAmount { get; set; }
+
+    public string? CurrencyCode { get; set; }
+
+    /// <summary>Approved pricing policy version this quote was computed under.</summary>
+    public Guid? PricingPolicyId { get; set; }
+
+    public int? PricingPolicyVersion { get; set; }
+
+    /// <summary>Campaign snapshot version captured when the quote was issued.</summary>
+    public int? CampaignSnapshotVersion { get; set; }
+
     public ICollection<CampaignReservationAllocation> Allocations { get; set; } = new List<CampaignReservationAllocation>();
 
     public ICollection<CampaignPaymentTransaction> PaymentTransactions { get; set; } = new List<CampaignPaymentTransaction>();

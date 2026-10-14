@@ -55,7 +55,16 @@ public sealed record FamilyMemberListItemDto(
     string? ProgramNameEn,
     int RemainingDays,
     FamilyMemberSetupStatus SetupStatus, FamilyMemberLifecycleDto? Lifecycle = null,
-    Guid? UpcomingSubscriptionId = null, DateOnly? UpcomingStartDate = null);
+    Guid? UpcomingSubscriptionId = null, DateOnly? UpcomingStartDate = null,
+    string? ProfileImageUrl = null, bool HasSeparateAccount = false,
+    FamilyPlanSummaryDto? PlanSummary = null, FamilyTodayMealSelectionDto? TodayMealSelection = null);
+
+public sealed record FamilyPlanSummaryDto(
+    int? MealsPerDay, int? DurationDays, DateOnly? StartDate, DateOnly? EndDate,
+    DateOnly? NextRenewalDate, int? TotalServiceDays, int? UsedServiceDays, decimal? UsagePercentage);
+
+public sealed record FamilyTodayMealSelectionDto(
+    DateOnly ServiceDate, string UiStatus, int FilledCount, int RequiredCount, bool IsAutoSelected);
 
 public sealed record FamilyMemberDetailDto(
     Guid MemberId,

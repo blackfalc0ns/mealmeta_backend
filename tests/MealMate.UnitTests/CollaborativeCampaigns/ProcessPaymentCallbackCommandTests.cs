@@ -1,5 +1,6 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Features.CollaborativeCampaigns.Commands;
 using MealMate.Application.Features.CollaborativeCampaigns.DTOs;
 using MealMate.Application.Features.CollaborativeCampaigns.Services;
@@ -75,7 +76,9 @@ public class ProcessPaymentCallbackCommandTests
             BundleId = Guid.NewGuid(),
             CustomerId = Guid.NewGuid(),
             Status = initialStatus,
-            ExpiresAtUtc = isExpired ? _now.AddMinutes(-5) : _now.AddMinutes(10)
+            ExpiresAtUtc = isExpired ? _now.AddMinutes(-5) : _now.AddMinutes(10),
+            FinalAmount = 50.000m,
+            CurrencyCode = "KWD"
         };
         session.Allocations.Add(new CampaignReservationAllocation
         {
@@ -196,6 +199,50 @@ public class ProcessPaymentCallbackCommandTests
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("Campaign.SessionNotFound");
+    }
+
+    [Fact]
+    public async Task Handle_WhenAmountDiffersFromQuote_RejectsCallbackWithoutMarkingPaid()
+    {
+        var (_, session, _, _) = SeedSession();
+
+        var command = new ProcessPaymentCallbackCommand(
+            CheckoutSessionId: session.Id,
+            PaymentProvider: "Hesabe",
+            ProviderTransactionId: "tx-amount-mismatch",
+            ProviderPaymentReference: null,
+            Amount: 99.999m, // != server quote 50.000
+            Currency: "KWD",
+            IsSuccess: true);
+
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be(MessageCodes.Payment.WebhookAmountInvalid);
+
+        var dbSession = await _context.CampaignCheckoutSessions.FindAsync(session.Id);
+        dbSession!.Status.Should().Be(CampaignCheckoutSessionStatus.Pending);
+        (await _context.CampaignPaymentTransactions.CountAsync(t => t.CheckoutSessionId == session.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Handle_WhenCurrencyDiffersFromQuote_RejectsCallback()
+    {
+        var (_, session, _, _) = SeedSession();
+
+        var command = new ProcessPaymentCallbackCommand(
+            CheckoutSessionId: session.Id,
+            PaymentProvider: "Hesabe",
+            ProviderTransactionId: "tx-currency-mismatch",
+            ProviderPaymentReference: null,
+            Amount: 50.000m,
+            Currency: "AED",
+            IsSuccess: true);
+
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error!.Code.Should().Be(MessageCodes.Payment.WebhookAmountInvalid);
     }
 
     [Fact]

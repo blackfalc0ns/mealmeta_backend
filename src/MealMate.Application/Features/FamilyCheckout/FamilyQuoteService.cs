@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MediatR;
@@ -33,7 +34,8 @@ public interface IFamilyQuoteService
     Task<Result<FamilyQuoteResult>> QuoteAsync(FamilyGroup group, CancellationToken ct, FamilyQuoteScope? scope = null);
 }
 
-public sealed record FamilyQuoteScope(IReadOnlySet<Guid> ActiveMemberIds, IReadOnlySet<Guid>? SelectedMemberIds);
+public sealed record FamilyQuoteScope(IReadOnlySet<Guid> ActiveMemberIds, IReadOnlySet<Guid>? SelectedMemberIds,
+    string? PromoCode = null, Guid? PayerCustomerUserId = null);
 
 public sealed record FamilyQuoteLine(
     Guid MemberId,
@@ -67,7 +69,11 @@ public sealed record FamilyQuoteResult(
     bool ManagerIndividualIsLive = false,
     Guid? ManagerIndividualSubscriptionId = null,
     bool IsInitialPurchaseOrReactivation = true,
-    bool ManagerMustBeFunded = false);
+    bool ManagerMustBeFunded = false,
+    decimal PromoCodeDiscountAmount = 0m,
+    SubscriptionCouponEvaluation? CouponEvaluation = null,
+    Guid? CouponTargetMemberId = null,
+    Guid? CouponHolderMemberId = null);
 
 public sealed class FamilyQuoteService : IFamilyQuoteService
 {
@@ -76,19 +82,22 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
     private readonly ISubscriptionScheduleService _schedule;
     private readonly IAppDbContext? _db;
     private readonly FamilyParticipationContextReader? _participation;
+    private readonly ISubscriptionFlowCouponService? _coupons;
 
     public FamilyQuoteService(
         ISender sender,
         IFamilyPricingSettingsReader settingsReader,
         ISubscriptionScheduleService schedule,
         IAppDbContext? db = null,
-        FamilyParticipationContextReader? participation = null)
+        FamilyParticipationContextReader? participation = null,
+        ISubscriptionFlowCouponService? coupons = null)
     {
         _sender = sender;
         _settingsReader = settingsReader;
         _schedule = schedule;
         _db = db;
         _participation = participation;
+        _coupons = coupons;
     }
 
     public async Task<Result<FamilyQuoteResult>> QuoteAsync(FamilyGroup group, CancellationToken ct, FamilyQuoteScope? scope = null)
@@ -194,7 +203,100 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
         var familyDiscountAmount = discountApplied
             ? Math.Round(subtotal * discountPercent, FamilyPaymentAllocationService.CurrencyMinorDigits(currency), MidpointRounding.AwayFromZero)
             : 0m;
-        var finalPrice = subtotal - familyDiscountAmount;
+        SubscriptionCouponEvaluation? couponEvaluation = null;
+        Guid? couponTargetMemberId = null;
+        Guid? couponHolderMemberId = null;
+        decimal promoDiscount = 0m;
+        var familyEligibleMemberIds = new HashSet<Guid>();
+        var familyEligibleSubtotal = 0m;
+        if (!string.IsNullOrWhiteSpace(scope.PromoCode))
+        {
+            if (_db is null || _coupons is null || scope.PayerCustomerUserId is not Guid payerId)
+                return Error.Validation("family.coupon_context_unavailable");
+            var targetedPromo = await _db.PromoCodes.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Code.ToUpper() == scope.PromoCode.Trim().ToUpper(), ct);
+            var target = ReadTargeting(targetedPromo?.TargetingJson);
+            // A Family coupon applies once to the aggregate eligible set. Program/bundle
+            // targets limit that set, so unrelated selected members never receive a discount.
+            var familyEligibleMembers = group.Members.Where(m => scope.SelectedMemberIds?.Contains(m.Id) == true
+                    && scope.ActiveMemberIds.Contains(m.Id) && m.MemberSubscriptionId is null
+                    && FamilyMemberPlanRules.HasPricablePlan(m)
+                    && (target?.ProgramId.HasValue != true || target.ProgramId == m.ProgramId)
+                    && (target?.BundleId.HasValue != true || target.BundleId == m.BundleId))
+                .ToList();
+            familyEligibleMemberIds = familyEligibleMembers.Select(x => x.Id).ToHashSet();
+            familyEligibleSubtotal = payableLines.Where(l => familyEligibleMemberIds.Contains(l.MemberId)).Sum(x => x.MemberPrice);
+            foreach (var member in familyEligibleMembers)
+            {
+                var familyEvaluation = await _coupons.EvaluateAsync(scope.PromoCode, payerId, member.ProgramId!.Value,
+                    member.BundleId!.Value, member.DurationDays!.Value, familyEligibleSubtotal, ct, subscriptionType: "Family");
+                if (familyEvaluation.IsValid)
+                {
+                    couponEvaluation = familyEvaluation;
+                    couponHolderMemberId = member.Id;
+                    break;
+                }
+            }
+            // A FamilyBundle coupon is restricted to the matching actual member bundle line.
+            if (couponEvaluation is null || !couponEvaluation.IsValid)
+            {
+                foreach (var member in group.Members.Where(m => scope.SelectedMemberIds?.Contains(m.Id) == true
+                             && scope.ActiveMemberIds.Contains(m.Id) && m.MemberSubscriptionId is null
+                             && FamilyMemberPlanRules.HasPricablePlan(m)))
+                {
+                    var line = payableLines.FirstOrDefault(x => x.MemberId == member.Id);
+                    if (line is null) continue;
+                    var evaluation = await _coupons.EvaluateAsync(scope.PromoCode, payerId, member.ProgramId!.Value,
+                        member.BundleId!.Value, member.DurationDays!.Value, line.MemberPrice, ct,
+                        subscriptionType: "FamilyBundle");
+                    if (evaluation.IsValid)
+                    {
+                        couponEvaluation = evaluation;
+                        couponTargetMemberId = member.Id;
+                        couponHolderMemberId = member.Id;
+                        break;
+                    }
+                }
+            }
+            if (couponEvaluation is null || !couponEvaluation.IsValid)
+                return Error.Validation("family.coupon_rejected", couponEvaluation?.MessageEn ?? "Coupon is not eligible for the selected family members.");
+
+            promoDiscount = couponTargetMemberId.HasValue
+                ? Math.Min(payableLines.First(x => x.MemberId == couponTargetMemberId.Value).MemberPrice, couponEvaluation.DiscountAmount)
+                : Math.Min(familyEligibleSubtotal, couponEvaluation.DiscountAmount);
+            // Campaign/package and coupon reductions do not stack; keep the larger saving.
+            if (promoDiscount > familyDiscountAmount)
+            {
+                familyDiscountAmount = 0m;
+                discountApplied = false;
+            }
+            else { promoDiscount = 0m; couponEvaluation = null; couponTargetMemberId = null; couponHolderMemberId = null; }
+        }
+        if (promoDiscount > 0m)
+        {
+            if (couponTargetMemberId is { } oneMember)
+            {
+                var index = lines.FindIndex(x => x.MemberId == oneMember);
+                if (index >= 0) lines[index] = lines[index] with { PromoDiscount = promoDiscount };
+            }
+            else
+            {
+                var applicable = lines.Where(x => familyEligibleMemberIds.Contains(x.MemberId)).ToList();
+                var remaining = promoDiscount;
+                for (var index = 0; index < lines.Count; index++)
+                {
+                    var line = lines[index];
+                    if (!applicable.Any(x => x.MemberId == line.MemberId)) continue;
+                    var allocation = line.MemberId == applicable[^1].MemberId
+                        ? remaining
+                        : Math.Min(remaining, Math.Round(promoDiscount * line.MemberPrice / familyEligibleSubtotal,
+                            FamilyPaymentAllocationService.CurrencyMinorDigits(currency), MidpointRounding.AwayFromZero));
+                    lines[index] = line with { PromoDiscount = allocation };
+                    remaining -= allocation;
+                }
+            }
+        }
+        var finalPrice = subtotal - familyDiscountAmount - promoDiscount;
 
         return new FamilyQuoteResult(
             lines,
@@ -203,7 +305,7 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
             familyDiscountAmount,
             finalPrice,
             currency,
-            discountApplied && familyDiscountAmount > 0m,
+            (discountApplied && familyDiscountAmount > 0m) || promoDiscount > 0m,
             package.Id,
             package.MinMembers,
             package.MaxMembers,
@@ -218,7 +320,9 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
             participation?.ManagerIndividualIsLive ?? false,
             participation?.ManagerIndividualSubscriptionId,
             participation?.IsInitialPurchaseOrReactivation ?? group.Status == FamilyGroupStatus.Draft,
-            participation?.ManagerMustBeFunded ?? false);
+            participation?.ManagerMustBeFunded ?? false,
+            promoDiscount, couponEvaluation, promoDiscount > 0m ? couponTargetMemberId : null,
+            promoDiscount > 0m ? couponHolderMemberId : null);
     }
 
     private static bool IsEligiblePaidStatus(SubscriptionStatus status)
@@ -227,4 +331,13 @@ public sealed class FamilyQuoteService : IFamilyQuoteService
             or SubscriptionStatus.Active
             or SubscriptionStatus.Frozen
             or SubscriptionStatus.SuspendedForReview;
+
+    private static PromoTargeting? ReadTargeting(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try { return System.Text.Json.JsonSerializer.Deserialize<PromoTargeting>(json); }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    private sealed record PromoTargeting(Guid? CustomerUserId, Guid? ProgramId, Guid? BundleId, string? SubscriptionType);
 }

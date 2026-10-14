@@ -1,5 +1,6 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Features.CollaborativeCampaigns.Commands;
 using MealMate.Application.Features.CollaborativeCampaigns.DTOs;
 using MealMate.Domain.CollaborativeCampaigns;
@@ -17,6 +18,7 @@ public class RestaurantParticipationWorkflowTests
 {
     private readonly AppDbContext _context;
     private readonly ICurrentUser _currentUser;
+    private readonly Guid _callerRestaurantId;
     private readonly InviteRestaurantToCampaignCommandHandler _inviteHandler;
     private readonly RespondToCampaignInvitationCommandHandler _respondHandler;
 
@@ -32,6 +34,8 @@ public class RestaurantParticipationWorkflowTests
         _currentUser = Substitute.For<ICurrentUser>();
         _currentUser.IsAuthenticated.Returns(true);
         _currentUser.UserId.Returns(Guid.NewGuid());
+        _callerRestaurantId = Guid.NewGuid();
+        _currentUser.RestaurantId.Returns(_callerRestaurantId);
 
         _inviteHandler = new InviteRestaurantToCampaignCommandHandler(_context, _currentUser);
         _respondHandler = new RespondToCampaignInvitationCommandHandler(_context, _currentUser);
@@ -148,7 +152,7 @@ public class RestaurantParticipationWorkflowTests
         var enrollment = new CampaignRestaurantEnrollment
         {
             Campaign = campaign,
-            RestaurantId = Guid.NewGuid(),
+            RestaurantId = _callerRestaurantId,
             ParticipationStatus = CampaignRestaurantParticipationStatus.Invited,
             RequestedAtUtc = DateTime.UtcNow
         };
@@ -191,7 +195,7 @@ public class RestaurantParticipationWorkflowTests
         var enrollment = new CampaignRestaurantEnrollment
         {
             Campaign = campaign,
-            RestaurantId = Guid.NewGuid(),
+            RestaurantId = _callerRestaurantId,
             ParticipationStatus = CampaignRestaurantParticipationStatus.Invited,
             RequestedAtUtc = DateTime.UtcNow
         };
@@ -229,7 +233,7 @@ public class RestaurantParticipationWorkflowTests
         var enrollment = new CampaignRestaurantEnrollment
         {
             Campaign = campaign,
-            RestaurantId = Guid.NewGuid(),
+            RestaurantId = _callerRestaurantId,
             ParticipationStatus = CampaignRestaurantParticipationStatus.Invited,
             RequestedAtUtc = DateTime.UtcNow
         };
@@ -268,7 +272,7 @@ public class RestaurantParticipationWorkflowTests
         var enrollment = new CampaignRestaurantEnrollment
         {
             Campaign = campaign,
-            RestaurantId = Guid.NewGuid(),
+            RestaurantId = _callerRestaurantId,
             ParticipationStatus = CampaignRestaurantParticipationStatus.Invited,
             RequestedAtUtc = DateTime.UtcNow
         };
@@ -306,7 +310,7 @@ public class RestaurantParticipationWorkflowTests
         var enrollment = new CampaignRestaurantEnrollment
         {
             Campaign = campaign,
-            RestaurantId = Guid.NewGuid(),
+            RestaurantId = _callerRestaurantId,
             ParticipationStatus = CampaignRestaurantParticipationStatus.Invited,
             RequestedAtUtc = DateTime.UtcNow
         };
@@ -323,5 +327,124 @@ public class RestaurantParticipationWorkflowTests
 
         result.IsSuccess.Should().BeFalse();
         result.Error.Description.Should().Contain("joining is closed");
+    }
+
+    [Fact]
+    public async Task Respond_WhenEnrollmentBelongsToAnotherRestaurant_IsForbiddenAndUnchanged()
+    {
+        var campaign = new Campaign
+        {
+            NameAr = "حملة",
+            NameEn = "Campaign",
+            Status = CampaignStatus.OpenForJoining,
+            StartsAtUtc = DateTime.UtcNow.AddDays(5),
+            EndsAtUtc = DateTime.UtcNow.AddDays(25),
+            TotalDiscountRate = Percentage.FromFraction(0.20m),
+            MealMateShareRate = Percentage.FromFraction(0.10m),
+            RestaurantShareRate = Percentage.FromFraction(0.10m)
+        };
+        _context.Campaigns.Add(campaign);
+
+        var otherRestaurantId = Guid.NewGuid();
+        var enrollment = new CampaignRestaurantEnrollment
+        {
+            Campaign = campaign,
+            RestaurantId = otherRestaurantId,
+            ParticipationStatus = CampaignRestaurantParticipationStatus.Invited,
+            RequestedAtUtc = DateTime.UtcNow
+        };
+        _context.CampaignRestaurantEnrollments.Add(enrollment);
+        await _context.SaveChangesAsync();
+
+        var command = new RespondToCampaignInvitationCommand(
+            EnrollmentId: enrollment.Id,
+            Accept: true,
+            DedicatedDailyCapacity: 30);
+
+        var result = await _respondHandler.Handle(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be(MessageCodes.Campaign.EnrollmentOwnershipMismatch);
+
+        var unchanged = await _context.CampaignRestaurantEnrollments.FindAsync(enrollment.Id);
+        unchanged!.ParticipationStatus.Should().Be(CampaignRestaurantParticipationStatus.Invited);
+        unchanged.DedicatedDailyCapacity.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Respond_WhenRespondingTwice_SecondResponseConflicts()
+    {
+        var campaign = new Campaign
+        {
+            NameAr = "حملة",
+            NameEn = "Campaign",
+            Status = CampaignStatus.OpenForJoining,
+            StartsAtUtc = DateTime.UtcNow.AddDays(5),
+            EndsAtUtc = DateTime.UtcNow.AddDays(25),
+            TotalDiscountRate = Percentage.FromFraction(0.20m),
+            MealMateShareRate = Percentage.FromFraction(0.10m),
+            RestaurantShareRate = Percentage.FromFraction(0.10m)
+        };
+        _context.Campaigns.Add(campaign);
+
+        var enrollment = new CampaignRestaurantEnrollment
+        {
+            Campaign = campaign,
+            RestaurantId = _callerRestaurantId,
+            ParticipationStatus = CampaignRestaurantParticipationStatus.Invited,
+            RequestedAtUtc = DateTime.UtcNow
+        };
+        _context.CampaignRestaurantEnrollments.Add(enrollment);
+        await _context.SaveChangesAsync();
+
+        var first = new RespondToCampaignInvitationCommand(enrollment.Id, Accept: true, DedicatedDailyCapacity: 40);
+        var firstResult = await _respondHandler.Handle(first, CancellationToken.None);
+        firstResult.IsSuccess.Should().BeTrue();
+
+        var second = new RespondToCampaignInvitationCommand(enrollment.Id, Accept: false, DeclineReason: "changed my mind");
+        var secondResult = await _respondHandler.Handle(second, CancellationToken.None);
+
+        secondResult.IsSuccess.Should().BeFalse();
+        secondResult.Error.Code.Should().Be(MessageCodes.Campaign.AlreadyResponded);
+
+        var persisted = await _context.CampaignRestaurantEnrollments.FindAsync(enrollment.Id);
+        persisted!.ParticipationStatus.Should().Be(CampaignRestaurantParticipationStatus.Accepted);
+        persisted.DedicatedDailyCapacity.Should().Be(40);
+    }
+
+    [Fact]
+    public async Task Respond_WhenAccepted_RecordsAcceptedSnapshotVersionAndResponseTime()
+    {
+        var campaign = new Campaign
+        {
+            NameAr = "حملة",
+            NameEn = "Campaign",
+            Status = CampaignStatus.OpenForJoining,
+            StartsAtUtc = DateTime.UtcNow.AddDays(5),
+            EndsAtUtc = DateTime.UtcNow.AddDays(25),
+            TotalDiscountRate = Percentage.FromFraction(0.20m),
+            MealMateShareRate = Percentage.FromFraction(0.10m),
+            RestaurantShareRate = Percentage.FromFraction(0.10m)
+        };
+        _context.Campaigns.Add(campaign);
+
+        var enrollment = new CampaignRestaurantEnrollment
+        {
+            Campaign = campaign,
+            RestaurantId = _callerRestaurantId,
+            ParticipationStatus = CampaignRestaurantParticipationStatus.Invited,
+            RequestedAtUtc = DateTime.UtcNow
+        };
+        _context.CampaignRestaurantEnrollments.Add(enrollment);
+        await _context.SaveChangesAsync();
+
+        var command = new RespondToCampaignInvitationCommand(enrollment.Id, Accept: true, DedicatedDailyCapacity: 25);
+        var result = await _respondHandler.Handle(command, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+
+        var persisted = await _context.CampaignRestaurantEnrollments.FindAsync(enrollment.Id);
+        persisted!.AcceptedSnapshotVersion.Should().Be(campaign.CurrentSnapshotVersion);
+        persisted.RespondedAtUtc.Should().NotBeNull();
     }
 }

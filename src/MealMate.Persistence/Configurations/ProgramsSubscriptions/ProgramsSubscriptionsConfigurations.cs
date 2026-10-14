@@ -381,13 +381,14 @@ public sealed class PromoCodeConfiguration : IEntityTypeConfiguration<PromoCode>
 {
     public void Configure(EntityTypeBuilder<PromoCode> builder)
     {
-        builder.ToTable("PromoCodes");
+        builder.ToTable("PromoCodes", table => table.HasCheckConstraint("CK_PromoCodes_PerCustomerLimit_Positive", "\"PerCustomerLimit\" IS NULL OR \"PerCustomerLimit\" > 0"));
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.Code).HasMaxLength(50).IsRequired();
         builder.Property(x => x.DiscountPercent).HasNullablePercentageConversion();
         builder.OwnsMoney(x => x.DiscountAmount, "DiscountAmount", required: false);
         builder.Property(x => x.EligibleDurationDaysJson).HasColumnType("jsonb");
+        builder.Property(x => x.TargetingJson).HasColumnType("jsonb");
 
         builder.HasIndex(x => x.Code).IsUnique();
         builder.HasIndex(x => x.IsActive);
@@ -395,6 +396,39 @@ public sealed class PromoCodeConfiguration : IEntityTypeConfiguration<PromoCode>
     }
 }
 
+public sealed class PromoCodeRedemptionConfiguration : IEntityTypeConfiguration<PromoCodeRedemption>
+{
+    public void Configure(EntityTypeBuilder<PromoCodeRedemption> builder)
+    {
+        builder.ToTable("PromoCodeRedemptions");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(24).IsRequired();
+        builder.Property(x => x.TargetingSnapshotJson).HasColumnType("jsonb").IsRequired();
+        builder.Property(x => x.ReleaseReason).HasMaxLength(500);
+        builder.OwnsRequiredMoney(x => x.DiscountAppliedAmount, "DiscountAppliedAmount");
+        builder.OwnsRequiredMoney(x => x.PlatformFundedAmount, "PlatformFundedAmount");
+        builder.OwnsRequiredMoney(x => x.RestaurantFundedAmount, "RestaurantFundedAmount");
+        builder.HasIndex(x => new { x.PromoCodeId, x.SubscriptionId }).IsUnique();
+        builder.HasIndex(x => new { x.PromoCodeId, x.CustomerId, x.Status });
+        builder.HasOne(x => x.PromoCode).WithMany().HasForeignKey(x => x.PromoCodeId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class ReferralAttributionConfiguration : IEntityTypeConfiguration<ReferralAttribution>
+{
+    public void Configure(EntityTypeBuilder<ReferralAttribution> builder)
+    {
+        builder.ToTable("ReferralAttributions");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
+
+        // One attribution per referred customer, ever.
+        builder.HasIndex(x => x.ReferredCustomerUserId).IsUnique();
+        builder.HasIndex(x => x.ReferrerUserId);
+        builder.HasIndex(x => new { x.ReferrerUserId, x.ReferredCustomerUserId }).IsUnique();
+    }
+}
 public sealed class ReferralCodeConfiguration : IEntityTypeConfiguration<ReferralCode>
 {
     public void Configure(EntityTypeBuilder<ReferralCode> builder)

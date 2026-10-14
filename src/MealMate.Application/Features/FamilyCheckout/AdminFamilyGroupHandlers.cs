@@ -541,7 +541,7 @@ public sealed class AdminFamilyGroupHandlers :
             var allocationLines = batchLines.Where(x => x.BatchId == line.BatchId).ToList();
             var allocationIsComplete = allocationLines.Count > 0
                 && allocationLines.All(x => x.NetPaidAmount >= 0m
-                    && x.NetPaidAmount == x.PriceBeforeFamilyDiscount - x.FamilyDiscountAllocated
+                    && x.NetPaidAmount == x.PriceBeforeFamilyDiscount - x.FamilyDiscountAllocated - x.PromoCodeDiscountAllocated
                     && string.Equals(x.CurrencyCode, batch.CurrencyCode, StringComparison.OrdinalIgnoreCase))
                 && allocationLines.Sum(x => x.NetPaidAmount) == batch.FinalPrice;
             var lineUpgrades = line.SubscriptionId is Guid lineSubscriptionId

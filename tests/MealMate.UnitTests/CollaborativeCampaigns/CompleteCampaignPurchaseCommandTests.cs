@@ -200,4 +200,38 @@ public class CompleteCampaignPurchaseCommandTests
             .CountAsync(s => s.CampaignId == session.CampaignId && s.CustomerUserId == session.CustomerId);
         subsCount.Should().Be(1);
     }
+
+    [Fact]
+    public async Task Handle_SeparatePaidSessionsForSameCustomerAndBundle_CreateDistinctSubscriptions()
+    {
+        var (campaign, first, _, bundleId, restaurantId, date) = SeedPaidSession();
+        var second = new CampaignCheckoutSession
+        {
+            CampaignId = campaign.Id, BundleId = bundleId, CustomerId = first.CustomerId,
+            Status = CampaignCheckoutSessionStatus.Paid, ExpiresAtUtc = _now.AddMinutes(15)
+        };
+        second.Allocations.Add(new CampaignReservationAllocation
+        {
+            CheckoutSessionId = second.Id, CampaignId = campaign.Id, BundleId = bundleId,
+            RestaurantId = restaurantId, ServiceDate = date, Units = 1
+        });
+        _context.CampaignCheckoutSessions.Add(second);
+        _context.CampaignPaymentTransactions.Add(new CampaignPaymentTransaction
+        {
+            CheckoutSessionId = second.Id, CampaignId = campaign.Id, PaymentProvider = "Hesabe",
+            ProviderTransactionId = "tx-paid-second", Amount = 45m, Currency = "KWD",
+            Status = PaymentTransactionStatus.Succeeded, InitiatedAtUtc = _now, CompletedAtUtc = _now
+        });
+        await _context.SaveChangesAsync();
+
+        var firstResult = await _handler.Handle(new CompleteCampaignPurchaseCommand(first.Id), CancellationToken.None);
+        var secondResult = await _handler.Handle(new CompleteCampaignPurchaseCommand(second.Id), CancellationToken.None);
+
+        firstResult.IsSuccess.Should().BeTrue();
+        secondResult.IsSuccess.Should().BeTrue();
+        secondResult.Value.SubscriptionId.Should().NotBe(firstResult.Value.SubscriptionId);
+        var subscriptions = await _context.Subscriptions.Where(s => s.CampaignId == campaign.Id && s.CustomerUserId == first.CustomerId).ToListAsync();
+        subscriptions.Should().HaveCount(2);
+        subscriptions.Select(x => x.CorrelationId).Should().Contain(new[] { first.Id.ToString("N"), second.Id.ToString("N") });
+    }
 }

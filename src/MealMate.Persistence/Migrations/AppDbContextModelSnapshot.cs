@@ -248,6 +248,638 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("SystemSettings", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdAuction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AdSpaceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("BidsCloseAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("BidsOpenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("DisplayEndsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("DisplayStartsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PolicyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("PolicyVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal?>("WinningAmount")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid?>("WinningBidId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("WinningRestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AdSpaceId");
+
+                    b.HasIndex("BidsCloseAtUtc");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("AdAuctions", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdAuctionNextBidderOffer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AdAuctionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AdBidId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RespondedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RespondedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ResponseReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AdAuctionId", "AdBidId")
+                        .IsUnique();
+
+                    b.HasIndex("RestaurantId", "Status");
+
+                    b.ToTable("AdAuctionNextBidderOffers", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdBid", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AcceptedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("AdAuctionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsWinning")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AdAuctionId", "RestaurantId");
+
+                    b.HasIndex("AdAuctionId", "RestaurantId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.ToTable("AdBids", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdCommercialPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("BidStep")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("MinimumBid")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("NextBidderPolicy")
+                        .IsRequired()
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
+
+                    b.Property<string>("StopSettlementRule")
+                        .IsRequired()
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
+
+                    b.Property<string>("TiePolicy")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("WinnerPaymentDeadlineMinutes")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Version")
+                        .IsUnique();
+
+                    b.ToTable("AdCommercialPolicies", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdFinancialLedgerEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("AdAuctionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<string>("ExternalRefundIdentifier")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProviderRefundId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ProviderTransactionId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<decimal?>("RefundApprovedAmount")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid?>("RefundApprovedPolicyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("RefundApprovedPolicyVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RefundReviewReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("RefundReviewStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("RefundReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RefundReviewedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AdAuctionId");
+
+                    b.HasIndex("Source", "ProviderTransactionId", "Action")
+                        .IsUnique();
+
+                    b.ToTable("AdFinancialLedgerEntries", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdPaymentTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AdAuctionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime>("InitiatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PaymentProvider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ProviderTransactionId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AdAuctionId");
+
+                    b.HasIndex("PaymentProvider", "ProviderTransactionId")
+                        .IsUnique();
+
+                    b.ToTable("AdPaymentTransactions", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdPlacement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AdAuctionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AdSpaceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CreativeStorageKey")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DisplayEndsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DisplayStartsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReviewNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("ReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReviewedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StopReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("StoppedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("StoppedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("TargetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TargetType")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AdAuctionId")
+                        .IsUnique();
+
+                    b.HasIndex("RestaurantId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("AdSpaceId", "Status");
+
+                    b.ToTable("AdPlacements", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdPlacementEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PlacementId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OccurredAtUtc");
+
+                    b.HasIndex("PlacementId", "EventId")
+                        .IsUnique();
+
+                    b.ToTable("AdPlacementEvents", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdSpace", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("HeightPx")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MarketIdsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("NameAr")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("NameEn")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("PlacementKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("WidthPx")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("PlacementKey")
+                        .IsUnique();
+
+                    b.ToTable("AdSpaces", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdvertisingSettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AuctionsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("BusinessTimezone")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ExpectedVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LastChangeReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("LastChangedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LastChangedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AdvertisingSettings", (string)null);
+                });
+
             modelBuilder.Entity("MealMate.Domain.CalendarMeals.CustomerAllergyPreference", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1527,11 +2159,25 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("ApprovedSnapshotVersion")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uuid");
+
+                    b.Property<int>("CurrentSnapshotVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
 
                     b.Property<int>("CurrentSubscribers")
                         .HasColumnType("integer");
@@ -1583,6 +2229,18 @@ namespace MealMate.Persistence.Migrations
                     b.Property<decimal>("RestaurantShareRate")
                         .HasPrecision(9, 6)
                         .HasColumnType("numeric(9,6)");
+
+                    b.Property<DateTime?>("ReviewEndsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ReviewStartsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
 
                     b.Property<DateTime>("StartsAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -1837,11 +2495,17 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("CampaignId")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("CampaignSnapshotVersion")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasColumnType("text");
 
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uuid");
@@ -1855,6 +2519,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<DateTime>("ExpiresAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<decimal?>("FinalAmount")
+                        .HasColumnType("numeric");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -1866,6 +2533,12 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<Guid?>("PriceQuoteSnapshotId")
                         .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PricingPolicyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("PricingPolicyVersion")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("ProcessingLeaseExpiresAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -2064,6 +2737,79 @@ namespace MealMate.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("CampaignPaymentTransactions", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignPricingPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContributionRulesJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RefundRulesJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RoundingRule")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("StackingRulesJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Version")
+                        .IsUnique();
+
+                    b.HasIndex("CurrencyCode", "ApprovedAtUtc");
+
+                    b.ToTable("CampaignPricingPolicies", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CampaignProfitabilitySnapshot", b =>
@@ -2328,6 +3074,9 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("AcceptedSnapshotVersion")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime?>("ApprovedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -2368,6 +3117,9 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("integer");
 
                     b.Property<DateTime>("RequestedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RespondedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("RestaurantId")
@@ -10318,8 +11070,14 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("ModifiedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("PerCustomerLimit")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("StartsAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TargetingJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<int>("UsedCount")
                         .HasColumnType("integer");
@@ -10333,7 +11091,120 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasIndex("StartsAtUtc", "EndsAtUtc");
 
-                    b.ToTable("PromoCodes", (string)null);
+                    b.ToTable("PromoCodes", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PromoCodes_PerCustomerLimit_Positive", "\"PerCustomerLimit\" IS NULL OR \"PerCustomerLimit\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.PromoCodeRedemption", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CommittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("DiscountAmountSnapshot")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("DiscountPercentSnapshot")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime>("HeldAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PromoCodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReleaseReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("ReleasedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<Guid>("SubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TargetingSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PromoCodeId", "SubscriptionId")
+                        .IsUnique();
+
+                    b.HasIndex("PromoCodeId", "CustomerId", "Status");
+
+                    b.ToTable("PromoCodeRedemptions", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.ReferralAttribution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AttributedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReferralCodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ReferredCustomerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ReferrerUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReferredCustomerUserId")
+                        .IsUnique();
+
+                    b.HasIndex("ReferrerUserId");
+
+                    b.HasIndex("ReferrerUserId", "ReferredCustomerUserId")
+                        .IsUnique();
+
+                    b.ToTable("ReferralAttributions", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.ReferralCode", b =>
@@ -15345,6 +16216,39 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("UserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdAuction", b =>
+                {
+                    b.HasOne("MealMate.Domain.Advertising.AdSpace", "AdSpace")
+                        .WithMany()
+                        .HasForeignKey("AdSpaceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AdSpace");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdBid", b =>
+                {
+                    b.HasOne("MealMate.Domain.Advertising.AdAuction", "AdAuction")
+                        .WithMany("Bids")
+                        .HasForeignKey("AdAuctionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AdAuction");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdPlacement", b =>
+                {
+                    b.HasOne("MealMate.Domain.Advertising.AdAuction", "AdAuction")
+                        .WithOne()
+                        .HasForeignKey("MealMate.Domain.Advertising.AdPlacement", "AdAuctionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AdAuction");
+                });
+
             modelBuilder.Entity("MealMate.Domain.CalendarMeals.DailyMealSelection", b =>
                 {
                     b.HasOne("MealMate.Domain.CalendarMeals.SubscriptionDay", "SubscriptionDay")
@@ -17695,6 +18599,98 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("DiscountAmount");
                 });
 
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.PromoCodeRedemption", b =>
+                {
+                    b.HasOne("MealMate.Domain.ProgramsSubscriptions.PromoCode", "PromoCode")
+                        .WithMany()
+                        .HasForeignKey("PromoCodeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.OwnsOne("MealMate.Domain.ValueObjects.Money", "DiscountAppliedAmount", b1 =>
+                        {
+                            b1.Property<Guid>("PromoCodeRedemptionId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(18, 3)
+                                .HasColumnType("numeric(18,3)")
+                                .HasColumnName("DiscountAppliedAmount_Amount");
+
+                            b1.Property<string>("CurrencyCode")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("DiscountAppliedAmount_CurrencyCode");
+
+                            b1.HasKey("PromoCodeRedemptionId");
+
+                            b1.ToTable("PromoCodeRedemptions");
+
+                            b1.WithOwner()
+                                .HasForeignKey("PromoCodeRedemptionId");
+                        });
+
+                    b.OwnsOne("MealMate.Domain.ValueObjects.Money", "PlatformFundedAmount", b1 =>
+                        {
+                            b1.Property<Guid>("PromoCodeRedemptionId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(18, 3)
+                                .HasColumnType("numeric(18,3)")
+                                .HasColumnName("PlatformFundedAmount_Amount");
+
+                            b1.Property<string>("CurrencyCode")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("PlatformFundedAmount_CurrencyCode");
+
+                            b1.HasKey("PromoCodeRedemptionId");
+
+                            b1.ToTable("PromoCodeRedemptions");
+
+                            b1.WithOwner()
+                                .HasForeignKey("PromoCodeRedemptionId");
+                        });
+
+                    b.OwnsOne("MealMate.Domain.ValueObjects.Money", "RestaurantFundedAmount", b1 =>
+                        {
+                            b1.Property<Guid>("PromoCodeRedemptionId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<decimal>("Amount")
+                                .HasPrecision(18, 3)
+                                .HasColumnType("numeric(18,3)")
+                                .HasColumnName("RestaurantFundedAmount_Amount");
+
+                            b1.Property<string>("CurrencyCode")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("RestaurantFundedAmount_CurrencyCode");
+
+                            b1.HasKey("PromoCodeRedemptionId");
+
+                            b1.ToTable("PromoCodeRedemptions");
+
+                            b1.WithOwner()
+                                .HasForeignKey("PromoCodeRedemptionId");
+                        });
+
+                    b.Navigation("DiscountAppliedAmount")
+                        .IsRequired();
+
+                    b.Navigation("PlatformFundedAmount")
+                        .IsRequired();
+
+                    b.Navigation("PromoCode");
+
+                    b.Navigation("RestaurantFundedAmount")
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.RestaurantBundlePricing", b =>
                 {
                     b.HasOne("MealMate.Domain.ProgramsSubscriptions.Bundle", "Bundle")
@@ -18767,6 +19763,11 @@ namespace MealMate.Persistence.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Advertising.AdAuction", b =>
+                {
+                    b.Navigation("Bids");
                 });
 
             modelBuilder.Entity("MealMate.Domain.CalendarMeals.SubscriptionCalendar", b =>

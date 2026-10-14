@@ -12,7 +12,11 @@ public sealed record FamilyMemberDto(
     string? Relationship,
     int MaxMealsAllowedPerDay,
     bool IsActive,
-    DateTime CreatedAtUtc);
+    DateTime CreatedAtUtc,
+    Guid? CustomerUserId = null,
+    Guid? ProgramId = null,
+    Guid? BundleId = null,
+    string? SubscriptionType = null);
 
 public sealed record AddFamilyMemberCommand(
     Guid PrimarySubscriptionId,
@@ -36,14 +40,21 @@ public sealed record PromoCodeDto(
     DateTime StartsAtUtc,
     DateTime? EndsAtUtc,
     bool IsActive,
-    DateTime CreatedAtUtc);
+    DateTime CreatedAtUtc,
+    Guid? CustomerUserId = null,
+    Guid? ProgramId = null,
+    Guid? BundleId = null,
+    string? SubscriptionType = null,
+    int? PerCustomerLimit = null);
 
 public sealed record DiscountValidationResultDto(
     bool IsValid,
     string Code,
     string CodeType, // PromoCode | ReferralCode
     decimal CalculatedDiscountKwd,
-    string? FailureReason);
+    string? FailureReason,
+    decimal? DiscountPercent = null,
+    string? EligibilityCode = null);
 
 public sealed record CreatePromoCodeCommand(
     string Code,
@@ -51,13 +62,24 @@ public sealed record CreatePromoCodeCommand(
     decimal? DiscountAmountKwd = null,
     int? MaxUses = null,
     DateTime? StartsAtUtc = null,
-    DateTime? EndsAtUtc = null) : ICommand<PromoCodeDto>;
+    DateTime? EndsAtUtc = null,
+    Guid? CustomerUserId = null,
+    Guid? ProgramId = null,
+    Guid? BundleId = null,
+    string? SubscriptionType = null,
+    int? PerCustomerLimit = null) : ICommand<PromoCodeDto>;
 
 public sealed record ValidateDiscountCodeQuery(
     string Code,
     Guid? SubscriptionId = null,
-    decimal TotalAmountKwd = 0m) : IQuery<DiscountValidationResultDto>;
+    decimal TotalAmountKwd = 0m,
+    Guid? CustomerUserId = null,
+    Guid? ProgramId = null,
+    Guid? BundleId = null,
+    string? SubscriptionType = null) : IQuery<DiscountValidationResultDto>;
 
 public sealed record GetPromoCodesListQuery(
     int Page = 1,
     int PageSize = 20) : IQuery<PagedResult<PromoCodeDto>>;
+
+public sealed record SetPromoCodeActiveCommand(Guid PromoCodeId, bool IsActive, string Reason) : ICommand<PromoCodeDto>;
