@@ -194,7 +194,8 @@ public sealed record UpdateFamilyMemberPermissionsRequest(
     bool? CancelSubscription = null,
     bool? ViewFamilyCalendars = null,
     bool? ViewFamilyPlans = null,
-    bool? ViewFamilyInvoices = null);
+    bool? ViewFamilyInvoices = null,
+    bool? ManageCalendar = null);
 
 public sealed record GetFamilyHomeQuery : IQuery<FamilyHomeDto>;
 public sealed record GetFamilyMembersQuery : IQuery<IReadOnlyList<FamilyMemberListItemDto>>;
@@ -221,9 +222,7 @@ public static class FamilyPermissionCatalog
             messages.GetArabicMessage($"family.permission_group.{key}"), messages.GetEnglishMessage($"family.permission_group.{key}"), items);
         return [
             Group("meals", Item("viewCalendar", p.ViewCalendar, required: ["viewProgram"]),
-                Item("selectRestaurant", p.SelectRestaurant, required: ["viewCalendar", "viewProgram"]),
-                Item("editDailyMeals", p.EditDailyMeals, required: ["viewCalendar", "viewProgram"]),
-                Item("confirmMeals", p.ConfirmMeals, required: ["viewCalendar", "viewProgram"]),
+                Item("manageCalendar", p.SelectRestaurant || p.EditDailyMeals || p.ConfirmMeals, required: ["viewCalendar", "viewProgram"]),
                 Item("editMealsAndDays", p.EditMealsAndDays, required: ["viewCalendar", "viewProgram"]),
                 Item("unitExchange", p.UnitExchange, required: ["viewCalendar", "viewProgram"])),
             Group("program", Item("viewProgram", true, configurable: false), Item("viewFamilyPlans", p.ViewFamilyPlans),

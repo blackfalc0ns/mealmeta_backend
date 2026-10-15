@@ -999,6 +999,7 @@
   <data name="family.permission.editDailyMeals" xml:space="preserve"><value>Edit daily meals</value></data>
   <data name="family.permission.confirmMeals" xml:space="preserve"><value>Confirm meals</value></data>
   <data name="family.permission.editMealsAndDays" xml:space="preserve"><value>Edit meals and days</value></data>
+  <data name="family.permission.manageCalendar" xml:space="preserve"><value>Manage calendar</value></data>
   <data name="family.permission.unitExchange" xml:space="preserve"><value>Unit exchange</value></data>
   <data name="family.permission.changeProgram" xml:space="preserve"><value>Change program</value></data>
   <data name="family.permission.changeDeliveryTime" xml:space="preserve"><value>Change delivery time</value></data>
@@ -1018,6 +1019,7 @@
   <data name="family.permission_description.editDailyMeals" xml:space="preserve"><value>Lets the member add or change meal selections and use automatic meal selection; this is the broader legacy meal-edit permission.</value></data>
   <data name="family.permission_description.confirmMeals" xml:space="preserve"><value>Lets the member confirm a completed day's meals and send them to the restaurant.</value></data>
   <data name="family.permission_description.editMealsAndDays" xml:space="preserve"><value>Lets the member add meals to available slots and fill a day's meals; by itself it does not allow replacing a selected meal.</value></data>
+  <data name="family.permission_description.manageCalendar" xml:space="preserve"><value>Lets the member choose a restaurant, edit daily meals, and confirm them.</value></data>
   <data name="family.permission_description.unitExchange" xml:space="preserve"><value>Lets the member replace a selected meal while the day is open and editable.</value></data>
   <data name="family.permission_description.editAddress" xml:space="preserve"><value>Lets the member update the delivery address for their subscription.</value></data>
   <data name="family.permission_description.changePassword" xml:space="preserve"><value>Lets the member change their account password. This baseline permission is always enabled.</value></data>

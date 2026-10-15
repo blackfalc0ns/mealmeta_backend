@@ -941,6 +941,7 @@
   <data name="family.permission.editDailyMeals" xml:space="preserve"><value>تعديل الوجبات اليومية</value></data>
   <data name="family.permission.confirmMeals" xml:space="preserve"><value>تأكيد الوجبات</value></data>
   <data name="family.permission.editMealsAndDays" xml:space="preserve"><value>تعديل الوجبات والأيام</value></data>
+  <data name="family.permission.manageCalendar" xml:space="preserve"><value>إدارة التقويم</value></data>
   <data name="family.permission.unitExchange" xml:space="preserve"><value>استبدال الوحدة</value></data>
   <data name="family.permission.changeProgram" xml:space="preserve"><value>تغيير البرنامج</value></data>
   <data name="family.permission.changeDeliveryTime" xml:space="preserve"><value>تغيير وقت التوصيل</value></data>
@@ -960,6 +961,7 @@
   <data name="family.permission_description.editDailyMeals" xml:space="preserve"><value>يسمح بإضافة الوجبات أو تغييرها أو استخدامها في الاختيار التلقائي؛ وهي صلاحية التعديل القديمة الواسعة.</value></data>
   <data name="family.permission_description.confirmMeals" xml:space="preserve"><value>يسمح بتأكيد وجبات اليوم المكتمل وإرسالها إلى المطعم.</value></data>
   <data name="family.permission_description.editMealsAndDays" xml:space="preserve"><value>يسمح بإضافة وجبات إلى خانات اليوم المتاحة واستكمال وجبات اليوم، ولا يسمح وحده باستبدال وجبة مختارة.</value></data>
+  <data name="family.permission_description.manageCalendar" xml:space="preserve"><value>يسمح باختيار المطعم وتعديل الوجبات اليومية وتأكيدها.</value></data>
   <data name="family.permission_description.unitExchange" xml:space="preserve"><value>يسمح باستبدال وجبة مختارة بوجبة أخرى ما دام اليوم مفتوحًا وقابلًا للتعديل.</value></data>
   <data name="family.permission_description.editAddress" xml:space="preserve"><value>يسمح بتعديل عنوان توصيل اشتراك العضو.</value></data>
   <data name="family.permission_description.changePassword" xml:space="preserve"><value>يسمح للعضو بتغيير كلمة مرور حسابه. هذه صلاحية أساسية مفعّلة دائمًا.</value></data>

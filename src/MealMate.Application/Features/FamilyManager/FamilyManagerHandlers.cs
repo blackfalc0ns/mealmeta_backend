@@ -735,6 +735,12 @@ public sealed class FamilyManagerHandlers :
         if (request.Request.ViewInvoices is { } viewInvoices) perms.ViewInvoices = viewInvoices;
         if (request.Request.SelectRestaurant is { } selectRestaurant) perms.SelectRestaurant = selectRestaurant;
         if (request.Request.ConfirmMeals is { } confirmMeals) perms.ConfirmMeals = confirmMeals;
+        if (request.Request.ManageCalendar is { } manageCalendar)
+        {
+            perms.SelectRestaurant = manageCalendar;
+            perms.EditDailyMeals = manageCalendar;
+            perms.ConfirmMeals = manageCalendar;
+        }
         if (request.Request.RequestFreeze is { } requestFreeze) perms.RequestFreeze = requestFreeze;
         if (request.Request.RequestRenewal is { } requestRenewal) perms.RequestRenewal = requestRenewal;
         if (request.Request.RequestUpgrade is { } requestUpgrade) perms.RequestUpgrade = requestUpgrade;
