@@ -103,6 +103,9 @@ public sealed class FamilyDraftHandlers :
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
+        var memberOnly = await IsManagedFamilyMemberAsync(managerId.Value, cancellationToken);
+        if (memberOnly)
+            return Error.Forbidden("family.manager_required", "Only the family manager can start or resume family setup.");
 
         var settings = await _settings.GetAsync(cancellationToken);
         return new FamilyDraftMetadataDto(
@@ -145,6 +148,9 @@ public sealed class FamilyDraftHandlers :
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
+        var memberOnly = await IsManagedFamilyMemberAsync(managerId.Value, ct);
+        if (memberOnly)
+            return Error.Forbidden("family.manager_required", "Only the family manager can start or resume family setup.");
         if (request.FamilyPackageId == Guid.Empty)
             return Error.Validation("family.package_required", "A family package is required.");
 
@@ -769,6 +775,19 @@ public sealed class FamilyDraftHandlers :
             IsDislike = dislike,
         };
 
+    private Task<bool> IsManagedFamilyMemberAsync(Guid userId, CancellationToken cancellationToken)
+        => (from access in _db.FamilyMemberAccesses.AsNoTracking()
+            join member in _db.FamilyMembers.AsNoTracking() on access.FamilyMemberId equals member.Id
+            join familyGroup in _db.FamilyGroups.AsNoTracking() on member.FamilyGroupId equals familyGroup.Id
+            where access.LinkedCustomerUserId == userId
+                && access.RemovedAtUtc == null
+                && !access.DetachedFromFamilyManagement
+                && !access.IsPaused
+                && !member.IsDeleted
+                && !familyGroup.IsDeleted
+                && familyGroup.ManagerCustomerUserId != userId
+            select access.FamilyMemberId).AnyAsync(cancellationToken);
+
     public Task<Result<FamilyGroupScreenDto>> Handle(GetCurrentFamilyGroupQuery request, CancellationToken cancellationToken)
         => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken, false);
 
@@ -776,6 +795,8 @@ public sealed class FamilyDraftHandlers :
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
+        if (await IsManagedFamilyMemberAsync(managerId.Value, cancellationToken))
+            return Error.Forbidden("family.manager_required", "Only the family manager can start or resume family setup.");
 
         var expiredThisCall = await FamilyDraftExpiry.ExpireDueAsync(_db, _clock.UtcNow, cancellationToken, managerId.Value, groupLockHeld: true);
         var sessionExpired = await DetectSessionExpiredAsync(managerId.Value, expiredThisCall, cancellationToken);
@@ -823,6 +844,8 @@ public sealed class FamilyDraftHandlers :
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
+        if (await IsManagedFamilyMemberAsync(managerId.Value, cancellationToken))
+            return Error.Forbidden("family.manager_required", "Only the family manager can start or resume family setup.");
 
         var checkoutPending = await _db.FamilyGroups.AsNoTracking().AnyAsync(
             x => x.ManagerCustomerUserId == managerId.Value && x.Status == FamilyGroupStatus.CheckoutPending,
