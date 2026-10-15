@@ -43,6 +43,11 @@ public sealed class GetMyFamilySessionContextHandler(IAppDbContext db, ICurrentU
                 && ((!x.FamilyMember.FamilyGroup.IsDeleted && x.FamilyMember.FamilyGroup.Status != FamilyGroupStatus.Cancelled)
                     || x.DetachedFromFamilyManagement))
             .OrderBy(x => x.FamilyMember.FamilyGroupId).ThenBy(x => x.FamilyMemberId).ToListAsync(cancellationToken);
+        // A linked member session is scoped to its own access row. Never append
+        // manager rosters to that response, even if stale data still points the
+        // same user at an old group manager record.
+        if (memberships.Count > 0)
+            managed = [];
         var result = new List<FamilyMemberSessionContextDto>();
         foreach (var group in managed)
         {
