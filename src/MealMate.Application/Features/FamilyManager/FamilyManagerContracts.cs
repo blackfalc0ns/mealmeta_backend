@@ -220,7 +220,7 @@ public static class FamilyPermissionCatalog
         FamilyPermissionGroupDto Group(string key, params FamilyPermissionItemDto[] items) => new(key,
             messages.GetArabicMessage($"family.permission_group.{key}"), messages.GetEnglishMessage($"family.permission_group.{key}"), items);
         return [
-            Group("meals", Item("viewCalendar", p.ViewCalendar, required: ["viewProgram"]), Item("viewFamilyCalendars", p.ViewFamilyCalendars),
+            Group("meals", Item("viewCalendar", p.ViewCalendar, required: ["viewProgram"]),
                 Item("selectRestaurant", p.SelectRestaurant, required: ["viewCalendar", "viewProgram"]),
                 Item("editDailyMeals", p.EditDailyMeals, required: ["viewCalendar", "viewProgram"]),
                 Item("confirmMeals", p.ConfirmMeals, required: ["viewCalendar", "viewProgram"]),
@@ -232,8 +232,7 @@ public static class FamilyPermissionCatalog
                 Item("requestUpgrade", p.RequestUpgrade, required: ["viewProgram"]),
                 Item("cancelSubscription", p.CancelSubscription, required: ["viewProgram"])),
             Group("delivery", Item("editAddress", p.EditAddress, required: ["viewCalendar", "viewProgram"])),
-            Group("account", Item("changePassword", true, configurable: false), Item("viewInvoices", p.ViewInvoices),
-                Item("viewFamilyInvoices", p.ViewFamilyInvoices))
+            Group("account", Item("changePassword", true, configurable: false), Item("viewInvoices", p.ViewInvoices))
         ];
     }
 }

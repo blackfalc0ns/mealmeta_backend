@@ -1164,6 +1164,12 @@ public sealed class FamilyManagerHandlerTests
         ok.Value.EditDailyMeals.Should().BeTrue();
         ok.Value.Groups.Should().HaveCount(4);
         ok.Value.Groups.Select(g => g.Code).Should().Equal("meals", "program", "delivery", "account");
+        ok.Value.Groups.Single(g => g.Code == "meals").LabelAr.Should().Be("إدارة التقويم");
+        ok.Value.Groups.Single(g => g.Code == "meals").LabelEn.Should().Be("Calendar management");
+        ok.Value.Groups.Single(g => g.Code == "meals").Permissions
+            .Select(p => p.Key).Should().Equal("viewCalendar", "selectRestaurant", "editDailyMeals", "confirmMeals", "editMealsAndDays", "unitExchange");
+        ok.Value.Groups.SelectMany(g => g.Permissions).Select(p => p.Key)
+            .Should().NotContain(new[] { "viewFamilyCalendars", "viewFamilyInvoices" });
         ok.Value.Groups.Single(g => g.Code == "meals").Permissions
             .Single(p => p.Key == "editDailyMeals").Value.Should().BeTrue();
 

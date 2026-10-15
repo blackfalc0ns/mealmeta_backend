@@ -967,7 +967,7 @@
   <data name="family.permission_description.requestRenewal" xml:space="preserve"><value>يسمح للعضو ببدء إجراء تجديد اشتراكه.</value></data>
   <data name="family.permission_description.requestUpgrade" xml:space="preserve"><value>يسمح للعضو ببدء إجراء ترقية اشتراكه.</value></data>
   <data name="family.permission_description.cancelSubscription" xml:space="preserve"><value>يسمح للعضو ببدء إجراء إلغاء اشتراكه.</value></data>
-  <data name="family.permission_group.meals" xml:space="preserve"><value>الوجبات</value></data>
+  <data name="family.permission_group.meals" xml:space="preserve"><value>إدارة التقويم</value></data>
   <data name="family.permission_group.program" xml:space="preserve"><value>البرنامج والاشتراك</value></data>
   <data name="family.permission_group.delivery" xml:space="preserve"><value>التوصيل</value></data>
   <data name="family.permission_group.account" xml:space="preserve"><value>الحساب والفواتير</value></data>

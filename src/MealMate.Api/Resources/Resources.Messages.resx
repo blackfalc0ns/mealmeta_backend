@@ -1025,7 +1025,7 @@
   <data name="family.permission_description.requestRenewal" xml:space="preserve"><value>Lets the member start the renewal flow for their subscription.</value></data>
   <data name="family.permission_description.requestUpgrade" xml:space="preserve"><value>Lets the member start the upgrade flow for their subscription.</value></data>
   <data name="family.permission_description.cancelSubscription" xml:space="preserve"><value>Lets the member start the cancellation flow for their subscription.</value></data>
-  <data name="family.permission_group.meals" xml:space="preserve"><value>Meals</value></data>
+  <data name="family.permission_group.meals" xml:space="preserve"><value>Calendar management</value></data>
   <data name="family.permission_group.program" xml:space="preserve"><value>Plan and subscription</value></data>
   <data name="family.permission_group.delivery" xml:space="preserve"><value>Delivery</value></data>
   <data name="family.permission_group.account" xml:space="preserve"><value>Account and invoices</value></data>
