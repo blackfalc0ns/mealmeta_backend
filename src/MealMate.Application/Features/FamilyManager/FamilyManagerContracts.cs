@@ -195,15 +195,14 @@ public static class FamilyPermissionCatalog
         FamilyPermissionGroupDto Group(string key, params FamilyPermissionItemDto[] items) => new(key,
             messages.GetArabicMessage($"family.permission_group.{key}"), messages.GetEnglishMessage($"family.permission_group.{key}"), items);
         return [
-            Group("meals", Item("viewCalendar", p.ViewCalendar), Item("viewFamilyCalendars", p.ViewFamilyCalendars),
+            Group("meals", Item("viewCalendar", p.ViewCalendar),
                 Item("selectRestaurant", p.SelectRestaurant), Item("editDailyMeals", p.EditDailyMeals), Item("confirmMeals", p.ConfirmMeals),
                 Item("editMealsAndDays", p.EditMealsAndDays), Item("unitExchange", p.UnitExchange)),
             Group("program", Item("viewProgram", p.ViewProgram), Item("viewFamilyPlans", p.ViewFamilyPlans),
                 Item("changeProgram", p.ChangeProgram), Item("requestFreeze", p.RequestFreeze), Item("requestRenewal", p.RequestRenewal),
                 Item("requestUpgrade", p.RequestUpgrade), Item("cancelSubscription", p.CancelSubscription)),
             Group("delivery", Item("changeDeliveryTime", p.ChangeDeliveryTime), Item("editAddress", p.EditAddress)),
-            Group("account", Item("changePassword", p.ChangePassword), Item("viewInvoices", p.ViewInvoices),
-                Item("viewFamilyInvoices", p.ViewFamilyInvoices))
+            Group("account", Item("changePassword", p.ChangePassword), Item("viewInvoices", p.ViewInvoices))
         ];
     }
 }

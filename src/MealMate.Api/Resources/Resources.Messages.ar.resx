@@ -933,7 +933,7 @@
   <data name="family.permission.requestRenewal" xml:space="preserve"><value>طلب تجديد الاشتراك</value></data>
   <data name="family.permission.requestUpgrade" xml:space="preserve"><value>طلب ترقية الاشتراك</value></data>
   <data name="family.permission.cancelSubscription" xml:space="preserve"><value>إلغاء الاشتراك</value></data>
-  <data name="family.permission_group.meals" xml:space="preserve"><value>الوجبات</value></data>
+  <data name="family.permission_group.meals" xml:space="preserve"><value>إدارة التقويم</value></data>
   <data name="family.permission_group.program" xml:space="preserve"><value>البرنامج والاشتراك</value></data>
   <data name="family.permission_group.delivery" xml:space="preserve"><value>التوصيل</value></data>
   <data name="family.permission_group.account" xml:space="preserve"><value>الحساب والفواتير</value></data>
