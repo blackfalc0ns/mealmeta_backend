@@ -223,7 +223,7 @@ public static class FamilyPermissionCatalog
                 Item("editDailyMeals", p.EditDailyMeals, required: ["viewCalendar", "viewProgram"]),
                 Item("confirmMeals", p.ConfirmMeals, required: ["viewCalendar", "viewProgram"]),
                 Item("editMealsAndDays", p.EditMealsAndDays, false), Item("unitExchange", p.UnitExchange, false)),
-            Group("program", Item("viewProgram", p.ViewProgram), Item("viewFamilyPlans", p.ViewFamilyPlans),
+            Group("program", Item("viewProgram", true, configurable: false), Item("viewFamilyPlans", p.ViewFamilyPlans),
                 Item("changeProgram", p.ChangeProgram, false), Item("requestFreeze", p.RequestFreeze, required: ["viewProgram"]),
                 Item("requestRenewal", p.RequestRenewal, required: ["viewProgram"]),
                 Item("requestUpgrade", p.RequestUpgrade, required: ["viewProgram"]),
@@ -236,18 +236,27 @@ public static class FamilyPermissionCatalog
     }
 }
 
-/// <summary>Query: the current actor's capability decisions for one family member.</summary>
+/// <summary>
+/// Query: the current actor's capability decisions for one family member.
+/// For a manager this describes the manager's access to the target, not grants
+/// assigned to the target member; use <see cref="GetFamilyMemberPermissionsQuery"/>
+/// to read the manager-configured member grants.
+/// </summary>
 public sealed record GetMyFamilyCapabilitiesQuery(Guid MemberId)
     : MealMate.Application.Common.Messaging.IQuery<IReadOnlyList<FamilyCapabilityDto>>;
 
-/// <summary>One action's capability decision as rendered by the family UI.</summary>
+/// <summary>One action's authorization decision for the current caller.</summary>
 public sealed record FamilyCapabilityDto(
     string Action,
     bool Allowed,
     string? ReasonCode,
     string? RequiredPermission);
 
-/// <summary>Family switcher item with resolved subscription IDs so mobile can switch between members seamlessly.</summary>
+/// <summary>
+/// Family switcher item with resolved subscription IDs. Capability flags describe
+/// what the current caller can do for the selected member; they are not the target
+/// member's assigned permissions when the caller is the manager.
+/// </summary>
 public sealed record FamilySwitcherItemDto(
     Guid MemberId,
     string DisplayName,

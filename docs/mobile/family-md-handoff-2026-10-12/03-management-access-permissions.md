@@ -8,6 +8,12 @@ GET/PUT access يتحكم في الحساب المستقل والإيقاف وا
 
 GET permissions ثم PUT permissions مع expectedVersion=version الحالي. عند family.permissions_changed أعد القراءة واطلب إعادة تطبيق اختيار المستخدم، دون overwrite صامت. المدير يحتفظ بصلاحيات إدارة العمليات المدعومة، وصلاحيات الفرد يحددها المدير. المصدر يسمح أيضًا ببعض عمليات الفرد عند منح المفتاح المناسب؛ لا تفترض حظر كل كتابة للفرد أو السماح بها، بل اعتمد capabilities ورفض السيرفر.
 
+### معنى الدور والصلاحية في جلسة الدخول
+
+`FamilyManager` يعني أن المستخدم يملك مجموعة عائلية؛ يُحسب من ملكية المجموعة. `FamilyMember` يعني أن له صف عضوية مرتبطًا بحسابه، حتى لو كان الحساب المستقل غير مفعّل. صلاحيات العائلة لا تُضاف إلى استجابة الدخول إلا إذا كان `hasSeparateAccount=true` والحساب غير موقوف ولا يحتاج إعداد كلمة مرور. لا تعتبر `roles` وحدها دليلاً على إمكان فتح البيانات؛ حدّث سياق الجلسة من `GET /api/v1/customer/family/me` واعتمد `accessStatus` و`capabilities`.
+
+`GET /members/{memberId}/permissions` هو منح العضو التي ضبطها المدير. أما `GET /members/{memberId}/capabilities` فيصف ما يستطيع **المستخدم الحالي** فعله تجاه هذا الفرد؛ للمدير قد تكون القراءة والإدارة مسموحتين حتى عندما لا تكون تلك الصلاحيات ممنوحة لحساب العضو. كذلك `canViewCalendar` و`canEditDailyMeals` في عنصر switcher هي صلاحيات المستخدم الحالي على الفرد المحدد. لا تستخدمها لبناء شاشة دخول العضو من جلسة المدير.
+
 viewCalendar/viewProgram/viewInvoices تخص قراءة الفرد لنفسه. viewFamilyCalendars/viewFamilyPlans/viewFamilyInvoices تمنح نطاق العيلة لكل مورد مستقل. قراءة التقويم لا تمنح تعديله. GET capabilities يرجع array من action/allowed/reasonCode/requiredPermission؛ action وrequiredPermission قد يستعملان أسماء PascalCase الأصلية. لا تحوّلهما إلى identifiers جديدة. قدرات editMealsAndDays/changeProgram/changeDeliveryTime/unitExchange غير متاحة حتى للمدير في هذه النسخة.
 
 هذه **أشكال JSON توضيحية** مأخوذة من DTOs، وليست بيانات أعمال أو requests جاهزة للإرسال. استبدل الرموز بقيم السيرفر. الصفر وfalse يوضحان نوع القيمة فقط وليسا defaults أو قرارات صلاحية. الحقول nullable تظهر null هنا؛ راجع نوعها في الجدول لمعرفة القيمة عند وجودها. عنصر array يشرح نوع العنصر؛ الاستجابة الحقيقية قد ترجع []. IDs لا تُولّد بدل IDs السيرفر. Defaults موضحة منفصلة في الجداول. enums تُرسل بأسمائها الأصلية، والحقول camelCase. بعض حقول الاستجابة قد تُحذف عند null وفق خيارات serializer؛ العميل يتحمل null والغياب.

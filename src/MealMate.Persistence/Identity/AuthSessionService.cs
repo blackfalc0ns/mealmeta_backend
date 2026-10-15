@@ -336,27 +336,40 @@ public sealed class AuthSessionService : IAuthSessionService
                                 where access.RemovedAtUtc == null
                                     && (access.LinkedCustomerUserId == userId || familyGroup.ManagerCustomerUserId == userId)
                                     && !member.IsDeleted && !familyGroup.IsDeleted
+                                    && familyGroup.Status != FamilyGroupStatus.Cancelled
                                 select new { access, member, familyGroup })
             .ToListAsync(cancellationToken);
 
-        if (familyRows.Count == 0)
-            return (roles, permissions);
-
         var mergedRoles = roles.ToList();
-        mergedRoles.Add("FamilyMember");
-        if (familyRows.Any(x => x.familyGroup.ManagerCustomerUserId == userId && x.member.Role == FamilyMemberRole.Manager))
+        if (familyRows.Any(x => x.access.LinkedCustomerUserId == userId
+                                && !x.access.DetachedFromFamilyManagement))
+            mergedRoles.Add("FamilyMember");
+
+        // Manager identity comes from group ownership, not from a joined member
+        // row. The manager's group may only contribute linked rows for other
+        // family members to familyRows.
+        if (await _db.FamilyGroups.AsNoTracking().AnyAsync(x =>
+                x.ManagerCustomerUserId == userId
+                && !x.IsDeleted
+                && x.Status != FamilyGroupStatus.Cancelled, cancellationToken))
             mergedRoles.Add("FamilyManager");
 
         var mergedPermissions = permissions.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var row in familyRows.Where(x => x.access.LinkedCustomerUserId == userId))
+        foreach (var row in familyRows.Where(x => x.access.LinkedCustomerUserId == userId
+                                                  && x.access.HasSeparateAccount
+                                                  && !x.access.IsPaused
+                                                  && !x.access.RequiresPasswordSetup
+                                                  && !x.access.DetachedFromFamilyManagement))
         {
+            if (row.member.Role == FamilyMemberRole.Member)
+                AddFamilyPermission(mergedPermissions, true, nameof(FamilyMemberPermissions.ViewProgram));
+
             var grants = await _db.FamilyMemberPermissions.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.FamilyMemberId == row.member.Id, cancellationToken);
-            if (grants is null || row.access.IsPaused || row.access.RequiresPasswordSetup)
+            if (grants is null)
                 continue;
 
             AddFamilyPermission(mergedPermissions, grants.ViewCalendar, nameof(FamilyMemberPermissions.ViewCalendar));
-            AddFamilyPermission(mergedPermissions, grants.ViewProgram, nameof(FamilyMemberPermissions.ViewProgram));
             AddFamilyPermission(mergedPermissions, grants.ViewInvoices, nameof(FamilyMemberPermissions.ViewInvoices));
             AddFamilyPermission(mergedPermissions, grants.SelectRestaurant, nameof(FamilyMemberPermissions.SelectRestaurant));
             AddFamilyPermission(mergedPermissions, grants.EditDailyMeals, nameof(FamilyMemberPermissions.EditDailyMeals));

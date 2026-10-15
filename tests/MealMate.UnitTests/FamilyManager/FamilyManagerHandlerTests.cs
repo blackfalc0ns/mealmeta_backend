@@ -78,7 +78,11 @@ public sealed class FamilyManagerHandlerTests
         omitted.IsSuccess.Should().BeTrue();
         omitted.Value.ViewInvoices.Should().BeTrue();
         omitted.Value.ViewCalendar.Should().BeFalse();
-        omitted.Value.ViewProgram.Should().BeFalse();
+        omitted.Value.ViewProgram.Should().BeTrue();
+        var viewProgram = omitted.Value.Groups.SelectMany(x => x.Permissions)
+            .Single(x => x.Key == "viewProgram");
+        viewProgram.Value.Should().BeTrue();
+        viewProgram.IsManagerConfigurable.Should().BeFalse();
 
         var unsupported = await fx.Handlers.Handle(new UpdateFamilyMemberPermissionsCommand(fx.MemberId,
             new UpdateFamilyMemberPermissionsRequest(null, null, null, true, null, null, null, null,

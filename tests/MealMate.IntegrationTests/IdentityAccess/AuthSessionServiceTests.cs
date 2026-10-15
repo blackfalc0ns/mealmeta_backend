@@ -7,6 +7,7 @@ using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Persistence;
 using MealMate.Persistence.Common;
 using MealMate.Persistence.Identity;
@@ -64,6 +65,168 @@ public class AuthSessionServiceTests
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexString(bytes);
+    }
+
+    private static async Task<(FamilyGroup Group, FamilyMember Member)> AddLinkedFamilyMemberAsync(
+        AppDbContext db, Guid managerId, Guid memberUserId, bool hasSeparateAccount, bool isPaused = false,
+        bool requiresPasswordSetup = false)
+    {
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "Family",
+            Status = FamilyGroupStatus.Active,
+        };
+        var member = new FamilyMember
+        {
+            FamilyGroup = group,
+            Role = FamilyMemberRole.Member,
+            DisplayName = "Member",
+            RelationshipCode = "sibling",
+            NutritionalGoalCode = string.Empty,
+        };
+        group.Members.Add(member);
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+        db.FamilyMemberAccesses.Add(new FamilyMemberAccess
+        {
+            FamilyMemberId = member.Id,
+            FamilyMember = member,
+            LinkedCustomerUserId = memberUserId,
+            HasSeparateAccount = hasSeparateAccount,
+            IsPaused = isPaused,
+            RequiresPasswordSetup = requiresPasswordSetup,
+        });
+        db.FamilyMemberPermissions.Add(new FamilyMemberPermissions
+        {
+            FamilyMemberId = member.Id,
+            FamilyMember = member,
+            ViewCalendar = true,
+            ViewProgram = true,
+        });
+        await db.SaveChangesAsync();
+        return (group, member);
+    }
+
+    [Fact]
+    public async Task IssueSession_does_not_add_family_data_permissions_for_disabled_member_access()
+    {
+        var managerId = Guid.NewGuid();
+        var memberUserId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await using var db = CreateDbContext();
+        await AddLinkedFamilyMemberAsync(db, managerId, memberUserId, hasSeparateAccount: false);
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(memberUserId, Arg.Any<CancellationToken>()).Returns(ActiveUser(memberUserId));
+        users.GetRolesAsync(memberUserId, Arg.Any<CancellationToken>()).Returns(["Customer"]);
+        users.GetPermissionsAsync(memberUserId, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
+        var tokens = TokenStub();
+        tokens.CreateAccessToken(Arg.Any<TokenUser>()).Returns(new AccessToken("access", now.AddMinutes(15)));
+        tokens.GenerateRefreshToken().Returns("raw-refresh");
+
+        var session = await CreateService(db, users, tokens, now)
+            .IssueSessionAsync(memberUserId, null, null, CancellationToken.None);
+
+        session.IsSuccess.Should().BeTrue();
+        session.Value.Permissions.Should().NotContain(nameof(FamilyMemberPermissions.ViewCalendar));
+        session.Value.Permissions.Should().NotContain(nameof(FamilyMemberPermissions.ViewProgram));
+        session.Value.Roles.Should().Contain("FamilyMember");
+    }
+
+    [Fact]
+    public async Task IssueSession_adds_enabled_member_grants_and_family_member_role()
+    {
+        var managerId = Guid.NewGuid();
+        var memberUserId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await using var db = CreateDbContext();
+        await AddLinkedFamilyMemberAsync(db, managerId, memberUserId, hasSeparateAccount: true);
+        var memberGrants = await db.FamilyMemberPermissions.SingleAsync();
+        memberGrants.ViewProgram = false;
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(memberUserId, Arg.Any<CancellationToken>()).Returns(ActiveUser(memberUserId));
+        users.GetRolesAsync(memberUserId, Arg.Any<CancellationToken>()).Returns(["Customer"]);
+        users.GetPermissionsAsync(memberUserId, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
+        var tokens = TokenStub();
+        tokens.CreateAccessToken(Arg.Any<TokenUser>()).Returns(new AccessToken("access", now.AddMinutes(15)));
+        tokens.GenerateRefreshToken().Returns("raw-refresh");
+
+        var session = await CreateService(db, users, tokens, now)
+            .IssueSessionAsync(memberUserId, null, null, CancellationToken.None);
+
+        session.IsSuccess.Should().BeTrue();
+        session.Value.Permissions.Should().Contain(nameof(FamilyMemberPermissions.ViewCalendar));
+        session.Value.Permissions.Should().Contain(nameof(FamilyMemberPermissions.ViewProgram));
+        session.Value.Permissions.Should().NotContain(nameof(FamilyMemberPermissions.ViewInvoices));
+        session.Value.Roles.Should().Contain("FamilyMember");
+        session.Value.Roles.Should().NotContain("FamilyManager");
+    }
+
+    [Fact]
+    public async Task IssueSession_assigns_family_manager_role_from_group_ownership()
+    {
+        var managerId = Guid.NewGuid();
+        var memberUserId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await using var db = CreateDbContext();
+        await AddLinkedFamilyMemberAsync(db, managerId, memberUserId, hasSeparateAccount: true);
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ActiveUser(managerId));
+        users.GetRolesAsync(managerId, Arg.Any<CancellationToken>()).Returns(["Customer"]);
+        users.GetPermissionsAsync(managerId, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
+        var tokens = TokenStub();
+        tokens.CreateAccessToken(Arg.Any<TokenUser>()).Returns(new AccessToken("access", now.AddMinutes(15)));
+        tokens.GenerateRefreshToken().Returns("raw-refresh");
+
+        var session = await CreateService(db, users, tokens, now)
+            .IssueSessionAsync(managerId, null, null, CancellationToken.None);
+
+        session.IsSuccess.Should().BeTrue();
+        session.Value.Roles.Should().Contain("FamilyManager");
+        session.Value.Roles.Should().NotContain("FamilyMember");
+    }
+
+    [Fact]
+    public async Task IssueSession_assigns_family_manager_role_without_linked_member_access_rows()
+    {
+        var managerId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await using var db = CreateDbContext();
+        var group = new FamilyGroup
+        {
+            ManagerCustomerUserId = managerId,
+            Name = "Family",
+            Status = FamilyGroupStatus.Active,
+        };
+        group.Members.Add(new FamilyMember
+        {
+            FamilyGroup = group,
+            Role = FamilyMemberRole.Manager,
+            DisplayName = "Manager",
+            RelationshipCode = "self",
+            NutritionalGoalCode = string.Empty,
+        });
+        db.FamilyGroups.Add(group);
+        await db.SaveChangesAsync();
+
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(managerId, Arg.Any<CancellationToken>()).Returns(ActiveUser(managerId));
+        users.GetRolesAsync(managerId, Arg.Any<CancellationToken>()).Returns(["Customer"]);
+        users.GetPermissionsAsync(managerId, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
+        var tokens = TokenStub();
+        tokens.CreateAccessToken(Arg.Any<TokenUser>()).Returns(new AccessToken("access", now.AddMinutes(15)));
+        tokens.GenerateRefreshToken().Returns("raw-refresh");
+
+        var session = await CreateService(db, users, tokens, now)
+            .IssueSessionAsync(managerId, null, null, CancellationToken.None);
+
+        session.IsSuccess.Should().BeTrue();
+        session.Value.Roles.Should().Contain("FamilyManager");
+        session.Value.Roles.Should().NotContain("FamilyMember");
     }
 
     [Fact]

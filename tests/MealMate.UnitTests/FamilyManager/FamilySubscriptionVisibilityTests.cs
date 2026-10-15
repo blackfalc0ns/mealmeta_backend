@@ -62,6 +62,57 @@ public sealed class FamilySubscriptionVisibilityTests
     }
 
     [Fact]
+    public async Task Member_can_view_only_own_subscription_summary_without_manager_grants()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options, Substitute.For<IDomainEventDispatcher>());
+        var actor = Guid.NewGuid();
+        var manager = Guid.NewGuid();
+        var today = new DateOnly(2026, 10, 15);
+        var program = new Program { Code = "P-own-summary", NameAr = "خطة", NameEn = "Plan", IsActive = true };
+        var bundle = new Bundle { ProgramId = program.Id, Code = "B-own-summary", NameAr = "باقة", NameEn = "Bundle", MealsPerDay = 1 };
+        var group = new FamilyGroup { ManagerCustomerUserId = manager, Name = "Family", Status = FamilyGroupStatus.Active };
+        var ownMember = new FamilyMember { FamilyGroupId = group.Id, DisplayName = "Own member", Role = FamilyMemberRole.Member,
+            RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        var sibling = new FamilyMember { FamilyGroupId = group.Id, DisplayName = "Sibling", Role = FamilyMemberRole.Member,
+            RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        var ownSubscription = new Subscription { CustomerUserId = manager, ProgramId = program.Id, BundleId = bundle.Id,
+            FamilyGroupId = group.Id, FamilyMemberId = ownMember.Id, Status = SubscriptionStatus.Active,
+            PaidAmount = new Money(7, "KWD"), StartDate = today, EndDate = today.AddDays(10), DurationDays = 10 };
+        var siblingSubscription = new Subscription { CustomerUserId = manager, ProgramId = program.Id, BundleId = bundle.Id,
+            FamilyGroupId = group.Id, FamilyMemberId = sibling.Id, Status = SubscriptionStatus.Active,
+            PaidAmount = new Money(13, "KWD"), StartDate = today, EndDate = today.AddDays(10), DurationDays = 10 };
+        ownMember.MemberSubscriptionId = ownSubscription.Id;
+        sibling.MemberSubscriptionId = siblingSubscription.Id;
+        group.Members.Add(ownMember);
+        group.Members.Add(sibling);
+        db.AddRange(program, bundle, group, ownSubscription, siblingSubscription,
+            new FamilyMemberAccess { FamilyMemberId = ownMember.Id, LinkedCustomerUserId = actor, HasSeparateAccount = true },
+            new FamilyMemberPermissions { FamilyMemberId = ownMember.Id, ViewProgram = false, ViewInvoices = false });
+        await db.SaveChangesAsync();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(new DateTime(2026, 10, 15, 9, 0, 0, DateTimeKind.Utc));
+        clock.TodayUtc.Returns(today);
+        var service = new CustomerSubscriptionQueryService(db, clock);
+
+        var current = await service.GetCurrentSubscriptionAsync(actor);
+        var subscriptions = await service.ListSubscriptionsAsync(actor, includeHistory: true);
+        var invoices = await service.GetInvoicesAsync(actor);
+        var subscriptionInvoices = await service.GetSubscriptionInvoicesAsync(ownSubscription.Id, actor);
+
+        current.Value.Subscription.Should().NotBeNull();
+        current.Value.Subscription!.SubscriptionId.Should().Be(ownSubscription.Id);
+        current.Value.Subscription.PaidAmount.Should().BeNull();
+        current.Value.Subscription.Actions.CanRenew.Should().BeFalse();
+        current.Value.Subscription.Actions.CanFreeze.Should().BeFalse();
+        current.Value.Subscription.Actions.CanCancel.Should().BeFalse();
+        current.Value.Subscription.Actions.CanUpgrade.Should().BeFalse();
+        subscriptions.Value.Should().ContainSingle().Which.SubscriptionId.Should().Be(ownSubscription.Id);
+        invoices.Value.Should().BeEmpty();
+        subscriptionInvoices.IsFailure.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Shared_service_resolver_ignores_paid_pointer_from_another_family()
     {
         await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
@@ -144,7 +195,8 @@ public sealed class FamilySubscriptionVisibilityTests
         familyPermissions.ViewFamilyPlans = false;
         familyPermissions.ViewProgram = false;
         await db.SaveChangesAsync();
-        (await service.GetArchivedSubscriptionsAsync(actor)).Value.Should().BeEmpty();
+        (await service.GetArchivedSubscriptionsAsync(actor)).Value.Should().ContainSingle()
+            .Which.SubscriptionId.Should().Be(sub.Id);
         var memberInvoices = await service.GetSubscriptionInvoicesAsync(sub.Id, actor);
         memberInvoices.Value.Should().ContainSingle().Which.Amount.Should().Be(7);
         var allInvoices = await service.GetInvoicesAsync(actor);
@@ -231,10 +283,9 @@ public sealed class FamilySubscriptionVisibilityTests
         historicalBasePayerInvoices.Value.Should().NotContain(x => x.ReceiptId == reviewReceipt.Id);
     }
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task Own_plan_and_invoice_grants_are_independent(bool plan, bool invoices)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Own_plan_is_always_visible_while_invoice_grant_is_independent(bool invoices)
     {
         await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options, Substitute.For<IDomainEventDispatcher>());
@@ -252,17 +303,17 @@ public sealed class FamilySubscriptionVisibilityTests
         group.Members.Add(member);
         db.AddRange(program, bundle, group, sub,
             new FamilyMemberAccess { FamilyMemberId = member.Id, LinkedCustomerUserId = actor, HasSeparateAccount = true },
-            new FamilyMemberPermissions { FamilyMemberId = member.Id, ViewProgram = plan, ViewInvoices = invoices });
+            new FamilyMemberPermissions { FamilyMemberId = member.Id, ViewProgram = false, ViewInvoices = invoices });
         await db.SaveChangesAsync();
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(new DateTime(2026, 10, 9, 12, 0, 0, DateTimeKind.Utc));
         clock.TodayUtc.Returns(new DateOnly(2026, 10, 9));
         var service = new CustomerSubscriptionQueryService(db, clock);
         var detail = await service.GetManagementDetailsAsync(sub.Id, actor);
-        detail.IsSuccess.Should().Be(plan);
-        if (plan && !invoices) ((object?)detail.Value.PaidAmount).Should().BeNull();
+        detail.IsSuccess.Should().BeTrue();
+        if (!invoices) ((object?)detail.Value.PaidAmount).Should().BeNull();
         var list = await service.ListSubscriptionsAsync(actor, true);
-        list.Value.Count.Should().Be(plan ? 1 : 0);
+        list.Value.Should().ContainSingle().Which.SubscriptionId.Should().Be(sub.Id);
         sub.CustomerUserId = actor;
         db.PaymentWebhookReceipts.Add(new PaymentWebhookReceipt { SubscriptionId = sub.Id, EventKey = "private-method",
             Gateway = "Payzah", Status = "Paid", VerifiedAtUtc = DateTime.UtcNow });

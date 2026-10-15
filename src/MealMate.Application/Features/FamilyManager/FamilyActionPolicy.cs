@@ -162,6 +162,11 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
         if (isOwnRow && action == FamilyAction.ChangePassword)
             return new(true, null, PermissionKey(action));
 
+        // Members always retain read access to their own plan. Invoice access,
+        // calendar access and every write action remain separately permissioned.
+        if (isOwnRow && action == FamilyAction.ViewPlan && member.Role == FamilyMemberRole.Member)
+            return new(true, null, PermissionKey(action));
+
         // Linked member acting on their own row (pause/disable checked above for
         // the actor's own access row).
         var permissions = await _db.FamilyMemberPermissions.AsNoTracking()

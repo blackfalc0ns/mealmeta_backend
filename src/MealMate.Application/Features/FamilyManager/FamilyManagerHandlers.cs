@@ -725,7 +725,8 @@ public sealed class FamilyManagerHandlers :
         if (request.Request.EditMealsAndDays is false) perms.EditMealsAndDays = false;
         if (request.Request.UnitExchange is false) perms.UnitExchange = false;
         if (request.Request.EditDailyMeals is { } editDailyMeals) perms.EditDailyMeals = editDailyMeals;
-        if (request.Request.ViewProgram is { } viewProgram) perms.ViewProgram = viewProgram;
+        // Own-plan visibility is a baseline member capability, not a manager grant.
+        perms.ViewProgram = true;
         if (request.Request.EditAddress is { } editAddress) perms.EditAddress = editAddress;
         if (request.Request.ViewCalendar is { } viewCalendar) perms.ViewCalendar = viewCalendar;
         if (request.Request.ViewInvoices is { } viewInvoices) perms.ViewInvoices = viewInvoices;
@@ -1076,7 +1077,7 @@ public sealed class FamilyManagerHandlers :
 
     private FamilyMemberPermissionsDto MapPermissions(FamilyMemberPermissions p)
         => new(
-            p.FamilyMemberId, p.EditDailyMeals, p.ChangeDeliveryTime, p.ViewProgram, p.ChangeProgram,
+            p.FamilyMemberId, p.EditDailyMeals, p.ChangeDeliveryTime, true, p.ChangeProgram,
             p.EditMealsAndDays, p.EditAddress, p.UnitExchange, true,
             FamilyPermissionCatalog.Groups(p, _messages),
             p.Version, p.ViewCalendar, p.ViewInvoices, p.SelectRestaurant, p.ConfirmMeals,

@@ -14,6 +14,10 @@
 10. التجديد: renewal-requests ثم family renewals/{renewalRequestId}/checkout. لا تستبدل الاشتراك الحالي بالقادم قبل تاريخ بدايته.
 11. freeze/upgrade/cancel: استعمل preview/options/quote ثم request والعقد المقابل؛ بعد النجاح أعد قراءة management والفواتير. الاسترداد يتبع payer المثبت على السيرفر.
 
+### مجموعة عائلية نشطة
+
+قد يرجع `family-subscription-flow/current` مجموعة `status=Active` عند فتح إجراء إدارة/إضافة أفراد لعائلة قائمة. في هذه الحالة اقرأ `/customer/family/home` و`/customer/family/members` لعرض الاشتراكات والخدمة القائمة، ولا تعرض شاشة شراء جديدة لمجرد أن current أعاد بيانات أفراد العائلة. اعرض الدفع فقط عندما يرجع summary `canCheckout=true`؛ إذا كان `false` فلا تبدأ checkout، واعرض أفراد الخدمة القائمة من شاشة الإدارة. بدء إضافة اشتراك جديد يجب أن يكون إجراءً صريحًا، ثم يعتمد اختيار المشتركين والسعر على summary الحالي.
+
 ## قبول إلزامي
 
 | السيناريو | النتيجة المطلوبة |
