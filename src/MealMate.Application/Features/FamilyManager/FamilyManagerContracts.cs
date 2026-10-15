@@ -121,7 +121,7 @@ public sealed record FamilyMemberAccessDto(
     bool PasswordAlreadyIssued = false,
     bool RequiresExplicitReset = false);
 
-public sealed record FamilyPermissionItemDto(string Key, string LabelAr, string LabelEn, bool Value,
+public sealed record FamilyPermissionItemDto(string Key, string LabelAr, string LabelEn, string DescriptionAr, string DescriptionEn, bool Value,
     bool IsSupported = true, bool IsManagerConfigurable = true, IReadOnlyList<string>? RequiredPermissions = null);
 
 public sealed record FamilyPermissionGroupDto(
@@ -214,6 +214,8 @@ public static class FamilyPermissionCatalog
         FamilyPermissionItemDto Item(string key, bool value, bool supported = true, bool configurable = true,
             params string[] required) => new(key,
             messages.GetArabicMessage($"family.permission.{key}"), messages.GetEnglishMessage($"family.permission.{key}"),
+            messages.GetArabicMessage($"family.permission_description.{key}"),
+            messages.GetEnglishMessage($"family.permission_description.{key}"),
             value, supported, supported && configurable, required.Length == 0 ? Array.Empty<string>() : required);
         FamilyPermissionGroupDto Group(string key, params FamilyPermissionItemDto[] items) => new(key,
             messages.GetArabicMessage($"family.permission_group.{key}"), messages.GetEnglishMessage($"family.permission_group.{key}"), items);
@@ -222,14 +224,14 @@ public static class FamilyPermissionCatalog
                 Item("selectRestaurant", p.SelectRestaurant, required: ["viewCalendar", "viewProgram"]),
                 Item("editDailyMeals", p.EditDailyMeals, required: ["viewCalendar", "viewProgram"]),
                 Item("confirmMeals", p.ConfirmMeals, required: ["viewCalendar", "viewProgram"]),
-                Item("editMealsAndDays", p.EditMealsAndDays, false), Item("unitExchange", p.UnitExchange, false)),
+                Item("editMealsAndDays", p.EditMealsAndDays, required: ["viewCalendar", "viewProgram"]),
+                Item("unitExchange", p.UnitExchange, required: ["viewCalendar", "viewProgram"])),
             Group("program", Item("viewProgram", true, configurable: false), Item("viewFamilyPlans", p.ViewFamilyPlans),
-                Item("changeProgram", p.ChangeProgram, false), Item("requestFreeze", p.RequestFreeze, required: ["viewProgram"]),
+                Item("requestFreeze", p.RequestFreeze, required: ["viewProgram"]),
                 Item("requestRenewal", p.RequestRenewal, required: ["viewProgram"]),
                 Item("requestUpgrade", p.RequestUpgrade, required: ["viewProgram"]),
                 Item("cancelSubscription", p.CancelSubscription, required: ["viewProgram"])),
-            Group("delivery", Item("changeDeliveryTime", p.ChangeDeliveryTime, false),
-                Item("editAddress", p.EditAddress, required: ["viewCalendar", "viewProgram"])),
+            Group("delivery", Item("editAddress", p.EditAddress, required: ["viewCalendar", "viewProgram"])),
             Group("account", Item("changePassword", true, configurable: false), Item("viewInvoices", p.ViewInvoices),
                 Item("viewFamilyInvoices", p.ViewFamilyInvoices))
         ];

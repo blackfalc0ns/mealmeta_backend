@@ -113,6 +113,24 @@ public sealed class FamilyCalendarAccessGateTests
         result.Value.CanEditDailyMeals.Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task New_calendar_write_grants_include_calendar_visibility(bool fillMeals, bool exchangeMeals)
+    {
+        var fx = await SeedFamilyAsync(linkMember: true);
+        var permissions = await fx.Db.FamilyMemberPermissions.SingleAsync();
+        permissions.EditMealsAndDays = fillMeals;
+        permissions.UnitExchange = exchangeMeals;
+        await fx.Db.SaveChangesAsync();
+
+        var gate = new FamilyCalendarAccessGate(fx.Db, fx.LinkedMember);
+        var result = await gate.AuthorizeAsync(fx.MemberSubscription, requireWrite: false, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.CanEditDailyMeals.Should().BeTrue();
+    }
+
     private static async Task<(AppDbContext Db, ICurrentUser Owner, Subscription Subscription)> SeedIndividualAsync()
     {
         var db = NewDb();

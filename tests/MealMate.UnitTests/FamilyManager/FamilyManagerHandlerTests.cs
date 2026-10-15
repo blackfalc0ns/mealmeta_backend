@@ -91,6 +91,35 @@ public sealed class FamilyManagerHandlerTests
         unsupported.Error.Code.Should().Be("family.permission_not_supported");
         permissions.ChangeProgram.Should().BeFalse();
     }
+
+    [Fact]
+    public async Task Permission_catalog_exposes_meal_fill_and_exchange_but_hides_removed_permissions()
+    {
+        var fx = await SeedAsync();
+        var permissions = await fx.Db.FamilyMemberPermissions.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        permissions.Version = 2;
+        await fx.Db.SaveChangesAsync();
+
+        var saved = await fx.Handlers.Handle(new UpdateFamilyMemberPermissionsCommand(fx.MemberId,
+            new UpdateFamilyMemberPermissionsRequest(null, null, null, null, true, null, true, null,
+                ExpectedVersion: 2)), CancellationToken.None);
+
+        saved.IsSuccess.Should().BeTrue();
+        saved.Value.EditMealsAndDays.Should().BeTrue();
+        saved.Value.UnitExchange.Should().BeTrue();
+        saved.Value.ViewCalendar.Should().BeTrue("calendar write grants require a discoverable calendar read surface");
+        var catalog = saved.Value.Groups.SelectMany(x => x.Permissions).ToList();
+        catalog.Should().HaveCount(17);
+        var fillPermission = catalog.Single(x => x.Key == "editMealsAndDays");
+        fillPermission.IsSupported.Should().BeTrue();
+        fillPermission.IsManagerConfigurable.Should().BeTrue();
+        fillPermission.RequiredPermissions.Should().BeEquivalentTo(new[] { "viewCalendar", "viewProgram" });
+        var exchangePermission = catalog.Single(x => x.Key == "unitExchange");
+        exchangePermission.IsSupported.Should().BeTrue();
+        exchangePermission.IsManagerConfigurable.Should().BeTrue();
+        exchangePermission.RequiredPermissions.Should().BeEquivalentTo(new[] { "viewCalendar", "viewProgram" });
+        catalog.Should().NotContain(x => x.Key is "changeProgram" or "changeDeliveryTime");
+    }
     [Theory]
     [InlineData(FamilyGroupStatus.Draft)]
     [InlineData(FamilyGroupStatus.CheckoutPending)]

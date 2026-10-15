@@ -66,7 +66,24 @@ Changed linked phone numbers require a verified identity-change flow. Ordinary m
 
 ## Permissions
 
+Implementation details for all 17 permissions, their screen behavior, descriptions and API routes: [Family permissions mobile implementation guide](./family-permissions-mobile-implementation-guide.md).
+
 Read: `GET members/{memberId}/permissions`. Write: `PUT members/{memberId}/permissions` with `expectedVersion` and only the changed keys. All permission booleans are nullable patch inputs: omissions preserve existing values. Never send `groups` as a request body substitute.
+
+Each catalog item returns `labelAr`, `labelEn`, `descriptionAr`, and `descriptionEn`. Show the description under the permission name using the app's active language; when a field is missing, fall back to its counterpart in the other language. Do not hardcode a second mobile permission glossary. Example:
+
+```json
+{
+  "key": "editMealsAndDays",
+  "labelAr": "تعديل الوجبات والأيام",
+  "labelEn": "Edit meals and days",
+  "descriptionAr": "يسمح بإضافة وجبات إلى خانات اليوم المتاحة واستكمال وجبات اليوم، ولا يسمح وحده باستبدال وجبة مختارة.",
+  "descriptionEn": "Lets the member add meals to available slots and fill a day's meals; by itself it does not allow replacing a selected meal.",
+  "value": false,
+  "isSupported": true,
+  "isManagerConfigurable": true
+}
+```
 
 ```json
 { "expectedVersion": 4, "editDailyMeals": true }
@@ -74,7 +91,7 @@ Read: `GET members/{memberId}/permissions`. Write: `PUT members/{memberId}/permi
 
 Calendar write grants carry `viewCalendar` and `viewProgram` prerequisites; own calendar read and supported service-management grants carry own plan-read prerequisites. The persisted response returns these derived grants. Read access does not grant write access. Invoice access stays financially independent: plan permission does not grant invoice permission, and invoice permission alone does not grant plan data.
 
-Catalog items include `isSupported`, `isManagerConfigurable`, and `requiredPermissions`. Hide or disable unsupported controls. `changePassword` is customer-owned and not manager-configurable. Granting an unsupported legacy action is rejected; storing true does not create a feature.
+Catalog items include `isSupported`, `isManagerConfigurable`, and `requiredPermissions`. Hide or disable unsupported controls. `viewProgram` and `changePassword` are baseline permissions and not manager-configurable. `editMealsAndDays` adds meals to available slots and completes a day's selections; `unitExchange` replaces a selected meal in an open, editable day. `editDailyMeals` remains the broader legacy permission. `changeProgram` and `changeDeliveryTime` are not in the manager catalog, and granting either legacy field is rejected.
 
 For newly initialized member access, minimum own plan/calendar reading is initialized. Existing saved deliberate permissions are preserved. On `409 family.permissions_changed`, refresh and show a conflict; never silently overwrite another session's edits. Capabilities are authorization, not a guarantee that a day/service operation is currently available.
 

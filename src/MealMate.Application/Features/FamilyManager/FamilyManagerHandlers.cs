@@ -354,6 +354,10 @@ public sealed class FamilyManagerHandlers :
                 actorId, m.Id, FamilyAction.ViewInvoices, cancellationToken)).Allowed;
             var canEditDailyMeals = (await _familyPolicy.EvaluateAsync(
                 actorId, m.Id, FamilyAction.EditDailyMeals, cancellationToken)).Allowed;
+            var canFillMealsAndDays = (await _familyPolicy.EvaluateAsync(
+                actorId, m.Id, FamilyAction.EditMealsAndDays, cancellationToken)).Allowed;
+            var canExchangeMeals = (await _familyPolicy.EvaluateAsync(
+                actorId, m.Id, FamilyAction.UnitExchange, cancellationToken)).Allowed;
             var canViewSiblingPlan = isTargetGroupManager || canViewProgram;
             var canViewSiblingCalendar = isTargetGroupManager || canViewCalendar;
             var canViewSiblingInvoices = isTargetGroupManager || canViewInvoices;
@@ -371,7 +375,7 @@ public sealed class FamilyManagerHandlers :
                 canViewSiblingPlan ? programEn : null,
                 ownRow ? imageUrl : null,
                 ownRow && memberAccess?.IsPaused == true,
-                ownRow && canEditDailyMeals,
+                ownRow && (canEditDailyMeals || canFillMealsAndDays || canExchangeMeals),
                 ownRow ? m.SetupStatus : null,
                 canViewSiblingCalendar,
                 canViewSiblingPlan,
@@ -717,13 +721,12 @@ public sealed class FamilyManagerHandlers :
         var perms = await EnsurePermissionsAsync(loaded.Value.Member, cancellationToken);
         if (perms.Version != request.Request.ExpectedVersion)
             return Error.Conflict("family.permissions_changed");
-        if (request.Request.ChangeDeliveryTime == true || request.Request.ChangeProgram == true
-            || request.Request.EditMealsAndDays == true || request.Request.UnitExchange == true)
+        if (request.Request.ChangeDeliveryTime == true || request.Request.ChangeProgram == true)
             return Error.Validation("family.permission_not_supported");
         if (request.Request.ChangeDeliveryTime is false) perms.ChangeDeliveryTime = false;
         if (request.Request.ChangeProgram is false) perms.ChangeProgram = false;
-        if (request.Request.EditMealsAndDays is false) perms.EditMealsAndDays = false;
-        if (request.Request.UnitExchange is false) perms.UnitExchange = false;
+        if (request.Request.EditMealsAndDays is { } editMealsAndDays) perms.EditMealsAndDays = editMealsAndDays;
+        if (request.Request.UnitExchange is { } unitExchange) perms.UnitExchange = unitExchange;
         if (request.Request.EditDailyMeals is { } editDailyMeals) perms.EditDailyMeals = editDailyMeals;
         // Own-plan visibility is a baseline member capability, not a manager grant.
         perms.ViewProgram = true;
@@ -740,9 +743,10 @@ public sealed class FamilyManagerHandlers :
         if (request.Request.ViewFamilyPlans is { } viewFamilyPlans) perms.ViewFamilyPlans = viewFamilyPlans;
         if (request.Request.ViewFamilyInvoices is { } viewFamilyInvoices) perms.ViewFamilyInvoices = viewFamilyInvoices;
         // A granted service action must remain discoverable through its read surface.
-        if (perms.SelectRestaurant || perms.EditDailyMeals || perms.ConfirmMeals || perms.EditAddress)
+        if (perms.SelectRestaurant || perms.EditDailyMeals || perms.EditMealsAndDays || perms.UnitExchange
+            || perms.ConfirmMeals || perms.EditAddress)
             perms.ViewCalendar = true;
-        if (perms.ViewCalendar || perms.SelectRestaurant || perms.EditDailyMeals
+        if (perms.ViewCalendar || perms.SelectRestaurant || perms.EditDailyMeals || perms.EditMealsAndDays || perms.UnitExchange
             || perms.ConfirmMeals || perms.EditAddress || perms.RequestFreeze || perms.RequestRenewal
             || perms.RequestUpgrade || perms.CancelSubscription)
             perms.ViewProgram = true;

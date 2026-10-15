@@ -373,6 +373,8 @@ public sealed class AuthSessionService : IAuthSessionService
             AddFamilyPermission(mergedPermissions, grants.ViewInvoices, nameof(FamilyMemberPermissions.ViewInvoices));
             AddFamilyPermission(mergedPermissions, grants.SelectRestaurant, nameof(FamilyMemberPermissions.SelectRestaurant));
             AddFamilyPermission(mergedPermissions, grants.EditDailyMeals, nameof(FamilyMemberPermissions.EditDailyMeals));
+            AddFamilyPermission(mergedPermissions, grants.EditMealsAndDays, nameof(FamilyMemberPermissions.EditMealsAndDays));
+            AddFamilyPermission(mergedPermissions, grants.UnitExchange, nameof(FamilyMemberPermissions.UnitExchange));
             AddFamilyPermission(mergedPermissions, grants.ConfirmMeals, nameof(FamilyMemberPermissions.ConfirmMeals));
             AddFamilyPermission(mergedPermissions, grants.EditAddress, nameof(FamilyMemberPermissions.EditAddress));
             AddFamilyPermission(mergedPermissions, grants.ChangePassword, nameof(FamilyMemberPermissions.ChangePassword));

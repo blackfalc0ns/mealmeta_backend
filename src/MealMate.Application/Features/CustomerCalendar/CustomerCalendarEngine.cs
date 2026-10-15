@@ -375,10 +375,13 @@ public sealed class CustomerCalendarEngine
 
     public Task<Result<CustomerCalendarDayDto>> SelectSlotMealAsync(
         Guid subscriptionId, DateOnly date, Guid mealId, string slot, CancellationToken ct)
-        => WithContext(subscriptionId, requireOwner: true, requireWrite: true, ct, async ctx =>
+        => WithContext(subscriptionId, requireOwner: true, requireWrite: true, ct, FamilyAction.ViewCalendar, async ctx =>
         {
             var day = ctx.Day(date);
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
+            var legacyEdit = await _accessGate.AuthorizeAsync(ctx.Subscription, FamilyAction.EditDailyMeals, ct);
+            var addMeal = await _accessGate.AuthorizeAsync(ctx.Subscription, FamilyAction.EditMealsAndDays, ct);
+            var exchangeMeal = await _accessGate.AuthorizeAsync(ctx.Subscription, FamilyAction.UnitExchange, ct);
             var edit = EnsureEditable(ctx, day, allowAfterDeadline: false);
             if (edit.IsFailure) return edit.Error;
 
@@ -439,6 +442,9 @@ public sealed class CustomerCalendarEngine
             var slotMeals = existing.Where(x => meals.Any(m => m.MealId == x.MealId && m.Slot.Equals(slot, StringComparison.OrdinalIgnoreCase))).ToList();
             if (existing.Any(x => x.MealId == mealId))
                 return Result.Success(await MapDayAsync(ctx, day, ct));
+            var requiredGrant = slotMeals.Count >= requirement.Count ? exchangeMeal : addMeal;
+            if (requiredGrant.IsFailure && legacyEdit.IsFailure)
+                return requiredGrant.Error;
             if (slotMeals.Count >= requirement.Count)
             {
                 var replaced = slotMeals[^1];
@@ -492,10 +498,13 @@ public sealed class CustomerCalendarEngine
         });
 
     public Task<Result<CustomerCalendarDayDto>> CompleteBoxAsync(Guid subscriptionId, DateOnly date, string? idempotencyKey, CancellationToken ct)
-        => WithContext(subscriptionId, requireOwner: true, requireWrite: true, ct, async ctx =>
+        => WithContext(subscriptionId, requireOwner: true, requireWrite: true, ct, FamilyAction.ViewCalendar, async ctx =>
         {
             var day = ctx.Day(date);
             if (day is null) return Error.NotFound(MessageCodes.Calendar.DayUnavailable);
+            var editPermission = await _accessGate.AuthorizeAsync(ctx.Subscription, FamilyAction.EditMealsAndDays, ct);
+            var legacyEdit = await _accessGate.AuthorizeAsync(ctx.Subscription, FamilyAction.EditDailyMeals, ct);
+            if (editPermission.IsFailure && legacyEdit.IsFailure) return editPermission.Error;
             if ((day.Status is SubscriptionDayStatus.CustomerSelected or SubscriptionDayStatus.SentToRestaurant) && IsBoxComplete(ctx, day))
                 return Result.Success(await MapDayAsync(ctx, day, ct));
             var edit = EnsureEditable(ctx, day, allowAfterDeadline: false);

@@ -107,7 +107,48 @@ public sealed class CustomerCalendarHandlerTests
         result.Error.Code.Should().Be("family.permission_required");
     }
 
-    private static async Task AttachFamilyMemberAsync(Fixture fx, bool editMeals, bool selectRestaurant)
+    [Fact]
+    public async Task EditMealsAndDays_allows_filling_and_completing_a_day_without_allowing_exchange()
+    {
+        var fx = await SeedAsync();
+        await AttachFamilyMemberAsync(fx, editMeals: false, selectRestaurant: true, editMealsAndDays: true);
+        await FillBox(fx, Day1, fx.RestaurantA, fx.BreakfastA, fx.LunchA, fx.DinnerA);
+
+        var exchange = await fx.Handlers.Handle(new SelectCustomerDaySlotMealCommand(
+            fx.SubscriptionId, Day1, fx.BreakfastAllergen, "breakfast"), CancellationToken.None);
+        exchange.IsFailure.Should().BeTrue();
+        exchange.Error.Code.Should().Be("family.permission_required");
+
+        var complete = await fx.Handlers.Handle(new CompleteCustomerDayBoxCommand(fx.SubscriptionId, Day1), CancellationToken.None);
+        complete.IsSuccess.Should().BeTrue();
+        complete.Value.Status.Should().Be(SubscriptionDayStatus.CustomerSelected);
+    }
+
+    [Fact]
+    public async Task UnitExchange_allows_replacing_meal_in_open_day_but_not_filling_empty_slot()
+    {
+        var fx = await SeedAsync();
+        await AttachFamilyMemberAsync(fx, editMeals: true, selectRestaurant: true);
+        await SelectRestaurant(fx, Day1, fx.RestaurantA);
+        await SelectSlot(fx, Day1, fx.BreakfastA, "breakfast");
+        var permissions = await fx.Db.FamilyMemberPermissions.SingleAsync();
+        permissions.EditDailyMeals = false;
+        permissions.UnitExchange = true;
+        await fx.Db.SaveChangesAsync();
+
+        var exchange = await fx.Handlers.Handle(new SelectCustomerDaySlotMealCommand(
+            fx.SubscriptionId, Day1, fx.BreakfastAllergen, "breakfast"), CancellationToken.None);
+        exchange.IsSuccess.Should().BeTrue();
+        exchange.Value.SelectedMeals.Should().ContainSingle(x => x.MealId == fx.BreakfastAllergen);
+
+        var add = await fx.Handlers.Handle(new SelectCustomerDaySlotMealCommand(
+            fx.SubscriptionId, Day1, fx.LunchA, "lunch"), CancellationToken.None);
+        add.IsFailure.Should().BeTrue();
+        add.Error.Code.Should().Be("family.permission_required");
+    }
+
+    private static async Task AttachFamilyMemberAsync(Fixture fx, bool editMeals, bool selectRestaurant,
+        bool editMealsAndDays = false, bool unitExchange = false)
     {
         var group = new FamilyGroup { ManagerCustomerUserId = Guid.NewGuid(), Name = "Family", Status = FamilyGroupStatus.Active };
         var member = new FamilyMember { FamilyGroupId = group.Id, DisplayName = "Member", Role = FamilyMemberRole.Member,
@@ -165,7 +206,8 @@ public sealed class CustomerCalendarHandlerTests
         }));
         fx.Db.AddRange(
             new FamilyMemberAccess { FamilyMemberId = member.Id, LinkedCustomerUserId = fx.CustomerId, HasSeparateAccount = true },
-            new FamilyMemberPermissions { FamilyMemberId = member.Id, ViewCalendar = true, EditDailyMeals = editMeals, SelectRestaurant = selectRestaurant });
+            new FamilyMemberPermissions { FamilyMemberId = member.Id, ViewCalendar = true, EditDailyMeals = editMeals,
+                EditMealsAndDays = editMealsAndDays, UnitExchange = unitExchange, SelectRestaurant = selectRestaurant });
         await fx.Db.SaveChangesAsync();
     }
 

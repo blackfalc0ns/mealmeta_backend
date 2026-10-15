@@ -950,6 +950,23 @@
   <data name="family.permission.requestRenewal" xml:space="preserve"><value>طلب تجديد الاشتراك</value></data>
   <data name="family.permission.requestUpgrade" xml:space="preserve"><value>طلب ترقية الاشتراك</value></data>
   <data name="family.permission.cancelSubscription" xml:space="preserve"><value>إلغاء الاشتراك</value></data>
+  <data name="family.permission_description.viewCalendar" xml:space="preserve"><value>يسمح للعضو بعرض تقويم اشتراكه والوجبات وحالة أيامه.</value></data>
+  <data name="family.permission_description.viewFamilyCalendars" xml:space="preserve"><value>يسمح للعضو بعرض تقاويم الأعضاء الآخرين في العائلة.</value></data>
+  <data name="family.permission_description.viewProgram" xml:space="preserve"><value>يسمح للعضو بعرض برنامجه وبيانات اشتراكه. هذه صلاحية أساسية مفعّلة دائمًا.</value></data>
+  <data name="family.permission_description.viewFamilyPlans" xml:space="preserve"><value>يسمح للعضو بعرض البرامج والخطط الخاصة بباقي أفراد العائلة.</value></data>
+  <data name="family.permission_description.viewInvoices" xml:space="preserve"><value>يسمح للعضو بعرض فواتير اشتراكه هو.</value></data>
+  <data name="family.permission_description.viewFamilyInvoices" xml:space="preserve"><value>يسمح للعضو بعرض فواتير اشتراكات أفراد العائلة.</value></data>
+  <data name="family.permission_description.selectRestaurant" xml:space="preserve"><value>يسمح للعضو باختيار مطعم متاح ليوم الخدمة.</value></data>
+  <data name="family.permission_description.editDailyMeals" xml:space="preserve"><value>يسمح بإضافة الوجبات أو تغييرها أو استخدامها في الاختيار التلقائي؛ وهي صلاحية التعديل القديمة الواسعة.</value></data>
+  <data name="family.permission_description.confirmMeals" xml:space="preserve"><value>يسمح بتأكيد وجبات اليوم المكتمل وإرسالها إلى المطعم.</value></data>
+  <data name="family.permission_description.editMealsAndDays" xml:space="preserve"><value>يسمح بإضافة وجبات إلى خانات اليوم المتاحة واستكمال وجبات اليوم، ولا يسمح وحده باستبدال وجبة مختارة.</value></data>
+  <data name="family.permission_description.unitExchange" xml:space="preserve"><value>يسمح باستبدال وجبة مختارة بوجبة أخرى ما دام اليوم مفتوحًا وقابلًا للتعديل.</value></data>
+  <data name="family.permission_description.editAddress" xml:space="preserve"><value>يسمح بتعديل عنوان توصيل اشتراك العضو.</value></data>
+  <data name="family.permission_description.changePassword" xml:space="preserve"><value>يسمح للعضو بتغيير كلمة مرور حسابه. هذه صلاحية أساسية مفعّلة دائمًا.</value></data>
+  <data name="family.permission_description.requestFreeze" xml:space="preserve"><value>يسمح للعضو ببدء إجراء طلب تجميد اشتراكه.</value></data>
+  <data name="family.permission_description.requestRenewal" xml:space="preserve"><value>يسمح للعضو ببدء إجراء تجديد اشتراكه.</value></data>
+  <data name="family.permission_description.requestUpgrade" xml:space="preserve"><value>يسمح للعضو ببدء إجراء ترقية اشتراكه.</value></data>
+  <data name="family.permission_description.cancelSubscription" xml:space="preserve"><value>يسمح للعضو ببدء إجراء إلغاء اشتراكه.</value></data>
   <data name="family.permission_group.meals" xml:space="preserve"><value>الوجبات</value></data>
   <data name="family.permission_group.program" xml:space="preserve"><value>البرنامج والاشتراك</value></data>
   <data name="family.permission_group.delivery" xml:space="preserve"><value>التوصيل</value></data>

@@ -1008,6 +1008,23 @@
   <data name="family.permission.requestRenewal" xml:space="preserve"><value>Request subscription renewal</value></data>
   <data name="family.permission.requestUpgrade" xml:space="preserve"><value>Request subscription upgrade</value></data>
   <data name="family.permission.cancelSubscription" xml:space="preserve"><value>Cancel subscription</value></data>
+  <data name="family.permission_description.viewCalendar" xml:space="preserve"><value>Lets the member view their subscription calendar, selected meals, and day statuses.</value></data>
+  <data name="family.permission_description.viewFamilyCalendars" xml:space="preserve"><value>Lets the member view the calendars of other family members.</value></data>
+  <data name="family.permission_description.viewProgram" xml:space="preserve"><value>Lets the member view their program and subscription details. This baseline permission is always enabled.</value></data>
+  <data name="family.permission_description.viewFamilyPlans" xml:space="preserve"><value>Lets the member view the programs and plans of other family members.</value></data>
+  <data name="family.permission_description.viewInvoices" xml:space="preserve"><value>Lets the member view invoices for their own subscription.</value></data>
+  <data name="family.permission_description.viewFamilyInvoices" xml:space="preserve"><value>Lets the member view invoices for family members' subscriptions.</value></data>
+  <data name="family.permission_description.selectRestaurant" xml:space="preserve"><value>Lets the member choose an available restaurant for a service day.</value></data>
+  <data name="family.permission_description.editDailyMeals" xml:space="preserve"><value>Lets the member add or change meal selections and use automatic meal selection; this is the broader legacy meal-edit permission.</value></data>
+  <data name="family.permission_description.confirmMeals" xml:space="preserve"><value>Lets the member confirm a completed day's meals and send them to the restaurant.</value></data>
+  <data name="family.permission_description.editMealsAndDays" xml:space="preserve"><value>Lets the member add meals to available slots and fill a day's meals; by itself it does not allow replacing a selected meal.</value></data>
+  <data name="family.permission_description.unitExchange" xml:space="preserve"><value>Lets the member replace a selected meal while the day is open and editable.</value></data>
+  <data name="family.permission_description.editAddress" xml:space="preserve"><value>Lets the member update the delivery address for their subscription.</value></data>
+  <data name="family.permission_description.changePassword" xml:space="preserve"><value>Lets the member change their account password. This baseline permission is always enabled.</value></data>
+  <data name="family.permission_description.requestFreeze" xml:space="preserve"><value>Lets the member start a request to freeze their subscription.</value></data>
+  <data name="family.permission_description.requestRenewal" xml:space="preserve"><value>Lets the member start the renewal flow for their subscription.</value></data>
+  <data name="family.permission_description.requestUpgrade" xml:space="preserve"><value>Lets the member start the upgrade flow for their subscription.</value></data>
+  <data name="family.permission_description.cancelSubscription" xml:space="preserve"><value>Lets the member start the cancellation flow for their subscription.</value></data>
   <data name="family.permission_group.meals" xml:space="preserve"><value>Meals</value></data>
   <data name="family.permission_group.program" xml:space="preserve"><value>Plan and subscription</value></data>
   <data name="family.permission_group.delivery" xml:space="preserve"><value>Delivery</value></data>

@@ -119,8 +119,7 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
             return new(false, "family.member_detached", PermissionKey(action));
         }
 
-        if (action is FamilyAction.EditMealsAndDays or FamilyAction.ChangeProgram
-            or FamilyAction.ChangeDeliveryTime or FamilyAction.UnitExchange)
+        if (action is FamilyAction.ChangeProgram or FamilyAction.ChangeDeliveryTime)
             return new(false, "family.action_not_available", PermissionKey(action));
 
         var isOwnRow = actorAccess is not null && actorAccess.FamilyMemberId == member.Id;
@@ -175,7 +174,8 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
             return new(false, "family.permission_required", PermissionKey(action));
 
         // Legacy rows may have writes enabled without their required read grants.
-        var calendarWrite = permissions.SelectRestaurant || permissions.EditDailyMeals || permissions.ConfirmMeals || permissions.EditAddress;
+        var calendarWrite = permissions.SelectRestaurant || permissions.EditDailyMeals || permissions.EditMealsAndDays
+            || permissions.UnitExchange || permissions.ConfirmMeals || permissions.EditAddress;
         if (action == FamilyAction.ViewCalendar && calendarWrite)
             return new(true, null, PermissionKey(action));
         if (action == FamilyAction.ViewPlan && (permissions.ViewCalendar || calendarWrite

@@ -42,9 +42,13 @@ public sealed class FamilyCalendarAccessGate : IFamilyCalendarAccessGate
             return Error.Forbidden(MessageCodes.Auth.Forbidden);
         var authorization = await _access.AuthorizeAsync(subscription, actorId, action, cancellationToken);
         if (authorization.IsFailure) return authorization.Error;
-        var edit = action == FamilyAction.EditDailyMeals
+        var edit = action == FamilyAction.EditDailyMeals || action == FamilyAction.EditMealsAndDays || action == FamilyAction.UnitExchange
             ? authorization
             : await _access.AuthorizeAsync(subscription, actorId, FamilyAction.EditDailyMeals, cancellationToken);
-        return new FamilyCalendarAccess(authorization.Value.IsManager, authorization.Value.MemberId, edit.IsSuccess);
+        var canEdit = edit.IsSuccess;
+        if (!canEdit)
+            canEdit = (await _access.AuthorizeAsync(subscription, actorId, FamilyAction.EditMealsAndDays, cancellationToken)).IsSuccess
+                || (await _access.AuthorizeAsync(subscription, actorId, FamilyAction.UnitExchange, cancellationToken)).IsSuccess;
+        return new FamilyCalendarAccess(authorization.Value.IsManager, authorization.Value.MemberId, canEdit);
     }
 }

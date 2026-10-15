@@ -127,7 +127,7 @@ public sealed class FamilyApiBoundaryTests
         foreach (var capability in context.GetProperty("capabilities").EnumerateArray())
         {
             var unsupported = capability.GetProperty("action").GetString() is
-                "EditMealsAndDays" or "ChangeProgram" or "ChangeDeliveryTime" or "UnitExchange";
+                "ChangeProgram" or "ChangeDeliveryTime";
             Assert.Equal(!unsupported, capability.GetProperty("allowed").GetBoolean());
         }
 
@@ -191,7 +191,7 @@ public sealed class FamilyApiBoundaryTests
         var rows = await capabilities.Content.ReadFromJsonAsync<JsonElement>();
         foreach (var row in rows.EnumerateArray())
         {
-            var unsupported = new[] { "UnitExchange", "ChangeProgram", "EditMealsAndDays", "ChangeDeliveryTime" }
+            var unsupported = new[] { "ChangeProgram", "ChangeDeliveryTime" }
                 .Contains(row.GetProperty("action").GetString());
             Assert.Equal(!unsupported, row.GetProperty("allowed").GetBoolean());
             if (!unsupported) Assert.Equal(JsonValueKind.Null, row.GetProperty("reasonCode").ValueKind);
@@ -202,9 +202,18 @@ public sealed class FamilyApiBoundaryTests
         using var catalog = await fx.Get(fx.Manager, $"members/{fx.Member.Id}/permissions");
         var permissions = await catalog.Content.ReadFromJsonAsync<JsonElement>();
         var items = permissions.GetProperty("groups").EnumerateArray().SelectMany(x => x.GetProperty("permissions").EnumerateArray()).ToList();
-        Assert.Equal(19, items.Count);
+        Assert.Equal(17, items.Count);
+        Assert.All(items.Where(x => x.GetProperty("key").GetString() is "editMealsAndDays" or "unitExchange"),
+            x => { Assert.True(x.GetProperty("isSupported").GetBoolean()); Assert.True(x.GetProperty("isManagerConfigurable").GetBoolean());
+                Assert.Equal(new[] { "viewCalendar", "viewProgram" }, x.GetProperty("requiredPermissions").EnumerateArray()
+                    .Select(value => value.GetString()).ToArray()); });
+        Assert.DoesNotContain(items, x => x.GetProperty("key").GetString() is "changeProgram" or "changeDeliveryTime");
         Assert.All(items, x => { Assert.NotEqual(x.GetProperty("labelAr").GetString(), x.GetProperty("labelEn").GetString());
-            Assert.DoesNotContain("family.permission.", x.GetProperty("labelEn").GetString()); });
+            Assert.DoesNotContain("family.permission.", x.GetProperty("labelEn").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(x.GetProperty("descriptionAr").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(x.GetProperty("descriptionEn").GetString()));
+            Assert.NotEqual(x.GetProperty("descriptionAr").GetString(), x.GetProperty("descriptionEn").GetString());
+            Assert.DoesNotContain("family.permission_description.", x.GetProperty("descriptionEn").GetString()); });
         foreach (var status in new[] { FamilyGroupStatus.Draft, FamilyGroupStatus.CheckoutPending, FamilyGroupStatus.Active })
         {
             fx.Group.Status = status;

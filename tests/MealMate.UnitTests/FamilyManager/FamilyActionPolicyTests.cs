@@ -41,8 +41,7 @@ public sealed class FamilyActionPolicyTests
         fx.MemberAccess.DetachedFromFamilyManagement = true;
         await fx.Db.SaveChangesAsync();
 
-        var unsupported = new[] { FamilyAction.EditMealsAndDays, FamilyAction.ChangeProgram,
-            FamilyAction.ChangeDeliveryTime, FamilyAction.UnitExchange };
+        var unsupported = new[] { FamilyAction.ChangeProgram, FamilyAction.ChangeDeliveryTime };
         foreach (var action in Enum.GetValues<FamilyAction>())
         {
             var own = await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, action);
@@ -65,8 +64,7 @@ public sealed class FamilyActionPolicyTests
         using var fx = new Fixture();
         fx.MemberAccess.DetachedFromFamilyManagement = true;
         await fx.Db.SaveChangesAsync();
-        var unsupported = new[] { FamilyAction.EditMealsAndDays, FamilyAction.ChangeProgram,
-            FamilyAction.ChangeDeliveryTime, FamilyAction.UnitExchange };
+        var unsupported = new[] { FamilyAction.ChangeProgram, FamilyAction.ChangeDeliveryTime };
         foreach (var action in Enum.GetValues<FamilyAction>())
         {
             var decision = await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, action);
@@ -88,8 +86,7 @@ public sealed class FamilyActionPolicyTests
             .Handle(new GetMyFamilyCapabilitiesQuery(fx.Member.Id), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        var unsupported = new[] { FamilyAction.EditMealsAndDays, FamilyAction.ChangeProgram,
-            FamilyAction.ChangeDeliveryTime, FamilyAction.UnitExchange };
+        var unsupported = new[] { FamilyAction.ChangeProgram, FamilyAction.ChangeDeliveryTime };
         foreach (var capability in result.Value)
         {
             capability.Allowed.Should().Be(!unsupported.Contains(Enum.Parse<FamilyAction>(capability.Action)));
@@ -184,6 +181,23 @@ public sealed class FamilyActionPolicyTests
             .Should().BeFalse();
         (await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, FamilyAction.ChangePassword)).Allowed
             .Should().BeTrue("credentials belong to the authenticated customer");
+    }
+
+    [Theory]
+    [InlineData(FamilyAction.EditMealsAndDays)]
+    [InlineData(FamilyAction.UnitExchange)]
+    public async Task Member_can_use_each_new_calendar_grant_independently(FamilyAction action)
+    {
+        using var fx = new Fixture();
+        if (action == FamilyAction.EditMealsAndDays) fx.Permissions!.EditMealsAndDays = true;
+        if (action == FamilyAction.UnitExchange) fx.Permissions!.UnitExchange = true;
+        await fx.Db.SaveChangesAsync();
+
+        (await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, action)).Allowed.Should().BeTrue();
+        (await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id,
+            action == FamilyAction.EditMealsAndDays ? FamilyAction.UnitExchange : FamilyAction.EditMealsAndDays))
+            .Allowed.Should().BeFalse("the two permissions cover different calendar actions");
+        (await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, FamilyAction.ViewCalendar)).Allowed.Should().BeTrue();
     }
 
     [Theory]
@@ -370,10 +384,8 @@ public sealed class FamilyActionPolicyTests
     }
 
     [Theory]
-    [InlineData(FamilyAction.EditMealsAndDays)]
     [InlineData(FamilyAction.ChangeProgram)]
     [InlineData(FamilyAction.ChangeDeliveryTime)]
-    [InlineData(FamilyAction.UnitExchange)]
     public async Task Unimplemented_actions_are_unavailable_even_for_manager(FamilyAction action)
     {
         using var fx = new Fixture();
