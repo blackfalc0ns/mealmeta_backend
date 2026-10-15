@@ -772,6 +772,11 @@ public sealed class FamilyManagerHandlers :
             if (!await _db.FamilyMemberPermissions.AsNoTracking().AnyAsync(x => x.FamilyMemberId == request.MemberId, cancellationToken)) throw;
             return Error.Conflict("family.permissions_changed");
         }
+        // Permission grants are embedded in the member's access token at login.
+        // Revoke existing sessions so a member cannot keep using stale grants
+        // after the manager changes this row; the next login issues fresh claims.
+        if (_sessions is not null && loaded.Value.Access?.LinkedCustomerUserId is Guid linkedUserId)
+            await _sessions.RevokeAllUserTokensAsync(linkedUserId, cancellationToken);
         return Result.Success(MapPermissions(perms));
     }
 
