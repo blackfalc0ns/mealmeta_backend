@@ -163,6 +163,14 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             .Include(x => x.Members)
             .Where(x => x.ManagerCustomerUserId == customerUserId
                 && (x.Status == FamilyGroupStatus.Draft || x.Status == FamilyGroupStatus.CheckoutPending))
+            // A stale draft must not be presented as a new subscription when the
+            // same family already has a funded/live member subscription.
+            .Where(x => !_db.Subscriptions.Any(subscription =>
+                subscription.FamilyGroupId == x.Id
+                && (subscription.Status == SubscriptionStatus.Paid
+                    || subscription.Status == SubscriptionStatus.Scheduled
+                    || subscription.Status == SubscriptionStatus.Active
+                    || subscription.Status == SubscriptionStatus.Frozen)))
             .OrderByDescending(x => x.CreatedAtUtc)
             .ToListAsync(ct);
         foreach (var group in familyDrafts)
