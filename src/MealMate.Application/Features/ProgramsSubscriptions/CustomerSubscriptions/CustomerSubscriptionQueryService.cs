@@ -85,6 +85,23 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
 
     public async Task<Result<IReadOnlyList<CustomerUncompletedSubscriptionDto>>> GetUncompletedSubscriptionsAsync(Guid customerUserId, CancellationToken ct = default)
     {
+        // A managed family member may view their funded subscription through the
+        // normal customer screens, but cannot start or resume any subscription
+        // checkout. Family subscription setup belongs to the group manager.
+        var isManagedFamilyMember = await (from access in _db.FamilyMemberAccesses.AsNoTracking()
+                                           join member in _db.FamilyMembers.AsNoTracking() on access.FamilyMemberId equals member.Id
+                                           join familyGroup in _db.FamilyGroups.AsNoTracking() on member.FamilyGroupId equals familyGroup.Id
+                                           where access.LinkedCustomerUserId == customerUserId
+                                               && access.RemovedAtUtc == null
+                                               && !access.DetachedFromFamilyManagement
+                                               && !access.IsPaused
+                                               && !member.IsDeleted
+                                               && !familyGroup.IsDeleted
+                                               && familyGroup.ManagerCustomerUserId != customerUserId
+                                           select access.FamilyMemberId).AnyAsync(ct);
+        if (isManagedFamilyMember)
+            return Result.Success<IReadOnlyList<CustomerUncompletedSubscriptionDto>>([]);
+
         var uncompletedStatuses = new[]
         {
             SubscriptionStatus.Draft,
