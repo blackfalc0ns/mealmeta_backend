@@ -1002,8 +1002,7 @@ public sealed class FamilyManagerHandlerTests
             .Returns(Task.CompletedTask);
 
         var result = await fx.Handlers.Handle(new UpdateFamilyMemberAccessCommand(fx.MemberId,
-            new UpdateFamilyMemberAccessRequest(true, false, null,
-                CredentialOperationKey: "family-create-enable-operation-001")), CancellationToken.None);
+            new UpdateFamilyMemberAccessRequest(true, false, null)), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
         result.Value.GeneratedPassword.Should().NotBeNullOrWhiteSpace();

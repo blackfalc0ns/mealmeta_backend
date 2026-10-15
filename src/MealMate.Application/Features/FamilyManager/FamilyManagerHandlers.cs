@@ -478,6 +478,13 @@ public sealed class FamilyManagerHandlers :
         if (request.Request.GenerateTemporaryPassword || request.Request.HasSeparateAccount == true)
         {
             var operationKey = request.Request.CredentialOperationKey?.Trim();
+            // Enabling an account without requesting a password reset is safe to
+            // retry, so provide a stable server-side idempotency key for clients
+            // that only send hasSeparateAccount=true.
+            if (string.IsNullOrWhiteSpace(operationKey)
+                && request.Request.HasSeparateAccount == true
+                && !request.Request.GenerateTemporaryPassword)
+                operationKey = $"family-enable:{member.Id:N}";
             if (string.IsNullOrWhiteSpace(operationKey) || operationKey.Length is < 16 or > 200)
                 return Error.Validation("family.credential_operation_key_required");
             credentialOperationKeyHash = HashToken(operationKey);
