@@ -762,7 +762,24 @@ public sealed class FamilyManagerHandlers :
         return Result.Success(MapPermissions(perms));
     }
 
-    public async Task<Result<FamilyMemberAccessDto>> Handle(AcceptFamilyInviteCommand request, CancellationToken cancellationToken)
+    public Task<Result<FamilyMemberAccessDto>> Handle(AcceptFamilyInviteCommand request, CancellationToken cancellationToken)
+        => _transactions is null
+            ? AcceptFamilyInviteCoreAsync(request, cancellationToken)
+            : _transactions.ExecuteResultAsync(async ct =>
+            {
+                var hash = HashToken(request.Token.Trim());
+                var groupId = await _db.FamilyMemberAccesses.AsNoTracking()
+                    .Where(x => x.InviteTokenHash == hash)
+                    .Select(x => (Guid?)x.FamilyMember.FamilyGroupId).FirstOrDefaultAsync(ct);
+                if (_locks is not null)
+                {
+                    if (groupId is Guid id) await _locks.LockFamilyGroupAsync(id, ct);
+                    if (_currentUser.UserId is Guid actorId) await _locks.LockCustomerIdentityAsync(actorId, ct);
+                }
+                return await AcceptFamilyInviteCoreAsync(request, ct);
+            }, cancellationToken);
+
+    private async Task<Result<FamilyMemberAccessDto>> AcceptFamilyInviteCoreAsync(AcceptFamilyInviteCommand request, CancellationToken cancellationToken)
     {
         if (_currentUser.UserType != UserType.Customer || _currentUser.UserId is null)
             return Error.Forbidden(MessageCodes.Auth.Forbidden);
@@ -781,7 +798,10 @@ public sealed class FamilyManagerHandlers :
         var alreadyLinked = await _db.FamilyMemberAccesses.AsNoTracking()
             .AnyAsync(x => x.LinkedCustomerUserId == _currentUser.UserId && x.Id != access.Id
                 && x.RemovedAtUtc == null && !x.DetachedFromFamilyManagement, cancellationToken);
-        if (alreadyLinked)
+        var managesAnotherFamily = await _db.FamilyGroups.AsNoTracking().AnyAsync(x =>
+            x.ManagerCustomerUserId == _currentUser.UserId && x.Id != access.FamilyMember.FamilyGroupId
+            && x.Status != FamilyGroupStatus.Cancelled, cancellationToken);
+        if (alreadyLinked || managesAnotherFamily)
             return Error.Conflict(MessageCodes.Family.InviteConflict);
 
         access.LinkedCustomerUserId = _currentUser.UserId;

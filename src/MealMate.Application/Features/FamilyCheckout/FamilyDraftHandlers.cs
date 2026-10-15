@@ -782,7 +782,6 @@ public sealed class FamilyDraftHandlers :
             where access.LinkedCustomerUserId == userId
                 && access.RemovedAtUtc == null
                 && !access.DetachedFromFamilyManagement
-                && !access.IsPaused
                 && !member.IsDeleted
                 && !familyGroup.IsDeleted
                 && familyGroup.ManagerCustomerUserId != userId
@@ -1001,6 +1000,15 @@ public sealed class FamilyDraftHandlers :
 
         if (_locks is not null)
             await _locks.LockCustomerIdentityAsync(account.Id, cancellationToken);
+
+        // Compare group IDs, not manager IDs: two groups can share a manager.
+        if (await _db.FamilyMemberAccesses.AsNoTracking().AnyAsync(a =>
+                a.LinkedCustomerUserId == account.Id && a.RemovedAtUtc == null
+                && !a.DetachedFromFamilyManagement && a.FamilyMember.FamilyGroupId != group.Id, cancellationToken)
+            || await _db.FamilyGroups.AsNoTracking().AnyAsync(g =>
+                g.ManagerCustomerUserId == account.Id && g.Id != group.Id
+                && g.Status != FamilyGroupStatus.Cancelled, cancellationToken))
+            return Error.Conflict("family.already_in_family", "This phone already belongs to another family.");
 
         var write = request.Member;
         if (string.IsNullOrWhiteSpace(write.DisplayName) && !string.IsNullOrWhiteSpace(account.FullName))
@@ -2077,6 +2085,17 @@ public sealed class FamilyDraftHandlers :
         FamilyPricingSettings settings,
         CancellationToken cancellationToken)
     {
+        // Serialize creation with other managers linking this customer. A paused
+        // or disabled login still occupies a family membership.
+        if (_locks is not null)
+            await _locks.LockCustomerIdentityAsync(managerId, cancellationToken);
+        if (await IsManagedFamilyMemberAsync(managerId, cancellationToken))
+            return Error.Forbidden("family.manager_required", "Only the family manager can start or resume family setup.");
+        var existingGroup = await _db.FamilyGroups.Include(x => x.Members)
+            .FirstOrDefaultAsync(x => x.ManagerCustomerUserId == managerId && x.Status != FamilyGroupStatus.Cancelled, cancellationToken);
+        if (existingGroup is not null)
+            return existingGroup;
+
         FamilySizePackageSettings package;
         if (familyPackageId is Guid requestedId && requestedId != Guid.Empty)
         {

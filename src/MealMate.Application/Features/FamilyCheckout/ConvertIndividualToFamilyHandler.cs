@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.ProgramsSubscriptions;
+using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
@@ -32,14 +33,19 @@ public sealed class ConvertIndividualToFamilyHandler :
     private readonly IUserAccountService _users;
     private readonly IFamilyPricingSettingsReader _settings;
     private readonly IDateTimeProvider _clock;
+    private readonly ICheckoutTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
 
     public ConvertIndividualToFamilyHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         IUserAccountService users,
         IFamilyPricingSettingsReader settings,
-        IDateTimeProvider clock)
-        => (_db, _currentUser, _users, _settings, _clock) = (db, currentUser, users, settings, clock);
+        IDateTimeProvider clock,
+        ICheckoutTransactionExecutor? transactions = null,
+        IApplicationLockManager? locks = null)
+        => (_db, _currentUser, _users, _settings, _clock, _transactions, _locks)
+            = (db, currentUser, users, settings, clock, transactions, locks);
 
     public async Task<Result<SubscriptionConversionOptionsDto>> Handle(
         GetSubscriptionConversionOptionsQuery request,
@@ -76,12 +82,31 @@ public sealed class ConvertIndividualToFamilyHandler :
             ]);
     }
 
-    public async Task<Result<FamilyGroupScreenDto>> Handle(
+    public Task<Result<FamilyGroupScreenDto>> Handle(
+        ConvertIndividualToFamilyCommand request,
+        CancellationToken cancellationToken)
+        => _transactions is null
+            ? ConvertCoreAsync(request, cancellationToken)
+            : _transactions.ExecuteAsync(async ct =>
+            {
+                if (_locks is not null && _currentUser.UserId is Guid actorId)
+                    await _locks.LockCustomerIdentityAsync(actorId, ct);
+                return await ConvertCoreAsync(request, ct);
+            }, cancellationToken);
+
+    private async Task<Result<FamilyGroupScreenDto>> ConvertCoreAsync(
         ConvertIndividualToFamilyCommand request,
         CancellationToken cancellationToken)
     {
         var managerId = RequireCustomerId();
         if (managerId.IsFailure) return managerId.Error;
+        if (await (from access in _db.FamilyMemberAccesses.AsNoTracking()
+                   join member in _db.FamilyMembers.AsNoTracking() on access.FamilyMemberId equals member.Id
+                   join family in _db.FamilyGroups.AsNoTracking() on member.FamilyGroupId equals family.Id
+                   where access.LinkedCustomerUserId == managerId.Value && access.RemovedAtUtc == null
+                       && !access.DetachedFromFamilyManagement && family.Status != FamilyGroupStatus.Cancelled
+                   select access.Id).AnyAsync(cancellationToken))
+            return Error.Conflict("conversion.already_in_family", "This customer already belongs to a family.");
 
         var settings = await _settings.GetAsync(cancellationToken);
 

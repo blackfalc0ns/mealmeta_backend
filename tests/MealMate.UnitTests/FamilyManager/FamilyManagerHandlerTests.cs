@@ -622,6 +622,21 @@ public sealed class FamilyManagerHandlerTests
     }
 
     [Fact]
+    public async Task Accept_invite_rejects_customer_already_managing_another_family()
+    {
+        var fx = await SeedAsync();
+        const string token = "other-family-manager-invite";
+        var access = await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        access.InviteTokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+        access.InviteExpiresAtUtc = DateTime.UtcNow.AddDays(1);
+        fx.Db.FamilyGroups.Add(new FamilyGroup { ManagerCustomerUserId = fx.LinkedUserId, Name = "Other family", Status = FamilyGroupStatus.Active });
+        await fx.Db.SaveChangesAsync();
+        fx.AsLinkedMember();
+        var result = await fx.Handlers.Handle(new AcceptFamilyInviteCommand(token), CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Accept_invite_binds_accepter_default_address_when_member_had_manager_address()
     {
         var fx = await SeedAsync();

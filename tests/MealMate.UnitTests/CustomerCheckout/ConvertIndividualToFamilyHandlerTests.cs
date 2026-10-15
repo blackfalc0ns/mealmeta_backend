@@ -16,6 +16,37 @@ namespace MealMate.UnitTests.CustomerCheckout;
 
 public sealed class ConvertIndividualToFamilyHandlerTests
 {
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 0)]
+    [InlineData(true, 1)]
+    [InlineData(true, 2)]
+    public async Task ManagedMember_CannotStartSecondFamily_EvenWhenAccessPaused(bool paused, int entry)
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var group = new FamilyGroup { ManagerCustomerUserId = Guid.NewGuid(), Name = "Existing family", Status = FamilyGroupStatus.Active };
+        var member = new FamilyMember { FamilyGroupId = group.Id, Role = FamilyMemberRole.Member, DisplayName = "Member", RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        db.AddRange(group, member, new FamilyMemberAccess { FamilyMemberId = member.Id, LinkedCustomerUserId = userId, IsPaused = paused, HasSeparateAccount = false });
+        await db.SaveChangesAsync();
+        var actor = Substitute.For<ICurrentUser>();
+        actor.UserId.Returns(userId);
+        actor.UserType.Returns(UserType.Customer);
+        var handlers = new FamilyDraftHandlers(db, actor, Substitute.For<IUserAccountService>(),
+            Substitute.For<IFamilyPricingSettingsReader>(), Substitute.For<IFamilyPlanEligibilityService>(),
+            Substitute.For<IFamilyQuoteService>(), Substitute.For<IDateTimeProvider>(), Substitute.For<ICustomerAddressBook>());
+        var result = entry == 2
+            ? await new ConvertIndividualToFamilyHandler(db, actor, Substitute.For<IUserAccountService>(),
+                Substitute.For<IFamilyPricingSettingsReader>(), Substitute.For<IDateTimeProvider>())
+                .Handle(new ConvertIndividualToFamilyCommand(null), CancellationToken.None)
+            : entry == 1
+            ? await handlers.Handle(new UpsertFamilyGroupCommand("New family", null), CancellationToken.None)
+            : await handlers.Handle(new GetCurrentFamilyGroupQuery(), CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be(entry == 2 ? "conversion.already_in_family" : "family.manager_required");
+        (await db.FamilyGroups.CountAsync()).Should().Be(1);
+    }
+
     [Fact]
     public async Task Convert_ActiveIndividual_CreatesDraftFamily_AndPreservesIndividualOwnership()
     {
