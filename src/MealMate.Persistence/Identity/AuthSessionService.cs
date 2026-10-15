@@ -6,6 +6,7 @@ using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -82,6 +83,7 @@ public sealed class AuthSessionService : IAuthSessionService
 
         var roles = await LoadEffectiveRolesAsync(userId, cancellationToken);
         var permissions = await _users.GetPermissionsAsync(userId, cancellationToken);
+        (roles, permissions) = await MergeFamilyMemberAccessAsync(userId, roles, permissions, cancellationToken);
 
         var (scopeIds, tenantIds) = await LoadScopeAndTenantIdsAsync(user, cancellationToken);
 
@@ -191,6 +193,7 @@ public sealed class AuthSessionService : IAuthSessionService
 
         var roles = await LoadEffectiveRolesAsync(user.Id, cancellationToken);
         var permissions = await _users.GetPermissionsAsync(user.Id, cancellationToken);
+        (roles, permissions) = await MergeFamilyMemberAccessAsync(user.Id, roles, permissions, cancellationToken);
         var (scopeIds, tenantIds) = await LoadScopeAndTenantIdsAsync(user, cancellationToken);
         var access = _tokenService.CreateAccessToken(new TokenUser(
             user.Id,
@@ -319,6 +322,62 @@ public sealed class AuthSessionService : IAuthSessionService
             .Concat(branchRoles)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private async Task<(IReadOnlyList<string> Roles, IReadOnlyList<string> Permissions)> MergeFamilyMemberAccessAsync(
+        Guid userId,
+        IReadOnlyList<string> roles,
+        IReadOnlyList<string> permissions,
+        CancellationToken cancellationToken)
+    {
+        var familyRows = await (from access in _db.FamilyMemberAccesses.AsNoTracking()
+                                join member in _db.FamilyMembers.AsNoTracking() on access.FamilyMemberId equals member.Id
+                                join familyGroup in _db.FamilyGroups.AsNoTracking() on member.FamilyGroupId equals familyGroup.Id
+                                where access.RemovedAtUtc == null
+                                    && (access.LinkedCustomerUserId == userId || familyGroup.ManagerCustomerUserId == userId)
+                                    && !member.IsDeleted && !familyGroup.IsDeleted
+                                select new { access, member, familyGroup })
+            .ToListAsync(cancellationToken);
+
+        if (familyRows.Count == 0)
+            return (roles, permissions);
+
+        var mergedRoles = roles.ToList();
+        mergedRoles.Add("FamilyMember");
+        if (familyRows.Any(x => x.familyGroup.ManagerCustomerUserId == userId && x.member.Role == FamilyMemberRole.Manager))
+            mergedRoles.Add("FamilyManager");
+
+        var mergedPermissions = permissions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in familyRows.Where(x => x.access.LinkedCustomerUserId == userId))
+        {
+            var grants = await _db.FamilyMemberPermissions.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.FamilyMemberId == row.member.Id, cancellationToken);
+            if (grants is null || row.access.IsPaused || row.access.RequiresPasswordSetup)
+                continue;
+
+            AddFamilyPermission(mergedPermissions, grants.ViewCalendar, nameof(FamilyMemberPermissions.ViewCalendar));
+            AddFamilyPermission(mergedPermissions, grants.ViewProgram, nameof(FamilyMemberPermissions.ViewProgram));
+            AddFamilyPermission(mergedPermissions, grants.ViewInvoices, nameof(FamilyMemberPermissions.ViewInvoices));
+            AddFamilyPermission(mergedPermissions, grants.SelectRestaurant, nameof(FamilyMemberPermissions.SelectRestaurant));
+            AddFamilyPermission(mergedPermissions, grants.EditDailyMeals, nameof(FamilyMemberPermissions.EditDailyMeals));
+            AddFamilyPermission(mergedPermissions, grants.ConfirmMeals, nameof(FamilyMemberPermissions.ConfirmMeals));
+            AddFamilyPermission(mergedPermissions, grants.EditAddress, nameof(FamilyMemberPermissions.EditAddress));
+            AddFamilyPermission(mergedPermissions, grants.ChangePassword, nameof(FamilyMemberPermissions.ChangePassword));
+            AddFamilyPermission(mergedPermissions, grants.RequestFreeze, nameof(FamilyMemberPermissions.RequestFreeze));
+            AddFamilyPermission(mergedPermissions, grants.RequestRenewal, nameof(FamilyMemberPermissions.RequestRenewal));
+            AddFamilyPermission(mergedPermissions, grants.RequestUpgrade, nameof(FamilyMemberPermissions.RequestUpgrade));
+            AddFamilyPermission(mergedPermissions, grants.CancelSubscription, nameof(FamilyMemberPermissions.CancelSubscription));
+            AddFamilyPermission(mergedPermissions, grants.ViewFamilyCalendars, nameof(FamilyMemberPermissions.ViewFamilyCalendars));
+            AddFamilyPermission(mergedPermissions, grants.ViewFamilyPlans, nameof(FamilyMemberPermissions.ViewFamilyPlans));
+            AddFamilyPermission(mergedPermissions, grants.ViewFamilyInvoices, nameof(FamilyMemberPermissions.ViewFamilyInvoices));
+        }
+
+        return (mergedRoles.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), mergedPermissions.ToList());
+    }
+
+    private static void AddFamilyPermission(HashSet<string> permissions, bool granted, string code)
+    {
+        if (granted) permissions.Add(code);
     }
 
     internal static string HashToken(string raw)
