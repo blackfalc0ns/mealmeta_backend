@@ -31,6 +31,41 @@ public sealed class FamilyMemberFirstLoginServiceTests
         await fx.Sessions.DidNotReceive().IssueSessionAsync(Arg.Any<Guid>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData(FamilyGroupStatus.Draft)]
+    [InlineData(FamilyGroupStatus.CheckoutPending)]
+    [InlineData(FamilyGroupStatus.Active)]
+    public async Task Pending_family_login_is_available_before_and_after_checkout(FamilyGroupStatus status)
+    {
+        await using var fx = await Fixture.Create();
+        (await fx.Db.FamilyGroups.SingleAsync()).Status = status;
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Service.BeginAsync(fx.User, [AppRoles.Customer], null, null);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.IsAuthenticated.Should().BeFalse();
+        result.Value.NextStep.Should().Be(LoginChallengeSteps.FamilyVerifyOtp);
+    }
+
+    [Fact]
+    public async Task Family_first_login_resend_rotates_challenge_and_uses_family_purpose()
+    {
+        await using var fx = await Fixture.Create();
+        var first = await fx.Service.BeginAsync(fx.User, [AppRoles.Customer], null, null);
+        await fx.Db.SaveChangesAsync();
+
+        var resent = await fx.Service.ResendOtpAsync(first.Value.LoginChallengeToken!, "device", "127.0.0.1");
+
+        resent.IsSuccess.Should().BeTrue();
+        resent.Value.IsAuthenticated.Should().BeFalse();
+        resent.Value.NextStep.Should().Be(LoginChallengeSteps.FamilyVerifyOtp);
+        resent.Value.LoginChallengeToken.Should().NotBe(first.Value.LoginChallengeToken);
+        (await fx.Service.VerifyOtpAsync(first.Value.LoginChallengeToken!, "123456", null, null)).IsFailure.Should().BeTrue();
+        await fx.Otp.Received(2).SendAsync(Arg.Is<OtpSendRequest>(x => x.UserId == fx.User.Id
+            && x.Purpose == OtpPurposes.FamilyMemberFirstLogin), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task Invalid_family_first_login_otp_never_yields_password_setup_or_session()
     {
@@ -151,6 +186,112 @@ public sealed class FamilyMemberFirstLoginServiceTests
         var login = await fx.Service.BeginAsync(fx.User, [AppRoles.Customer], null, null);
         login.IsFailure.Should().BeTrue();
         await fx.Sessions.DidNotReceive().IssueSessionAsync(Arg.Any<Guid>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Historical_setup_recovery_clears_gate_only_for_inaccessible_membership()
+    {
+        await using var fx = await Fixture.Create();
+        var access = await fx.Db.FamilyMemberAccesses.SingleAsync();
+        access.RemovedAtUtc = DateTime.UtcNow;
+        await fx.Db.SaveChangesAsync();
+
+        (await fx.Service.IsPendingSetupAsync(fx.User.Id)).Should().BeTrue();
+        (await fx.Service.IsViablePendingSetupAsync(fx.User.Id)).Should().BeFalse();
+        (await fx.Service.CompleteHistoricalSetupRecoveryAsync(fx.User.Id)).IsSuccess.Should().BeTrue();
+        (await fx.Db.FamilyMemberAccesses.SingleAsync()).RequiresPasswordSetup.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task Disabled_or_deleted_setup_can_be_recovered(bool hasSeparateAccount, bool isDeleted)
+    {
+        await using var fx = await Fixture.Create();
+        var access = await fx.Db.FamilyMemberAccesses.SingleAsync();
+        access.HasSeparateAccount = hasSeparateAccount;
+        access.IsDeleted = isDeleted;
+        await fx.Db.SaveChangesAsync();
+
+        (await fx.Service.IsViablePendingSetupAsync(fx.User.Id)).Should().BeFalse();
+        (await fx.Service.CompleteHistoricalSetupRecoveryAsync(fx.User.Id)).IsSuccess.Should().BeTrue();
+        (await fx.Service.IsPendingSetupAsync(fx.User.Id)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Recovery_rechecks_viability_after_otp_before_replacing_password()
+    {
+        await using var fx = await Fixture.Create();
+        var access = await fx.Db.FamilyMemberAccesses.SingleAsync();
+        access.IsPaused = true;
+        await fx.Db.SaveChangesAsync();
+        fx.Users.FindByPhoneAsync(fx.User.PhoneNumber!, Arg.Any<CancellationToken>()).Returns(fx.User);
+        fx.Otp.VerifyAsync(Arg.Any<OtpVerifyRequest>(), Arg.Any<CancellationToken>()).Returns(async _ =>
+        {
+            access.IsPaused = false;
+            await fx.Db.SaveChangesAsync();
+            return Result.Success();
+        });
+        var handler = new CustomerResetPasswordCommandHandler(fx.Users, fx.Otp, fx.Sessions,
+            new AuthLoginChallengeService(fx.Db, fx.Clock), Substitute.For<IAuditLogger>(), fx.UnitOfWork, fx.Service);
+
+        var result = await handler.Handle(new CustomerResetPasswordCommand(fx.User.PhoneNumber!, "123456", "FreshPass123"), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        await fx.Users.DidNotReceive().ResetPasswordAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        (await fx.Service.IsPendingSetupAsync(fx.User.Id)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Verified_recovery_replaces_password_before_retiring_obsolete_setup_gate()
+    {
+        await using var fx = await Fixture.Create();
+        (await fx.Db.FamilyMemberAccesses.SingleAsync()).RemovedAtUtc = DateTime.UtcNow;
+        await fx.Db.SaveChangesAsync();
+        fx.Users.FindByPhoneAsync(fx.User.PhoneNumber!, Arg.Any<CancellationToken>()).Returns(fx.User);
+        fx.Users.GeneratePasswordResetTokenAsync(fx.User.Id, Arg.Any<CancellationToken>()).Returns("reset-token");
+        fx.Users.ResetPasswordAsync(fx.User.Id, "reset-token", "FreshPass123", Arg.Any<CancellationToken>())
+            .Returns(Result.Success());
+        var handler = new CustomerResetPasswordCommandHandler(fx.Users, fx.Otp, fx.Sessions,
+            new AuthLoginChallengeService(fx.Db, fx.Clock), Substitute.For<IAuditLogger>(), fx.UnitOfWork, fx.Service);
+
+        var result = await handler.Handle(new CustomerResetPasswordCommand(fx.User.PhoneNumber!, "123456", "FreshPass123"), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        await fx.Otp.Received(1).VerifyAsync(Arg.Is<OtpVerifyRequest>(request => request.Purpose == OtpPurposes.PasswordReset), Arg.Any<CancellationToken>());
+        await fx.Users.Received(1).ResetPasswordAsync(fx.User.Id, "reset-token", "FreshPass123", Arg.Any<CancellationToken>());
+        (await fx.Service.IsPendingSetupAsync(fx.User.Id)).Should().BeFalse();
+        await fx.Sessions.Received(1).RevokeAllUserTokensAsync(fx.User.Id, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Completing_current_onboarding_clears_obsolete_historical_gates()
+    {
+        await using var fx = await Fixture.Create();
+        var historicalGroup = new FamilyGroup { Name = "History", Status = FamilyGroupStatus.Cancelled,
+            ManagerCustomerUserId = Guid.NewGuid() };
+        var historicalMember = new FamilyMember { FamilyGroupId = historicalGroup.Id,
+            Role = FamilyMemberRole.Member, DisplayName = "Historical member",
+            RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        historicalGroup.Members.Add(historicalMember);
+        fx.Db.AddRange(historicalGroup, new FamilyMemberAccess { FamilyMemberId = historicalMember.Id,
+            LinkedCustomerUserId = fx.User.Id, RequiresPasswordSetup = true, HasSeparateAccount = true,
+            RemovedAtUtc = DateTime.UtcNow });
+        await fx.Db.SaveChangesAsync();
+        fx.Users.GeneratePasswordResetTokenAsync(fx.User.Id, Arg.Any<CancellationToken>()).Returns("reset-token");
+        fx.Users.ResetPasswordAsync(fx.User.Id, "reset-token", "FreshPass123", Arg.Any<CancellationToken>())
+            .Returns(Result.Success());
+        fx.Sessions.IssueSessionAsync(fx.User.Id, null, null, Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new AuthSessionDto(fx.User.Id, null, fx.User.PhoneNumber, fx.User.FullName,
+                UserType.Customer, AccountStatus.Active, null, [AppRoles.Customer], [],
+                new AuthTokensDto("access", DateTime.UtcNow.AddMinutes(15), "refresh", DateTime.UtcNow.AddDays(1)))));
+        var started = await fx.Service.BeginAsync(fx.User, [AppRoles.Customer], null, null);
+        var verified = await fx.Service.VerifyOtpAsync(started.Value.LoginChallengeToken!, "123456", null, null);
+
+        var completed = await fx.Service.SetPasswordAsync(verified.Value.LoginChallengeToken!, "FreshPass123", null, null);
+
+        completed.IsSuccess.Should().BeTrue();
+        (await fx.Service.IsPendingSetupAsync(fx.User.Id)).Should().BeFalse();
     }
 
     private sealed class Fixture : IAsyncDisposable

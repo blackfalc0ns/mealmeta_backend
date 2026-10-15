@@ -104,12 +104,13 @@ public sealed class FamilyCalendarAccessGateTests
     }
 
     [Fact]
-    public async Task Calendar_read_requires_calendar_grant_even_when_meal_edit_is_granted()
+    public async Task Calendar_write_grant_includes_read_prerequisite_for_legacy_members()
     {
         var fx = await SeedFamilyAsync(linkMember: true, editMeals: true);
         var gate = new FamilyCalendarAccessGate(fx.Db, fx.LinkedMember);
         var result = await gate.AuthorizeAsync(fx.MemberSubscription, false, CancellationToken.None);
-        result.IsFailure.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
+        result.Value.CanEditDailyMeals.Should().BeTrue();
     }
 
     private static async Task<(AppDbContext Db, ICurrentUser Owner, Subscription Subscription)> SeedIndividualAsync()

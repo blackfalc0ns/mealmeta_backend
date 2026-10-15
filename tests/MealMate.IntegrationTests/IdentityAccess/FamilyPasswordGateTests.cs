@@ -15,17 +15,16 @@ using Testcontainers.PostgreSql;
 namespace MealMate.IntegrationTests.IdentityAccess;
 
 /// <summary>
-/// B14: a family member's ordinary password change is gated by the manager's
-/// ChangePassword permission; recovery/OTP flows are untouched. Real PostgreSQL
-/// proves the policy query path.
+/// Customer credentials remain customer-owned while family data access remains
+/// independently gated. Real PostgreSQL verifies the persisted membership path.
 /// </summary>
 public sealed class FamilyPasswordGateTests : IAsyncLifetime
 {
-    private PostgreSqlContainer _container = null!;
+    private MealMate.Testing.PostgresTestDatabase _container = null!;
 
     public async Task InitializeAsync()
     {
-        _container = new PostgreSqlBuilder().WithImage("postgres:16-alpine").Build();
+        _container = new();
         await _container.StartAsync();
         await using var db = CreateDb();
         await db.Database.MigrateAsync();
@@ -34,14 +33,13 @@ public sealed class FamilyPasswordGateTests : IAsyncLifetime
     public async Task DisposeAsync() => await _container.DisposeAsync();
 
     [Fact]
-    public async Task Password_change_without_family_permission_is_refused()
+    public async Task Password_change_without_family_permission_remains_customer_owned()
     {
         var (db, handler, users) = await BuildHandlerAsync(grantChangePassword: false);
         using var _ = db;
         var result = await handler.Handle(new ChangeCustomerPasswordCommand("Old#1", "New#2Pass"), CancellationToken.None);
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("family.permission_required");
-        await users.DidNotReceive().ChangePasswordAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.Code : "");
+        await users.Received(1).ChangePasswordAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -57,7 +55,7 @@ public sealed class FamilyPasswordGateTests : IAsyncLifetime
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, true)]
-    public async Task Existing_session_cannot_change_password_when_family_account_disabled_or_paused(bool separate, bool paused)
+    public async Task Family_access_disabled_or_paused_does_not_take_away_customer_credentials(bool separate, bool paused)
     {
         var (db, handler, users) = await BuildHandlerAsync(true);
         using var _ = db;
@@ -66,8 +64,10 @@ public sealed class FamilyPasswordGateTests : IAsyncLifetime
         access.IsPaused = paused;
         await db.SaveChangesAsync();
         var result = await handler.Handle(new ChangeCustomerPasswordCommand("Old#1", "New#2Pass"), CancellationToken.None);
-        result.IsFailure.Should().BeTrue();
-        await users.DidNotReceive().ChangePasswordAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.Code : "");
+        await users.Received(1).ChangePasswordAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        (await new FamilyActionPolicy(db).EvaluateAsync(access.LinkedCustomerUserId!.Value,
+            access.FamilyMemberId, FamilyAction.ViewCalendar)).Allowed.Should().BeFalse();
     }
 
     private async Task<(AppDbContext Db, ChangeCustomerPasswordCommandHandler Handler, IUserAccountService Users)> BuildHandlerAsync(bool grantChangePassword)

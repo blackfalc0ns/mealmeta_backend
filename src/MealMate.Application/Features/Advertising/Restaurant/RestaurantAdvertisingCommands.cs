@@ -233,7 +233,8 @@ public sealed record MyAdBidDto(
     bool IsWinning,
     DateTime AcceptedAtUtc,
     DateTime DisplayStartsAtUtc,
-    DateTime DisplayEndsAtUtc);
+    DateTime DisplayEndsAtUtc,
+    Guid? PlacementId = null);
 
 public sealed class GetMyAdBidsQueryHandler : IQueryHandler<GetMyAdBidsQuery, IReadOnlyList<MyAdBidDto>>
 {
@@ -262,10 +263,16 @@ public sealed class GetMyAdBidsQueryHandler : IQueryHandler<GetMyAdBidsQuery, IR
             .Take(100)
             .ToListAsync(ct);
 
+        var auctionIds = bids.Select(b => b.AdAuctionId).Distinct().ToArray();
+        var placementIds = await _context.AdPlacements.AsNoTracking()
+            .Where(p => auctionIds.Contains(p.AdAuctionId) && p.RestaurantId == _currentUser.RestaurantId.Value)
+            .ToDictionaryAsync(p => p.AdAuctionId, p => p.Id, ct);
+
         var dtos = bids.Select(b => new MyAdBidDto(
             b.Id, b.AdAuctionId, b.AdAuction.AdSpace.PlacementKey,
             b.AdAuction.Status.ToString(), b.Amount, b.CurrencyCode, b.IsWinning,
-            b.AcceptedAtUtc, b.AdAuction.DisplayStartsAtUtc, b.AdAuction.DisplayEndsAtUtc)).ToList();
+            b.AcceptedAtUtc, b.AdAuction.DisplayStartsAtUtc, b.AdAuction.DisplayEndsAtUtc,
+            placementIds.TryGetValue(b.AdAuctionId, out var placementId) ? placementId : null)).ToList();
 
         return Result.Success<IReadOnlyList<MyAdBidDto>>(dtos);
     }
@@ -337,8 +344,19 @@ public sealed class SubmitAdCreativeCommandHandler : ICommandHandler<SubmitAdCre
             return Error.Validation("Advertising.CreativeWindowMismatch", "Creative display dates must match the auction window.");
         }
 
+        var targetType = request.TargetType;
+        var targetId = request.TargetId;
+        // The restaurant dashboard submits this destination without an ID.
+        // Derive it from the persisted placement owner so mobile clicks have a real destination.
+        if (string.Equals(targetType, "restaurant", StringComparison.OrdinalIgnoreCase))
+        {
+            targetType = "restaurant";
+            if (!targetId.HasValue || targetId.Value == Guid.Empty)
+                targetId = placement.RestaurantId;
+        }
+
         var result = placement.SubmitCreative(
-            request.CreativeStorageKey, request.TargetType, request.TargetId,
+            request.CreativeStorageKey, targetType, targetId,
             request.DisplayStartsAtUtc, request.DisplayEndsAtUtc);
         if (result.IsFailure)
         {

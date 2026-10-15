@@ -30,6 +30,8 @@ public interface IApplicationLockManager
     /// mutations; implemented with the same advisory-lock mechanism as the other
     /// family locks. The owning feature session should reconcile the shape.</summary>
     Task LockFamilyGroupAsync(Guid familyGroupId, CancellationToken cancellationToken = default);
+    /// <summary>Serializes customer credential and family identity mutations. Acquire family locks first.</summary>
+    Task LockCustomerIdentityAsync(Guid userId, CancellationToken cancellationToken = default);
     Task LockAdAuctionAsync(Guid auctionId, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task LockPromoCodeAsync(Guid promoCodeId, CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

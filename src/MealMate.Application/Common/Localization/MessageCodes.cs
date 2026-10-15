@@ -292,6 +292,7 @@ public static class MessageCodes
         public const string InviteInvalid = "family.invite_invalid";
         public const string NotManager = "family.not_manager";
         public const string SessionExpired = "family.session_expired";
+        public const string DetachRequiresActiveLogin = "family.detach_requires_active_login";
     }
 
     public static class Maps

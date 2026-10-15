@@ -77,6 +77,20 @@ public sealed class PostgresApplicationLockManager : IApplicationLockManager
             await entry.ReloadAsync(cancellationToken);
     }
 
+    public async Task LockCustomerIdentityAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = "customer-identity:" + userId.ToString("N");
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT \"Id\" FROM \"Users\" WHERE \"Id\" = {userId} FOR UPDATE", cancellationToken);
+        foreach (var entry in _db.ChangeTracker.Entries().Where(entry =>
+            entry.Entity is MealMate.Persistence.Identity.ApplicationUser user && user.Id == userId ||
+            entry.Entity is MealMate.Domain.ProgramsSubscriptions.FamilyMemberAccess access
+                && access.LinkedCustomerUserId == userId).ToList())
+            await entry.ReloadAsync(cancellationToken);
+    }
+
     public async Task LockRefundInvoiceAsync(string invoiceId, CancellationToken cancellationToken = default)
     {
         if (!_db.Database.IsNpgsql()) return;

@@ -482,6 +482,11 @@ public class AdvertisingLifecycleTests : IDisposable
         // Unknown placement key: honest empty result, never fabricated banners.
         var empty = await handler.Handle(new GetEligibleAdPlacementsQuery("unknown.slot"), CancellationToken.None);
         empty.Value!.Placements.Should().BeEmpty();
+
+        space.IsActive = false;
+        await _context.SaveChangesAsync();
+        var disabled = await handler.Handle(new GetEligibleAdPlacementsQuery("offers.hero"), CancellationToken.None);
+        disabled.Value!.Placements.Should().BeEmpty("a disabled space must not serve an otherwise active placement");
     }
 
     [Fact]
@@ -532,6 +537,88 @@ public class AdvertisingLifecycleTests : IDisposable
         second.IsSuccess.Should().BeTrue("duplicate event id is an idempotent no-op");
         badType.IsFailure.Should().BeTrue();
         unknown.IsFailure.Should().BeTrue("unknown placement is never logged as phantom traffic");
+        _context.AdPlacementEvents.Count().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Creative_DefaultRestaurantDestinationUsesPersistedWinner()
+    {
+        var restaurantId = Guid.NewGuid();
+        _currentUser.RestaurantId.Returns(restaurantId);
+        var auction = SeedOpenAuction();
+        auction.Status = AdAuctionStatus.Awarded;
+        var placement = new AdPlacement
+        {
+            AdAuctionId = auction.Id, RestaurantId = restaurantId, AdSpaceId = auction.AdSpaceId,
+            Status = AdPlacementStatus.AwaitingCreative
+        };
+        _context.AdPlacements.Add(placement);
+        _context.UploadFileRecords.Add(new UploadFileRecord
+        {
+            StorageKey = "owned-banner", UploadedByUserId = _currentUser.UserId!.Value,
+            FileName = "banner.png", ContentType = "image/png", Scope = "advertising"
+        });
+        await _context.SaveChangesAsync();
+        var handler = new SubmitAdCreativeCommandHandler(_context, _currentUser, _clock);
+
+        var result = await handler.Handle(new SubmitAdCreativeCommand(auction.Id, "owned-banner", "restaurant", null,
+            auction.DisplayStartsAtUtc, auction.DisplayEndsAtUtc), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        placement.TargetType.Should().Be("restaurant");
+        placement.TargetId.Should().Be(restaurantId, "the existing restaurant UI does not supply a destination ID");
+        placement.Status.Should().Be(AdPlacementStatus.UnderReview);
+    }
+
+    [Fact]
+    public async Task MyBids_ExposeOwningPlacementIdForStop_WithoutAnotherRestaurantsPlacement()
+    {
+        var restaurantId = Guid.NewGuid();
+        _currentUser.RestaurantId.Returns(restaurantId);
+        var ownedAuction = SeedOpenAuction();
+        var lostAuction = SeedOpenAuction();
+        _context.AdBids.AddRange(
+            new AdBid { AdAuctionId = ownedAuction.Id, RestaurantId = restaurantId, Amount = 20m,
+                CurrencyCode = "KWD", IdempotencyKey = "owned", AcceptedAtUtc = Now, IsWinning = true },
+            new AdBid { AdAuctionId = lostAuction.Id, RestaurantId = restaurantId, Amount = 20m,
+                CurrencyCode = "KWD", IdempotencyKey = "lost", AcceptedAtUtc = Now });
+        var placement = new AdPlacement
+        {
+            AdAuctionId = ownedAuction.Id, AdSpaceId = ownedAuction.AdSpaceId,
+            RestaurantId = restaurantId, Status = AdPlacementStatus.Active
+        };
+        _context.AdPlacements.AddRange(placement, new AdPlacement
+        {
+            AdAuctionId = lostAuction.Id, AdSpaceId = lostAuction.AdSpaceId,
+            RestaurantId = Guid.NewGuid(), Status = AdPlacementStatus.Active
+        });
+        await _context.SaveChangesAsync();
+
+        var result = await new GetMyAdBidsQueryHandler(_context, _currentUser)
+            .Handle(new GetMyAdBidsQuery(), CancellationToken.None);
+
+        using var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(result.Value));
+        var owned = json.RootElement.EnumerateArray().Single(x => x.GetProperty("AuctionId").GetGuid() == ownedAuction.Id);
+        owned.GetProperty("PlacementId").GetGuid().Should().Be(placement.Id);
+        var lost = json.RootElement.EnumerateArray().Single(x => x.GetProperty("AuctionId").GetGuid() == lostAuction.Id);
+        lost.GetProperty("PlacementId").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task AdEvent_NormalizedReplayDoesNotAddAnotherImpression()
+    {
+        var auction = SeedOpenAuction();
+        var placement = new AdPlacement
+        {
+            AdAuctionId = auction.Id, RestaurantId = Guid.NewGuid(),
+            AdSpaceId = auction.AdSpaceId, Status = AdPlacementStatus.Active
+        };
+        _context.AdPlacements.Add(placement);
+        await _context.SaveChangesAsync();
+        var handler = new RecordAdEventCommandHandler(_context, _clock);
+        await handler.Handle(new RecordAdEventCommand(placement.Id, " impression-1 ", "impression"), CancellationToken.None);
+        await handler.Handle(new RecordAdEventCommand(placement.Id, " impression-1 ", "impression"), CancellationToken.None);
+
         _context.AdPlacementEvents.Count().Should().Be(1);
     }
 

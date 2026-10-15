@@ -13,7 +13,8 @@ namespace MealMate.UnitTests.ProgramsSubscriptions;
 
 internal static class FreezeTestFixture
 {
-    internal static SubscriptionOperationsHandlers CreateHandler(MealMate.Persistence.AppDbContext db, IDateTimeProvider clock)
+    internal static SubscriptionOperationsHandlers CreateHandler(MealMate.Persistence.AppDbContext db, IDateTimeProvider clock,
+        IApplicationTransactionExecutor? transactions = null, IApplicationLockManager? locks = null)
     {
         var schedule = new SubscriptionScheduleService(clock);
         var menus = new MenuPlanResolutionService(db);
@@ -23,7 +24,8 @@ internal static class FreezeTestFixture
         var reader = new RestaurantCapacityReader(db, clock);
         var eligibility = new RestaurantEligibilityService(db, clock, schedule, slots, menus, new MealMate.Application.Features.ProgramsSubscriptions.Pricing.RestaurantTierClassificationService(db, clock), reader);
         var prep = new MealMate.Application.Features.ProgramsSubscriptions.Freeze.SubscriptionFreezePreparationService(db, clock, schedule, policies, eligibility, new RestaurantPoolSnapshotService(db, menus, slots, clock), NSubstitute.Substitute.For<ICapacityConcurrencyLock>(), NSubstitute.Substitute.For<IApplicationLockManager>(), reader);
-        return new SubscriptionOperationsHandlers(db, audit, clock, NSubstitute.Substitute.For<MealMate.Application.Features.ProgramsSubscriptions.ISubscriptionTierUpgradeQuoteBuilder>(), schedule: schedule, freezePreparation: prep);
+        return new SubscriptionOperationsHandlers(db, audit, clock, NSubstitute.Substitute.For<MealMate.Application.Features.ProgramsSubscriptions.ISubscriptionTierUpgradeQuoteBuilder>(),
+            schedule: schedule, transactions: transactions, locks: locks, freezePreparation: prep);
     }
     internal static async Task<Subscription> SeedMenuPoolAsync(MealMate.Persistence.AppDbContext db, DateTime now, DateOnly date, bool capacity = true)
     {

@@ -22,7 +22,8 @@ public sealed record RequestSubscriptionFreezeCommand(
     DateOnly FreezeStartDate,
     DateOnly FreezeEndDate,
     string? Reason = null,
-    bool AcknowledgeLostSelections = false) : ICommand<SubscriptionFreezeRequestDto>;
+    bool AcknowledgeLostSelections = false,
+    Guid? CustomerActorUserId = null) : ICommand<SubscriptionFreezeRequestDto>;
 
 public sealed record ApproveSubscriptionFreezeCommand(
     Guid FreezeRequestId,

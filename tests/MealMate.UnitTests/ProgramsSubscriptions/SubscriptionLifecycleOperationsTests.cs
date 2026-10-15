@@ -65,6 +65,43 @@ public class SubscriptionLifecycleOperationsTests
         (await db.SubscriptionDays.SingleAsync(x => x.ServiceDate == date)).Status.Should().Be(SubscriptionDayStatus.Frozen);
         (await db.SubscriptionDays.SingleAsync(x => x.ServiceDate == date.AddDays(1))).ConfirmedAtUtc.Should().BeNull();
     }
+
+    [Fact]
+    public async Task Customer_freeze_command_rechecks_family_permission_before_mutation()
+    {
+        using var db = new AppDbContext(CreateInMemoryOptions(), Substitute.For<IDomainEventDispatcher>());
+        var actor = Guid.NewGuid();
+        var group = new FamilyGroup { Name = "Family", ManagerCustomerUserId = Guid.NewGuid(), Status = FamilyGroupStatus.Active };
+        var member = new FamilyMember { FamilyGroupId = group.Id, FamilyGroup = group, DisplayName = "Member",
+            Role = FamilyMemberRole.Member, RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        var date = new DateOnly(2026, 10, 20);
+        var subscription = new Subscription { CustomerUserId = group.ManagerCustomerUserId, FamilyGroupId = group.Id,
+            FamilyMemberId = member.Id, ProgramId = Guid.NewGuid(), BundleId = Guid.NewGuid(), StartDate = date,
+            EndDate = date, Status = SubscriptionStatus.Active, DurationDays = 1, PaidAmount = new Money(50m, "KWD") };
+        member.MemberSubscriptionId = subscription.Id;
+        db.AddRange(group, member, subscription,
+            new FamilyMemberAccess { FamilyMemberId = member.Id, LinkedCustomerUserId = actor, HasSeparateAccount = true },
+            new FamilyMemberPermissions { FamilyMemberId = member.Id, RequestFreeze = false });
+        await db.SaveChangesAsync();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(new DateTime(2026, 10, 10, 9, 0, 0, DateTimeKind.Utc));
+        clock.TodayUtc.Returns(new DateOnly(2026, 10, 10));
+        var transactions = Substitute.For<IApplicationTransactionExecutor>();
+        transactions.ExecuteResultAsync<SubscriptionFreezeRequestDto>(Arg.Any<Func<CancellationToken, Task<MealMate.Application.Common.Models.Result<SubscriptionFreezeRequestDto>>>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task<MealMate.Application.Common.Models.Result<SubscriptionFreezeRequestDto>>>>()(call.Arg<CancellationToken>()));
+        var locks = Substitute.For<IApplicationLockManager>();
+        locks.LockFamilyGroupAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        locks.LockSubscriptionAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        locks.LockSubscriptionDaysAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var result = await FreezeTestFixture.CreateHandler(db, clock, transactions, locks).Handle(
+            new RequestSubscriptionFreezeCommand(subscription.Id, date, date, "Vacation", true, actor), default);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Type.Should().Be(MealMate.Application.Common.Models.ErrorType.Forbidden);
+        result.Error.Code.Should().Be("family.permission_required");
+        (await db.SubscriptionFreezeRequests.CountAsync()).Should().Be(0);
+    }
     [Fact]
     public async Task Freeze_replacement_uses_latest_accepted_address_when_last_original_day_is_protected()
     {

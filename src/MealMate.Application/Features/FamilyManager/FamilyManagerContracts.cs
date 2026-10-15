@@ -29,7 +29,9 @@ public sealed record FamilyHomeMemberDto(
     int? TodayFilledCount,
     int? TodayRequiredCount,
     int RemainingDays = 0, FamilyMemberLifecycleDto? Lifecycle = null,
-    Guid? UpcomingSubscriptionId = null, DateOnly? UpcomingStartDate = null);
+    Guid? UpcomingSubscriptionId = null, DateOnly? UpcomingStartDate = null,
+    FamilyMemberSetupStatus? SetupStatus = null, bool HasSeparateAccount = false,
+    bool RequiresPasswordSetup = false, bool IsDetachedFromFamilyManagement = false);
 
 public sealed record FamilyHomeDto(
     Guid GroupId,
@@ -57,7 +59,8 @@ public sealed record FamilyMemberListItemDto(
     FamilyMemberSetupStatus SetupStatus, FamilyMemberLifecycleDto? Lifecycle = null,
     Guid? UpcomingSubscriptionId = null, DateOnly? UpcomingStartDate = null,
     string? ProfileImageUrl = null, bool HasSeparateAccount = false,
-    FamilyPlanSummaryDto? PlanSummary = null, FamilyTodayMealSelectionDto? TodayMealSelection = null);
+    FamilyPlanSummaryDto? PlanSummary = null, FamilyTodayMealSelectionDto? TodayMealSelection = null,
+    bool IsDetachedFromFamilyManagement = false, bool RequiresPasswordSetup = false);
 
 public sealed record FamilyPlanSummaryDto(
     int? MealsPerDay, int? DurationDays, DateOnly? StartDate, DateOnly? EndDate,
@@ -96,7 +99,8 @@ public sealed record FamilyMemberDetailDto(
     FamilyTodayNutritionDto? TodayNutrition = null,
     string? CountryCode = null,
     string? NationalPhoneNumber = null, FamilyMemberLifecycleDto? Lifecycle = null,
-    Guid? UpcomingSubscriptionId = null, DateOnly? UpcomingStartDate = null);
+    Guid? UpcomingSubscriptionId = null, DateOnly? UpcomingStartDate = null,
+    bool IsDetachedFromFamilyManagement = false, bool RequiresPasswordSetup = false);
 
 public sealed record FamilyMemberAccessDto(
     Guid MemberId,
@@ -112,9 +116,13 @@ public sealed record FamilyMemberAccessDto(
     string? GeneratedPassword = null,
     string? CountryCode = null,
     string? NationalPhoneNumber = null,
-    bool RequiresPasswordSetup = false);
+    bool RequiresPasswordSetup = false,
+    bool DetachedFromFamilyManagement = false,
+    bool PasswordAlreadyIssued = false,
+    bool RequiresExplicitReset = false);
 
-public sealed record FamilyPermissionItemDto(string Key, string LabelAr, string LabelEn, bool Value);
+public sealed record FamilyPermissionItemDto(string Key, string LabelAr, string LabelEn, bool Value,
+    bool IsSupported = true, bool IsManagerConfigurable = true, IReadOnlyList<string>? RequiredPermissions = null);
 
 public sealed record FamilyPermissionGroupDto(
     string Code,
@@ -163,17 +171,18 @@ public sealed record UpdateFamilyMemberAccessRequest(
     bool? HasSeparateAccount,
     bool? IsPaused,
     bool? Remove,
-    bool GenerateTemporaryPassword = false);
+    bool GenerateTemporaryPassword = false,
+    string? CredentialOperationKey = null);
 
 public sealed record UpdateFamilyMemberPermissionsRequest(
-    bool EditDailyMeals,
-    bool ChangeDeliveryTime,
-    bool ViewProgram,
-    bool ChangeProgram,
-    bool EditMealsAndDays,
-    bool EditAddress,
-    bool UnitExchange,
-    bool ChangePassword,
+    bool? EditDailyMeals,
+    bool? ChangeDeliveryTime,
+    bool? ViewProgram,
+    bool? ChangeProgram,
+    bool? EditMealsAndDays,
+    bool? EditAddress,
+    bool? UnitExchange,
+    bool? ChangePassword,
     long? ExpectedVersion = null,
     bool? ViewCalendar = null,
     bool? ViewInvoices = null,
@@ -193,6 +202,7 @@ public sealed record GetFamilyMemberQuery(Guid MemberId) : IQuery<FamilyMemberDe
 public sealed record CreateFamilyMemberCommand(CreateFamilyMemberRequest Request) : ICommand<FamilyMemberDetailDto>;
 public sealed record GetFamilyMemberAccessQuery(Guid MemberId) : IQuery<FamilyMemberAccessDto>;
 public sealed record UpdateFamilyMemberAccessCommand(Guid MemberId, UpdateFamilyMemberAccessRequest Request) : ICommand<FamilyMemberAccessDto>;
+public sealed record DetachFamilyMemberCommand(Guid MemberId) : ICommand<FamilyMemberAccessDto>;
 public sealed record GetFamilyMemberPermissionsQuery(Guid MemberId) : IQuery<FamilyMemberPermissionsDto>;
 public sealed record UpdateFamilyMemberPermissionsCommand(Guid MemberId, UpdateFamilyMemberPermissionsRequest Request) : ICommand<FamilyMemberPermissionsDto>;
 public sealed record AcceptFamilyInviteCommand(string Token) : ICommand<FamilyMemberAccessDto>;
@@ -201,19 +211,26 @@ public static class FamilyPermissionCatalog
 {
     public static IReadOnlyList<FamilyPermissionGroupDto> Groups(FamilyMemberPermissions p, ILocalizedMessageProvider messages)
     {
-        FamilyPermissionItemDto Item(string key, bool value) => new(key,
-            messages.GetArabicMessage($"family.permission.{key}"), messages.GetEnglishMessage($"family.permission.{key}"), value);
+        FamilyPermissionItemDto Item(string key, bool value, bool supported = true, bool configurable = true,
+            params string[] required) => new(key,
+            messages.GetArabicMessage($"family.permission.{key}"), messages.GetEnglishMessage($"family.permission.{key}"),
+            value, supported, supported && configurable, required.Length == 0 ? Array.Empty<string>() : required);
         FamilyPermissionGroupDto Group(string key, params FamilyPermissionItemDto[] items) => new(key,
             messages.GetArabicMessage($"family.permission_group.{key}"), messages.GetEnglishMessage($"family.permission_group.{key}"), items);
         return [
-            Group("meals", Item("viewCalendar", p.ViewCalendar), Item("viewFamilyCalendars", p.ViewFamilyCalendars),
-                Item("selectRestaurant", p.SelectRestaurant), Item("editDailyMeals", p.EditDailyMeals), Item("confirmMeals", p.ConfirmMeals),
-                Item("editMealsAndDays", p.EditMealsAndDays), Item("unitExchange", p.UnitExchange)),
+            Group("meals", Item("viewCalendar", p.ViewCalendar, required: ["viewProgram"]), Item("viewFamilyCalendars", p.ViewFamilyCalendars),
+                Item("selectRestaurant", p.SelectRestaurant, required: ["viewCalendar", "viewProgram"]),
+                Item("editDailyMeals", p.EditDailyMeals, required: ["viewCalendar", "viewProgram"]),
+                Item("confirmMeals", p.ConfirmMeals, required: ["viewCalendar", "viewProgram"]),
+                Item("editMealsAndDays", p.EditMealsAndDays, false), Item("unitExchange", p.UnitExchange, false)),
             Group("program", Item("viewProgram", p.ViewProgram), Item("viewFamilyPlans", p.ViewFamilyPlans),
-                Item("changeProgram", p.ChangeProgram), Item("requestFreeze", p.RequestFreeze), Item("requestRenewal", p.RequestRenewal),
-                Item("requestUpgrade", p.RequestUpgrade), Item("cancelSubscription", p.CancelSubscription)),
-            Group("delivery", Item("changeDeliveryTime", p.ChangeDeliveryTime), Item("editAddress", p.EditAddress)),
-            Group("account", Item("changePassword", p.ChangePassword), Item("viewInvoices", p.ViewInvoices),
+                Item("changeProgram", p.ChangeProgram, false), Item("requestFreeze", p.RequestFreeze, required: ["viewProgram"]),
+                Item("requestRenewal", p.RequestRenewal, required: ["viewProgram"]),
+                Item("requestUpgrade", p.RequestUpgrade, required: ["viewProgram"]),
+                Item("cancelSubscription", p.CancelSubscription, required: ["viewProgram"])),
+            Group("delivery", Item("changeDeliveryTime", p.ChangeDeliveryTime, false),
+                Item("editAddress", p.EditAddress, required: ["viewCalendar", "viewProgram"])),
+            Group("account", Item("changePassword", true, configurable: false), Item("viewInvoices", p.ViewInvoices),
                 Item("viewFamilyInvoices", p.ViewFamilyInvoices))
         ];
     }
@@ -244,7 +261,14 @@ public sealed record FamilySwitcherItemDto(
     string? ProfileImageUrl,
     bool IsPaused,
     bool CanEditDailyMeals,
-    FamilyMemberSetupStatus SetupStatus);
+    FamilyMemberSetupStatus? SetupStatus,
+    bool CanViewCalendar = false,
+    bool CanViewProgram = false,
+    bool CanViewInvoices = false,
+    bool HasSeparateAccount = false,
+    bool RequiresPasswordSetup = false,
+    bool IsDetachedFromFamilyManagement = false,
+    Guid? GroupId = null);
 
 public sealed record GetFamilySwitcherQuery : IQuery<IReadOnlyList<FamilySwitcherItemDto>>;
 

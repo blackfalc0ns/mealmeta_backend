@@ -2,6 +2,7 @@ using System.Text.Json;
 using MealMate.Api.Controllers.V1;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.FamilyManager;
@@ -33,6 +34,66 @@ namespace MealMate.ApiTests.CustomerCheckout;
 public sealed class CustomerSubscriptionManagementControllerTests
 {
     [Fact]
+    public async Task Current_subscription_prefers_actor_member_and_exposes_member_identity_for_sibling_cards()
+    {
+        await using var db = CreateDb();
+        var manager = Guid.NewGuid();
+        var actor = Guid.NewGuid();
+        var otherMemberUser = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var group = new FamilyGroup { ManagerCustomerUserId = manager, Name = "Family", Status = FamilyGroupStatus.Active };
+        var own = new FamilyMember { FamilyGroupId = group.Id, FamilyGroup = group, DisplayName = "Current customer",
+            Role = FamilyMemberRole.Member, RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        var sibling = new FamilyMember { FamilyGroupId = group.Id, FamilyGroup = group, DisplayName = "Sibling",
+            Role = FamilyMemberRole.Member, RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        var ownSub = NewSubscription(manager, program.Id, bundle.Id, SubscriptionStatus.Active);
+        ownSub.FamilyGroupId = group.Id; ownSub.FamilyMemberId = own.Id;
+        ownSub.StartDate = new DateOnly(2026, 10, 20); ownSub.EndDate = ownSub.StartDate.AddDays(25);
+        own.MemberSubscriptionId = ownSub.Id;
+        var siblingSub = NewSubscription(manager, program.Id, bundle.Id, SubscriptionStatus.Active);
+        siblingSub.FamilyGroupId = group.Id; siblingSub.FamilyMemberId = sibling.Id;
+        siblingSub.StartDate = new DateOnly(2026, 10, 30); siblingSub.EndDate = siblingSub.StartDate.AddDays(25);
+        sibling.MemberSubscriptionId = siblingSub.Id;
+        db.AddRange(program, bundle, group, own, sibling, ownSub, siblingSub,
+            new FamilyMemberAccess { FamilyMemberId = own.Id, LinkedCustomerUserId = actor, HasSeparateAccount = true },
+            new FamilyMemberAccess { FamilyMemberId = sibling.Id, LinkedCustomerUserId = otherMemberUser, HasSeparateAccount = true },
+            new FamilyMemberPermissions { FamilyMemberId = own.Id, ViewCalendar = true, ViewFamilyPlans = true },
+            new FamilyMemberPermissions { FamilyMemberId = sibling.Id, ViewProgram = true });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, actor);
+        var management = Assert.IsType<OkObjectResult>(await controller.Management(true, default));
+        var screen = Assert.IsType<CustomerSubscriptionManagementScreenDto>(management.Value);
+        Assert.Equal(ownSub.Id, screen.CurrentSubscription!.SubscriptionId);
+        Assert.Equal(own.Id, screen.CurrentSubscription.FamilyMemberId);
+        Assert.Equal("Current customer", screen.CurrentSubscription.FamilyMemberName);
+        Assert.Equal(2, screen.Subscriptions.Count);
+        Assert.Contains(screen.Subscriptions, x => x.FamilyMemberId == sibling.Id && x.FamilyMemberName == "Sibling");
+        var current = Assert.IsType<OkObjectResult>(await controller.Current(default));
+        Assert.Equal(own.Id, Assert.IsType<CustomerCurrentSubscriptionScreenDto>(current.Value).Subscription!.FamilyMemberId);
+    }
+
+    [Fact]
+    public async Task Renewal_forbidden_result_preserves_http_403_and_problem_details_code()
+    {
+        await using var db = CreateDb();
+        var actor = Guid.NewGuid();
+        var renewal = Substitute.For<ISubscriptionRenewalService>();
+        renewal.RequestRenewalAsync(Arg.Any<Guid>(), actor, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Result<CustomerRenewalRequestDto>>(Error.Forbidden("family.permission_required", "Renewal is not permitted.")));
+
+        var result = await CreateController(db, actor, renewalService: renewal)
+            .RequestRenewal(Guid.NewGuid(), default);
+
+        var response = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, response.StatusCode);
+        var problem = Assert.IsType<ProblemDetails>(response.Value);
+        Assert.Equal("family.permission_required", problem.Extensions["code"]);
+        Assert.Equal("Renewal is not permitted.", problem.Detail);
+    }
+
+    [Fact]
     public async Task Family_auto_renewal_consent_uses_shared_permission_and_never_connects_billing()
     {
         await using var db = CreateDb();
@@ -53,10 +114,15 @@ public sealed class CustomerSubscriptionManagementControllerTests
         clock.UtcNow.Returns(new DateTime(2026, 10, 9, 12, 0, 0, DateTimeKind.Utc));
         var access = new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
 
+        var transactions = Substitute.For<IApplicationTransactionExecutor>();
+        transactions.ExecuteAsync(Arg.Any<Func<CancellationToken, Task<IActionResult>>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task<IActionResult>>>()(call.Arg<CancellationToken>()));
+        var locks = Substitute.For<IApplicationLockManager>();
+
         var linkedController = CreateController(db, linked, clock: clock);
         var consentResult = await linkedController.RecordAutoRenewalConsent(subscription.Id,
             new AutoRenewalConsentRequest(true, "terms-1", subscription.PaidAmount.Amount, "KWD"),
-            db, access, clock, CancellationToken.None);
+            db, access, clock, CancellationToken.None, transactions, locks);
         Assert.IsType<AcceptedResult>(consentResult);
 
         var row = await db.Subscriptions.SingleAsync(x => x.Id == subscription.Id);
@@ -70,7 +136,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
 
         var managerController = CreateController(db, manager, clock: clock);
         var withdrawal = Assert.IsType<OkObjectResult>(await managerController.WithdrawAutoRenewalConsent(
-            subscription.Id, db, access, clock, CancellationToken.None));
+            subscription.Id, db, access, clock, CancellationToken.None, transactions, locks));
         Assert.Contains("NotConnected", withdrawal.Value!.ToString());
         Assert.Equal(manager, row.AutoRenewConsentWithdrawnByUserId);
         Assert.NotNull(row.AutoRenewConsentWithdrawnAtUtc);
@@ -1468,7 +1534,8 @@ public sealed class CustomerSubscriptionManagementControllerTests
         IPaymentGatewayService? payments = null,
         ISubscriptionTierUpgradeQuoteBuilder? upgradeQuotes = null,
         IDateTimeProvider? clock = null,
-        ICapacityHoldExpiryService? holdExpiry = null)
+        ICapacityHoldExpiryService? holdExpiry = null,
+        ISubscriptionRenewalService? renewalService = null)
     {
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(customerId);
@@ -1498,7 +1565,7 @@ public sealed class CustomerSubscriptionManagementControllerTests
             holdExpiry: holdExpiry, cancellationService: cancellation,
             freezeService: new SubscriptionFreezeService(db, clock, familyAccess: familyAccess),
             upgradeService: new SubscriptionUpgradeService(db, clock, upgradeQuotes, payments, familyAccess: familyAccess),
-            renewalService: new SubscriptionRenewalService(db, clock, familyAccess),
+            renewalService: renewalService ?? new SubscriptionRenewalService(db, clock, familyAccess),
             queryService: new CustomerSubscriptionQueryService(db, clock, holdExpiry, familyAccess))
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }

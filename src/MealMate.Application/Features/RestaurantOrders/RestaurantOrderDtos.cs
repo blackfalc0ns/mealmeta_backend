@@ -29,7 +29,11 @@ public sealed record PendingConfirmationItemDto(
     string Urgency,
     bool Confirmed,
     bool IsReassigned,
-    string Route);
+    string Route)
+{
+    public DateOnly ServiceDate { get; init; }
+    public DateTime ConfirmationDeadlineUtc { get; init; }
+}
 
 public sealed record PendingConfirmationDataDto(
     LocalizedTextDto Title,
@@ -171,7 +175,10 @@ public sealed record DailyOrderItemDto(
     LocalizedTextDto WindowLabel,
     bool BarcodeReady,
     LocalizedTextDto ActionLabel,
-    string Route);
+    string Route)
+{
+    public DateOnly ServiceDate { get; init; }
+}
 
 public sealed record DailyOrdersDataDto(
     LocalizedTextDto Title,
@@ -203,14 +210,20 @@ public sealed record Upcoming24hItemDto(
     LocalizedTextDto ShiftLabel,
     LocalizedTextDto DeliveryDateLabel,
     LocalizedTextDto DeliverySlotLabel,
-    int HoursToDelivery,
+    int? HoursToDelivery,
     bool InvoiceGenerated,
     bool BarcodeGenerated,
     bool LabelsGenerated,
     string PrepStatus,
     string Route,
     string LabelsRoute,
-    bool IsPrinted = false);
+    bool IsPrinted = false)
+{
+    public DateOnly ServiceDate { get; init; }
+    public DateTime? ScheduledDeliveryAtUtc { get; init; }
+    public string KitchenStatus { get; init; } = "unknown";
+    public string DocumentsStatus { get; init; } = "missing";
+}
 
 public sealed record Upcoming24hDataDto(
     LocalizedTextDto Title,

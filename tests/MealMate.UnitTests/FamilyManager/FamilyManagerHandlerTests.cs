@@ -23,6 +23,20 @@ namespace MealMate.UnitTests.FamilyManager;
 public sealed class FamilyManagerHandlerTests
 {
     [Fact]
+    public void Temporary_passwords_always_satisfy_identity_letter_and_digit_policy()
+    {
+        var generate = typeof(FamilyManagerHandlers).GetMethod("GeneratePassword",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        for (var i = 0; i < 64; i++)
+        {
+            var password = (string)generate.Invoke(null, null)!;
+            password.Length.Should().BeGreaterThanOrEqualTo(8);
+            password.Any(char.IsLetter).Should().BeTrue();
+            password.Any(char.IsDigit).Should().BeTrue();
+        }
+    }
+
+    [Fact]
     public async Task Permissions_update_requires_version_and_rejects_stale_write_without_changing_grants()
     {
         var fx = await SeedAsync();
@@ -44,7 +58,34 @@ public sealed class FamilyManagerHandlerTests
         saved.Value.ViewInvoices.Should().BeTrue();
         saved.Value.ViewFamilyPlans.Should().BeTrue();
         saved.Value.ConfirmMeals.Should().BeTrue();
-        saved.Value.ViewCalendar.Should().BeFalse();
+        saved.Value.ViewCalendar.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Permission_patch_preserves_omitted_values_and_rejects_unsupported_grants()
+    {
+        var fx = await SeedAsync();
+        var permissions = await fx.Db.FamilyMemberPermissions.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        permissions.Version = 9;
+        permissions.ViewCalendar = false;
+        permissions.ViewProgram = false;
+        permissions.ViewInvoices = true;
+        await fx.Db.SaveChangesAsync();
+
+        var omitted = await fx.Handlers.Handle(new UpdateFamilyMemberPermissionsCommand(fx.MemberId,
+            new UpdateFamilyMemberPermissionsRequest(null, null, null, null, null, null, null, null,
+                ExpectedVersion: 9)), CancellationToken.None);
+        omitted.IsSuccess.Should().BeTrue();
+        omitted.Value.ViewInvoices.Should().BeTrue();
+        omitted.Value.ViewCalendar.Should().BeFalse();
+        omitted.Value.ViewProgram.Should().BeFalse();
+
+        var unsupported = await fx.Handlers.Handle(new UpdateFamilyMemberPermissionsCommand(fx.MemberId,
+            new UpdateFamilyMemberPermissionsRequest(null, null, null, true, null, null, null, null,
+                ExpectedVersion: 10)), CancellationToken.None);
+        unsupported.IsFailure.Should().BeTrue();
+        unsupported.Error.Code.Should().Be("family.permission_not_supported");
+        permissions.ChangeProgram.Should().BeFalse();
     }
     [Theory]
     [InlineData(FamilyGroupStatus.Draft)]
@@ -119,6 +160,7 @@ public sealed class FamilyManagerHandlerTests
         var manager = switcher.Value.Single(x => x.MemberId == fx.ManagerMemberId);
         manager.ProfileImageUrl.Should().Be("/api/v1/uploads/content?key=uploads%2Fcustomers%2Fprofile%2Fmanager.png");
         manager.IsManager.Should().BeTrue();
+        manager.GroupId.Should().Be(fx.GroupId);
     }
 
     [Fact]
@@ -618,6 +660,11 @@ public sealed class FamilyManagerHandlerTests
     public async Task Enabling_access_returns_generated_password_once_for_new_login()
     {
         var fx = await SeedAsync();
+        var memberAccess = await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        memberAccess.HasSeparateAccount = false;
+        fx.Db.FamilyMemberPermissions.RemoveRange(await fx.Db.FamilyMemberPermissions
+            .Where(x => x.FamilyMemberId == fx.MemberId).ToListAsync());
+        await fx.Db.SaveChangesAsync();
         fx.Users.FindByPhoneAsync("+96551111112", Arg.Any<CancellationToken>())
             .Returns(new UserAccountDto(
                 fx.ProvisionedUserId, null, "+96551111112", "يوسف", UserType.Customer,
@@ -629,18 +676,267 @@ public sealed class FamilyManagerHandlerTests
 
         var access = await fx.Handlers.Handle(
             new UpdateFamilyMemberAccessCommand(fx.MemberId, new UpdateFamilyMemberAccessRequest(
-                HasSeparateAccount: true, IsPaused: false, Remove: null)),
+                HasSeparateAccount: true, IsPaused: false, Remove: null,
+                CredentialOperationKey: "family-initial-enable-operation-001")),
             CancellationToken.None);
 
         access.IsSuccess.Should().BeTrue();
         access.Value.GeneratedPassword.Should().NotBeNullOrWhiteSpace();
         access.Value.HasExistingLogin.Should().BeFalse();
         access.Value.LinkedCustomerUserId.Should().Be(fx.ProvisionedUserId);
+        var replay = await fx.Handlers.Handle(
+            new UpdateFamilyMemberAccessCommand(fx.MemberId, new UpdateFamilyMemberAccessRequest(
+                HasSeparateAccount: true, IsPaused: false, Remove: null,
+                CredentialOperationKey: "family-initial-enable-operation-001")),
+            CancellationToken.None);
+        replay.IsSuccess.Should().BeTrue();
+        replay.Value.GeneratedPassword.Should().BeNull();
+        replay.Value.PasswordAlreadyIssued.Should().BeTrue();
+        replay.Value.RequiresExplicitReset.Should().BeTrue();
+        await fx.Users.Received(1).ResetPasswordAsync(fx.ProvisionedUserId, "reset-token", Arg.Any<string>(), Arg.Any<CancellationToken>());
+        (await fx.Db.FamilyCredentialOperations.CountAsync()).Should().Be(1);
+        var initialPermissions = await fx.Db.FamilyMemberPermissions.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        initialPermissions.ViewCalendar.Should().BeTrue();
+        initialPermissions.ViewProgram.Should().BeTrue();
+        initialPermissions.Version.Should().Be(0);
 
         var again = await fx.Handlers.Handle(new GetFamilyMemberAccessQuery(fx.MemberId), CancellationToken.None);
         again.Value.GeneratedPassword.Should().BeNull();
         again.Value.HasSeparateAccount.Should().BeTrue();
         again.Value.PhoneNumber.Should().Be("+96551111112");
+    }
+
+    [Fact]
+    public async Task Replayed_credential_operation_does_not_reset_again_or_return_password()
+    {
+        var fx = await SeedAsync();
+        var memberAccess = await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        memberAccess.HasSeparateAccount = false;
+        await fx.Db.SaveChangesAsync();
+        fx.Users.FindByPhoneAsync("+96551111112", Arg.Any<CancellationToken>())
+            .Returns(new UserAccountDto(fx.ProvisionedUserId, null, "+96551111112", "Member", UserType.Customer,
+                AccountStatus.Active, null, false, true, DateTime.UtcNow.AddDays(-1), null));
+        fx.Users.GeneratePasswordResetTokenAsync(fx.ProvisionedUserId, Arg.Any<CancellationToken>()).Returns("token");
+        fx.Users.ResetPasswordAsync(fx.ProvisionedUserId, "token", Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success());
+        var request = new UpdateFamilyMemberAccessRequest(true, null, null, GenerateTemporaryPassword: true,
+            CredentialOperationKey: "idempotent-family-credential-001");
+
+        var first = await fx.Handlers.Handle(new UpdateFamilyMemberAccessCommand(fx.MemberId, request), CancellationToken.None);
+        var replay = await fx.Handlers.Handle(new UpdateFamilyMemberAccessCommand(fx.MemberId, request), CancellationToken.None);
+
+        first.IsSuccess.Should().BeTrue();
+        first.Value.GeneratedPassword.Should().NotBeNullOrWhiteSpace();
+        replay.IsSuccess.Should().BeTrue();
+        replay.Value.GeneratedPassword.Should().BeNull();
+        replay.Value.PasswordAlreadyIssued.Should().BeTrue();
+        replay.Value.RequiresExplicitReset.Should().BeTrue();
+        await fx.Users.Received(1).ResetPasswordAsync(fx.ProvisionedUserId, "token", Arg.Any<string>(), Arg.Any<CancellationToken>());
+        (await fx.Db.FamilyCredentialOperations.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Detach_is_idempotent_preserves_family_subscription_lineage_and_blocks_manager_mutation()
+    {
+        var fx = await SeedAsync();
+        fx.Users.FindByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new UserAccountDto(
+            fx.LinkedUserId, null, "+96551111112", "يوسف", UserType.Customer, AccountStatus.Active,
+            null, true, true, DateTime.UtcNow.AddDays(-10), DateTime.UtcNow.AddDays(-1), HasSetPassword: true));
+        var member = await fx.Db.FamilyMembers.SingleAsync(x => x.Id == fx.MemberId);
+        var subscription = await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.MemberSubscriptionId);
+        var groupId = member.FamilyGroupId;
+        var memberId = subscription.FamilyMemberId;
+        var status = subscription.Status;
+        var dayIds = await fx.Db.SubscriptionDays.Where(x => x.SubscriptionId == subscription.Id).Select(x => x.Id).ToListAsync();
+
+        var detached = await fx.Handlers.Handle(new DetachFamilyMemberCommand(fx.MemberId), CancellationToken.None);
+        detached.IsSuccess.Should().BeTrue();
+        detached.Value.DetachedFromFamilyManagement.Should().BeTrue();
+        var detachedPermissions = await fx.Db.FamilyMemberPermissions.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        detachedPermissions.ViewCalendar.Should().BeTrue();
+        detachedPermissions.ViewProgram.Should().BeTrue();
+        detachedPermissions.ViewInvoices.Should().BeTrue();
+        detachedPermissions.SelectRestaurant.Should().BeTrue();
+        detachedPermissions.EditDailyMeals.Should().BeTrue();
+        detachedPermissions.ConfirmMeals.Should().BeTrue();
+        detachedPermissions.EditAddress.Should().BeTrue();
+        detachedPermissions.ChangePassword.Should().BeTrue();
+        detachedPermissions.RequestFreeze.Should().BeTrue();
+        detachedPermissions.RequestRenewal.Should().BeTrue();
+        detachedPermissions.RequestUpgrade.Should().BeTrue();
+        detachedPermissions.CancelSubscription.Should().BeTrue();
+        detachedPermissions.ViewFamilyCalendars.Should().BeFalse();
+        detachedPermissions.ViewFamilyPlans.Should().BeFalse();
+        detachedPermissions.ViewFamilyInvoices.Should().BeFalse();
+        detachedPermissions.Version.Should().Be(1);
+        detachedPermissions.EditMealsAndDays.Should().BeFalse();
+        detachedPermissions.ChangeProgram.Should().BeFalse();
+        detachedPermissions.ChangeDeliveryTime.Should().BeFalse();
+        detachedPermissions.UnitExchange.Should().BeFalse();
+
+        var again = await fx.Handlers.Handle(new DetachFamilyMemberCommand(fx.MemberId), CancellationToken.None);
+        again.IsSuccess.Should().BeTrue();
+        again.Value.DetachedFromFamilyManagement.Should().BeTrue();
+        detachedPermissions.Version.Should().Be(1);
+
+        var persistedMember = await fx.Db.FamilyMembers.SingleAsync(x => x.Id == fx.MemberId);
+        var persistedSubscription = await fx.Db.Subscriptions.SingleAsync(x => x.Id == fx.MemberSubscriptionId);
+        persistedMember.FamilyGroupId.Should().Be(groupId);
+        persistedSubscription.FamilyGroupId.Should().Be(groupId);
+        persistedSubscription.FamilyMemberId.Should().Be(memberId);
+        persistedSubscription.Status.Should().Be(status);
+        (await fx.Db.SubscriptionDays.Where(x => x.SubscriptionId == subscription.Id).Select(x => x.Id).ToListAsync()).Should().Equal(dayIds);
+
+        var accessMutation = await fx.Handlers.Handle(new UpdateFamilyMemberAccessCommand(fx.MemberId,
+            new UpdateFamilyMemberAccessRequest(HasSeparateAccount: false, IsPaused: true, Remove: null)), CancellationToken.None);
+        accessMutation.IsFailure.Should().BeTrue();
+        accessMutation.Error.Code.Should().Be("family.member_detached");
+        var permissionMutation = await fx.Handlers.Handle(new UpdateFamilyMemberPermissionsCommand(fx.MemberId,
+            new UpdateFamilyMemberPermissionsRequest(true, true, true, true, true, true, true, true, ExpectedVersion: 0)),
+            CancellationToken.None);
+        permissionMutation.IsFailure.Should().BeTrue();
+        permissionMutation.Error.Code.Should().Be("family.member_detached");
+    }
+
+    [Fact]
+    public async Task Detach_rejects_member_without_completed_active_login()
+    {
+        var fx = await SeedAsync();
+        var result = await fx.Handlers.Handle(new DetachFamilyMemberCommand(fx.MemberId), CancellationToken.None);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.detach_requires_active_login");
+        (await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberId))
+            .DetachedFromFamilyManagement.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Detach_rejects_submitted_manager_freeze_intent()
+    {
+        var fx = await SeedAsync();
+        fx.Users.FindByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new UserAccountDto(
+            fx.LinkedUserId, null, "+96551111112", "يوسف", UserType.Customer, AccountStatus.Active,
+            null, true, true, DateTime.UtcNow.AddDays(-10), DateTime.UtcNow.AddDays(-1), HasSetPassword: true));
+        fx.Db.SubscriptionFreezeRequests.Add(new SubscriptionFreezeRequest
+        {
+            SubscriptionId = fx.MemberSubscriptionId,
+            FreezeStartDate = new DateOnly(2026, 8, 27),
+            FreezeEndDate = new DateOnly(2026, 8, 28),
+            FreezeDays = 2,
+            Status = VerificationStatus.Submitted
+        });
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Handlers.Handle(new DetachFamilyMemberCommand(fx.MemberId), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.freeze_request_pending");
+        (await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberId))
+            .DetachedFromFamilyManagement.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(FamilyCheckoutBatchStatus.Draft)]
+    [InlineData(FamilyCheckoutBatchStatus.PaymentPending)]
+    [InlineData(FamilyCheckoutBatchStatus.ReviewRequired)]
+    public async Task Detach_is_blocked_while_member_is_selected_or_payment_is_in_flight(FamilyCheckoutBatchStatus status)
+    {
+        var fx = await SeedAsync();
+        fx.Users.FindByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new UserAccountDto(
+            fx.LinkedUserId, null, "+96551111112", "يوسف", UserType.Customer, AccountStatus.Active,
+            null, true, true, DateTime.UtcNow.AddDays(-10), DateTime.UtcNow.AddDays(-1), HasSetPassword: true));
+        var batch = new FamilyCheckoutBatch
+        {
+            FamilyGroupId = fx.GroupId,
+            PayerCustomerUserId = fx.User.UserId!.Value,
+            IdempotencyKey = $"detach-guard-{status}",
+            Status = status,
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+        batch.Lines.Add(new FamilyCheckoutBatchLine
+        {
+            FamilyMemberId = fx.MemberId,
+            CheckoutSelected = true,
+        });
+        fx.Db.FamilyCheckoutBatches.Add(batch);
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Handlers.Handle(new DetachFamilyMemberCommand(fx.MemberId), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.checkout_pending");
+        (await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberId))
+            .DetachedFromFamilyManagement.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("upgrade", "Initializing")]
+    [InlineData("upgrade", "Ready")]
+    [InlineData("upgrade", "ReviewRequired")]
+    [InlineData("renewal", "PaymentPending")]
+    [InlineData("renewal", "ReviewRequired")]
+    public async Task Detach_is_blocked_while_member_upgrade_or_renewal_is_nonterminal(string kind, string state)
+    {
+        var fx = await SeedAsync();
+        fx.Users.FindByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new UserAccountDto(
+            fx.LinkedUserId, null, "+96551111112", "يوسف", UserType.Customer, AccountStatus.Active,
+            null, true, true, DateTime.UtcNow.AddDays(-10), DateTime.UtcNow.AddDays(-1), HasSetPassword: true));
+        if (kind == "upgrade")
+        {
+            fx.Db.SubscriptionTierUpgrades.Add(new SubscriptionTierUpgrade
+            {
+                SubscriptionId = fx.MemberSubscriptionId,
+                FromTier = RestaurantTier.Basic,
+                ToTier = RestaurantTier.Platinum,
+                PriceDifference = new Money(5m, "KWD"),
+                QuotedTotalDue = new Money(5m, "KWD"),
+                Status = VerificationStatus.Submitted,
+                PaymentCreationState = state,
+            });
+        }
+        else
+        {
+            fx.Db.SubscriptionRenewals.Add(new SubscriptionRenewal
+            {
+                PreviousSubscriptionId = fx.MemberSubscriptionId,
+                FamilyGroupId = fx.GroupId,
+                FamilyMemberId = fx.MemberId,
+                Status = state,
+                RequestedAtUtc = DateTime.UtcNow,
+            });
+        }
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Handlers.Handle(new DetachFamilyMemberCommand(fx.MemberId), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.checkout_pending");
+        (await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberId))
+            .DetachedFromFamilyManagement.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("paused")]
+    [InlineData("password_setup")]
+    [InlineData("disabled")]
+    [InlineData("missing_account")]
+    public async Task Detach_rejects_ineligible_member_access(string state)
+    {
+        var fx = await SeedAsync();
+        var access = await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        if (state == "paused") access.IsPaused = true;
+        if (state == "password_setup") access.RequiresPasswordSetup = true;
+        if (state == "disabled") access.HasSeparateAccount = false;
+        if (state == "missing_account") access.LinkedCustomerUserId = null;
+        await fx.Db.SaveChangesAsync();
+
+        fx.Users.FindByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new UserAccountDto(
+            fx.LinkedUserId, null, "+96551111112", "يوسف", UserType.Customer, AccountStatus.Active,
+            null, true, true, DateTime.UtcNow.AddDays(-10), DateTime.UtcNow.AddDays(-1), HasSetPassword: true));
+        var result = await fx.Handlers.Handle(new DetachFamilyMemberCommand(fx.MemberId), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.detach_requires_active_login");
+        access.DetachedFromFamilyManagement.Should().BeFalse();
     }
 
     [Fact]
@@ -658,13 +954,18 @@ public sealed class FamilyManagerHandlerTests
             .Returns(Task.CompletedTask);
 
         var result = await fx.Handlers.Handle(new UpdateFamilyMemberAccessCommand(fx.MemberId,
-            new UpdateFamilyMemberAccessRequest(true, false, null)), CancellationToken.None);
+            new UpdateFamilyMemberAccessRequest(true, false, null,
+                CredentialOperationKey: "family-create-enable-operation-001")), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
         result.Value.GeneratedPassword.Should().NotBeNullOrWhiteSpace();
         result.Value.LinkedCustomerUserId.Should().Be(fx.ProvisionedUserId);
         (await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberId))
             .RequiresPasswordSetup.Should().BeTrue();
+        var permissions = await fx.Db.FamilyMemberPermissions.SingleAsync(x => x.FamilyMemberId == fx.MemberId);
+        permissions.ViewCalendar.Should().BeFalse();
+        permissions.EditDailyMeals.Should().BeFalse();
+        permissions.RequestFreeze.Should().BeFalse();
         (await fx.Db.CustomerProfiles.SingleAsync(x => x.UserId == fx.ProvisionedUserId)).Should().NotBeNull();
         await fx.Users.Received(1).AddToRoleAsync(fx.ProvisionedUserId, AppRoles.Customer, Arg.Any<CancellationToken>());
     }
@@ -691,7 +992,8 @@ public sealed class FamilyManagerHandlerTests
             AccountStatus.Active, null, false, true, DateTime.UtcNow.AddYears(-2), DateTime.UtcNow.AddDays(-1), HasSetPassword: true));
 
         var result = await fx.Handlers.Handle(new UpdateFamilyMemberAccessCommand(fx.MemberId,
-            new UpdateFamilyMemberAccessRequest(true, false, null, GenerateTemporaryPassword: true)), CancellationToken.None);
+            new UpdateFamilyMemberAccessRequest(true, false, null, GenerateTemporaryPassword: true,
+                CredentialOperationKey: "family-temp-password-operation-001")), CancellationToken.None);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("family.manager_account_immutable");
@@ -714,7 +1016,8 @@ public sealed class FamilyManagerHandlerTests
         fx.Users.SetHasPasswordAsync(fx.ProvisionedUserId, false, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         var result = await fx.Handlers.Handle(new UpdateFamilyMemberAccessCommand(fx.MemberId,
-            new UpdateFamilyMemberAccessRequest(true, null, null, GenerateTemporaryPassword: true)), CancellationToken.None);
+            new UpdateFamilyMemberAccessRequest(true, null, null, GenerateTemporaryPassword: true,
+                CredentialOperationKey: "family-temp-password-operation-002")), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
         result.Value.GeneratedPassword.Should().NotBeNullOrWhiteSpace();
@@ -733,7 +1036,7 @@ public sealed class FamilyManagerHandlerTests
             fx.ProvisionedUserId, null, "+96551111112", "Member", UserType.Customer,
             AccountStatus.Active, null, false, true, DateTime.UtcNow.AddDays(-10), null, HasSetPassword: true));
         var result = await fx.Handlers.Handle(new UpdateFamilyMemberAccessCommand(fx.MemberId,
-            new(true, null, null)), CancellationToken.None);
+            new(true, null, null, CredentialOperationKey: "reenable-existing-password-001")), CancellationToken.None);
         result.IsSuccess.Should().BeTrue();
         result.Value.GeneratedPassword.Should().BeNull();
         await fx.Users.DidNotReceive().GeneratePasswordResetTokenAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
@@ -750,7 +1053,8 @@ public sealed class FamilyManagerHandlerTests
 
         var access = await fx.Handlers.Handle(
             new UpdateFamilyMemberAccessCommand(fx.MemberId, new UpdateFamilyMemberAccessRequest(
-                HasSeparateAccount: true, IsPaused: false, Remove: null)),
+                HasSeparateAccount: true, IsPaused: false, Remove: null,
+                CredentialOperationKey: "family-existing-enable-operation-001")),
             CancellationToken.None);
 
         access.IsSuccess.Should().BeTrue();
@@ -919,7 +1223,7 @@ public sealed class FamilyManagerHandlerTests
         await db.SaveChangesAsync();
         db.AddRange(
             new FamilyMemberAccess { FamilyMemberId = managerMember.Id },
-            new FamilyMemberAccess { FamilyMemberId = member.Id },
+            new FamilyMemberAccess { FamilyMemberId = member.Id, HasSeparateAccount = true, LinkedCustomerUserId = linkedUserId },
             new FamilyMemberPermissions { FamilyMemberId = managerMember.Id },
             new FamilyMemberPermissions { FamilyMemberId = member.Id });
         await db.SaveChangesAsync();

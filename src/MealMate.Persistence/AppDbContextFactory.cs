@@ -8,7 +8,7 @@ namespace MealMate.Persistence;
 /// <summary>
 /// Used by EF Core tooling (<c>dotnet ef migrations</c>) to build the context
 /// without the full host. The connection string is read from the
-/// <c>MEALMATE_DB_CONNECTION</c> environment variable, falling back to a local default.
+/// <c>MEALMATE_DB_CONNECTION</c> environment variable. No implicit database target is allowed.
 /// </summary>
 public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>
 {
@@ -17,7 +17,7 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
         var connectionString = Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            connectionString = "Host=157.173.104.121;Port=5432;Database=mealmate_db;Username=mealmate_user;Password=Fahad1990@MealMate;Trust Server Certificate=true";
+            throw new InvalidOperationException("Set MEALMATE_DB_CONNECTION explicitly before running migration tooling.");
         }
 
         var options = new DbContextOptionsBuilder<AppDbContext>()

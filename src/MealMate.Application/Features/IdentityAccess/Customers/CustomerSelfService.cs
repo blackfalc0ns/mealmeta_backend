@@ -505,8 +505,6 @@ public sealed class ChangeCustomerPasswordCommandValidator : AbstractValidator<C
 
 public sealed class ChangeCustomerPasswordCommandHandler : ICommandHandler<ChangeCustomerPasswordCommand>
 {
-    private readonly IAppDbContext _db;
-    private readonly IFamilyActionPolicy _familyPolicy;
     private readonly ICurrentUser _currentUser;
     private readonly IUserAccountService _users;
     private readonly IAuthSessionService _sessions;
@@ -520,8 +518,7 @@ public sealed class ChangeCustomerPasswordCommandHandler : ICommandHandler<Chang
         IAuditLogger audit,
         IFamilyActionPolicy? familyPolicy = null)
     {
-        (_db, _currentUser, _users, _sessions, _audit) = (db, currentUser, users, sessions, audit);
-        _familyPolicy = familyPolicy ?? new FamilyActionPolicy(db);
+        (_currentUser, _users, _sessions, _audit) = (currentUser, users, sessions, audit);
     }
 
     public async Task<Result> Handle(ChangeCustomerPasswordCommand request, CancellationToken cancellationToken)
@@ -535,17 +532,8 @@ public sealed class ChangeCustomerPasswordCommandHandler : ICommandHandler<Chang
             return Error.Forbidden(MessageCodes.Auth.InvalidCredentials, "This endpoint is only available to customer accounts.");
         }
 
-        var memberships = await _db.FamilyMemberAccesses.AsNoTracking()
-            .Where(x => x.LinkedCustomerUserId == userId && x.RemovedAtUtc == null
-                && _db.FamilyMembers.Any(m => m.Id == x.FamilyMemberId
-                    && _db.FamilyGroups.Any(g => g.Id == m.FamilyGroupId && g.Status != FamilyGroupStatus.Cancelled)))
-            .Select(x => x.FamilyMemberId).ToListAsync(cancellationToken);
-        foreach (var memberId in memberships)
-        {
-            var decision = await _familyPolicy.EvaluateAsync(userId, memberId, FamilyAction.ChangePassword, cancellationToken);
-            if (!decision.Allowed)
-                return Error.Forbidden(decision.ReasonCode ?? "family.permission_required");
-        }
+        // Account credentials are owned by the customer. Family access grants control
+        // family data actions and must not prevent a customer from changing their password.
         var changed = await _users.ChangePasswordAsync(userId, request.CurrentPassword, request.NewPassword, cancellationToken);
         if (changed.IsFailure) return changed.Error;
 

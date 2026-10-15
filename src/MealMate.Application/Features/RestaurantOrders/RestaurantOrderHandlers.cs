@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.CalendarMeals;
@@ -176,13 +177,8 @@ public sealed class RestaurantOrderService
 
             var mealSummary = BuildMealSummary(dayMeals!, sub?.Bundle);
 
-            var programLabel = new LocalizedTextDto(
-                sub?.Program?.NameAr ?? "برنامج غذائي",
-                sub?.Program?.NameEn ?? "Nutrition Program");
-
-            var bundleLabel = new LocalizedTextDto(
-                sub?.Bundle?.NameAr ?? "باقة كاملة",
-                sub?.Bundle?.NameEn ?? "Full Package");
+            var programLabel = DomainLabel(sub?.Program?.NameAr, sub?.Program?.NameEn, "البرنامج غير متاح", "Program unavailable");
+            var bundleLabel = DomainLabel(sub?.Bundle?.NameAr, sub?.Bundle?.NameEn, "الباقة غير متاحة", "Bundle unavailable");
 
             var deliveryDateLabel = FormatDeliveryDate(day.ServiceDate);
             var deliveryWindow = GetDeliveryWindow(
@@ -235,7 +231,7 @@ public sealed class RestaurantOrderService
                 Confirmed: isConfirmed,
                 IsReassigned: isReassigned,
                 Route: $"/restaurant/orders/detail/{orderCode}"
-            ));
+            ) { ServiceDate = day.ServiceDate, ConfirmationDeadlineUtc = deadlineTime });
         }
 
         var openItems = items.Where(i => !i.Confirmed).ToList();
@@ -246,7 +242,7 @@ public sealed class RestaurantOrderService
 
         var summaries = new List<PendingConfirmationSummaryDto>
         {
-            new("pending", new LocalizedTextDto("بانتظار التأكيد", "Awaiting confirm"), pendingCount, new LocalizedTextDto("داخل نافذة 24 ساعة", "Inside 24h window"), "primary", "lucideClock"),
+            new("pending", new LocalizedTextDto("بانتظار التأكيد", "Awaiting confirm"), pendingCount, new LocalizedTextDto("بانتظار إجراء المطعم", "Awaiting restaurant action"), "primary", "lucideClock"),
             new("critical", new LocalizedTextDto("حرج (< 4س)", "Critical (< 4h)"), criticalCount, new LocalizedTextDto("يحتاج تأكيد فوري", "Needs immediate confirm"), "danger", "lucideTriangleAlert"),
             new("warning", new LocalizedTextDto("تنبيه (< 8س)", "Warning (< 8h)"), warningCount, new LocalizedTextDto("اقترب الموعد النهائي", "Deadline approaching"), "warning", "lucideTimer"),
             new("overdue", new LocalizedTextDto("متأخر", "Overdue"), overdueCount, new LocalizedTextDto("قد يُعاد تعيينه", "May be reassigned"), "accent", "lucideCircleAlert")
@@ -256,9 +252,9 @@ public sealed class RestaurantOrderService
 
         var data = new PendingConfirmationDataDto(
             Title: new LocalizedTextDto("بانتظار التأكيد", "Pending confirmation"),
-            Subtitle: new LocalizedTextDto("طلبات وصلت عند −72س · أكّد خلال 24 ساعة قبل تصعيد الإدارة", "Orders locked at −72h · confirm within 24 hours before admin escalation"),
+            Subtitle: new LocalizedTextDto("أكّد الطلبات قبل انتهاء مهلة التأكيد المحددة في سياسة التشغيل", "Confirm orders before the operational policy confirmation deadline"),
             DateLabel: dateLabel,
-            WindowHint: new LocalizedTextDto("نافذة التأكيد 24 ساعة", "24h confirmation window"),
+            WindowHint: new LocalizedTextDto($"مهلة التأكيد {confirmationMinutes} دقيقة", $"Confirmation window: {confirmationMinutes} minutes"),
             Summaries: summaries,
             Orders: items
         );
@@ -648,6 +644,15 @@ public sealed class RestaurantOrderService
         if (day.Status is not (SubscriptionDayStatus.Locked72h or SubscriptionDayStatus.SentToRestaurant))
             return Result.Failure<bool>(Error.Conflict(MessageCodes.Orders.InvalidStatus, "Order is not awaiting restaurant confirmation."));
 
+        var confirmationMinutes = (await MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.ReadAsync(_db, cancellationToken)).Cutoff.EffectiveConfirmationMinutes;
+        var receivedAtUtc = await _db.RestaurantDailyOrders.AsNoTracking()
+            .Where(x => x.SubscriptionDayId == day.Id && x.RestaurantId == restaurantId && x.Status == OrderStatus.AwaitingRestaurantConfirmation)
+            .Select(x => (DateTime?)x.CreatedAtUtc)
+            .OrderByDescending(x => x)
+            .FirstOrDefaultAsync(cancellationToken) ?? day.LockAtUtc ?? day.CreatedAtUtc;
+        if (receivedAtUtc.AddMinutes(confirmationMinutes) <= _clock.UtcNow)
+            return Result.Failure<bool>(Error.Conflict("orders.confirmation_expired", "The restaurant confirmation window has expired."));
+
         day.Status = SubscriptionDayStatus.ConfirmedByRestaurant;
         day.ConfirmedAtUtc = _clock.UtcNow;
 
@@ -710,6 +715,15 @@ public sealed class RestaurantOrderService
         if (day.Status is not (SubscriptionDayStatus.Locked72h or SubscriptionDayStatus.SentToRestaurant))
             return Result.Failure<bool>(Error.Conflict(MessageCodes.Orders.InvalidStatus, "Order is not awaiting restaurant confirmation."));
 
+        var confirmationMinutes = (await MealMate.Application.Features.AdminDashboard.OperationalPolicies.OperationalPolicyRules.ReadAsync(_db, cancellationToken)).Cutoff.EffectiveConfirmationMinutes;
+        var receivedAtUtc = await _db.RestaurantDailyOrders.AsNoTracking()
+            .Where(x => x.SubscriptionDayId == day.Id && x.RestaurantId == restaurantId && x.Status == OrderStatus.AwaitingRestaurantConfirmation)
+            .Select(x => (DateTime?)x.CreatedAtUtc)
+            .OrderByDescending(x => x)
+            .FirstOrDefaultAsync(cancellationToken) ?? day.LockAtUtc ?? day.CreatedAtUtc;
+        if (receivedAtUtc.AddMinutes(confirmationMinutes) <= _clock.UtcNow)
+            return Result.Failure<bool>(Error.Conflict("orders.confirmation_expired", "The restaurant confirmation window has expired."));
+
         day.Status = SubscriptionDayStatus.ReplacementRequired;
 
         var reasonCode = request.ReasonCode ?? "RESTAURANT_REJECTED";
@@ -749,7 +763,7 @@ public sealed class RestaurantOrderService
             return Result.Failure<DailyOrdersDataDto>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
         var now = _clock.UtcNow;
-        var targetDate = request.Date ?? DateOnly.FromDateTime(now);
+        var targetDate = request.Date ?? BusinessCalendarDate.KuwaitToday(now);
 
         var query = _db.SubscriptionDays
             .AsNoTracking()
@@ -765,7 +779,7 @@ public sealed class RestaurantOrderService
         }
         else
         {
-            query = query.Where(x => x.ServiceDate == targetDate || x.Status != SubscriptionDayStatus.Delivered);
+            query = query.Where(x => x.ServiceDate == targetDate);
         }
 
         var days = await query
@@ -784,8 +798,13 @@ public sealed class RestaurantOrderService
         var dayIds = days.Select(d => d.Id).ToList();
         var dailyOrders = await _db.RestaurantDailyOrders
             .AsNoTracking()
-            .Where(r => dayIds.Contains(r.SubscriptionDayId))
+            .Where(r => r.RestaurantId == restaurantId && dayIds.Contains(r.SubscriptionDayId))
             .ToDictionaryAsync(r => r.SubscriptionDayId, cancellationToken);
+
+        var barcodeDayIds = (await _db.MealBarcodes.AsNoTracking()
+            .Where(x => dayIds.Contains(x.SubscriptionDayId) && !x.IsRevoked && x.BarcodeValue != "")
+            .Select(x => x.SubscriptionDayId)
+            .ToListAsync(cancellationToken)).ToHashSet();
 
         var mealSelections = await _db.DailyMealSelections
             .AsNoTracking()
@@ -810,12 +829,10 @@ public sealed class RestaurantOrderService
 
             var firstMeal = dayMeals.FirstOrDefault();
             var mealName = firstMeal != null
-                ? new LocalizedTextDto(firstMeal.NameAr, firstMeal.NameEn)
-                : new LocalizedTextDto("وجبة متوازنة معتمدة", "Balanced meal approved");
+                ? DomainLabel(firstMeal.NameAr, firstMeal.NameEn, "الوجبة غير متاحة", "Meal unavailable")
+                : new LocalizedTextDto("الوجبة غير متاحة", "Meal unavailable");
 
-            var programLabel = new LocalizedTextDto(
-                $"{sub?.Program?.NameAr ?? "لياقة"} · بلاتينيوم",
-                $"{sub?.Program?.NameEn ?? "Fitness"} · Platinum");
+            var programLabel = DomainLabel(sub?.Program?.NameAr, sub?.Program?.NameEn, "البرنامج غير متاح", "Program unavailable");
 
             dailyOrders.TryGetValue(day.Id, out var dailyOrder);
 
@@ -858,7 +875,7 @@ public sealed class RestaurantOrderService
                 _ => new LocalizedTextDto("نافذة -24س", "-24h window")
             };
 
-            var barcodeReady = status != "preparing";
+            var barcodeReady = barcodeDayIds.Contains(day.Id);
 
             items.Add(new DailyOrderItemDto(
                 Id: day.Id,
@@ -875,7 +892,7 @@ public sealed class RestaurantOrderService
                 BarcodeReady: barcodeReady,
                 ActionLabel: new LocalizedTextDto("عرض التفاصيل", "View details"),
                 Route: $"/restaurant/orders/detail/{orderCode}"
-            ));
+            ) { ServiceDate = day.ServiceDate });
 
         }
 
@@ -913,7 +930,7 @@ public sealed class RestaurantOrderService
             return Result.Failure<Upcoming24hDataDto>(Error.NotFound("restaurant.not_found", "No restaurant profile found."));
 
         var now = _clock.UtcNow;
-        var today = DateOnly.FromDateTime(now);
+        var today = BusinessCalendarDate.KuwaitToday(now);
         var tomorrow = today.AddDays(1);
         var targetDate = request.TargetDate;
 
@@ -986,6 +1003,10 @@ public sealed class RestaurantOrderService
               .Select(x => (x.SubscriptionDayId, x.Kind))
               .ToList();
 
+        var dailyOrdersByDay = await _db.RestaurantDailyOrders.AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId && dayIds.Contains(x.SubscriptionDayId))
+            .ToDictionaryAsync(x => x.SubscriptionDayId, cancellationToken);
+
         var boxLabelDayIds = labels.Where(x => x.Kind == MealLabelKind.Box).Select(x => x.SubscriptionDayId).ToHashSet();
         var mealLabelCounts = labels
             .Where(x => x.Kind == MealLabelKind.Meal)
@@ -1003,21 +1024,18 @@ public sealed class RestaurantOrderService
 
             var mealSummary = BuildMealSummary(dayMeals!, sub?.Bundle);
 
-            var programLabel = new LocalizedTextDto(
-                sub?.Program?.NameAr ?? "لياقة · بلاتينيوم",
-                sub?.Program?.NameEn ?? "Fitness · Platinum");
-
-            var bundleLabel = new LocalizedTextDto(
-                sub?.Bundle?.NameAr ?? "باقة كاملة",
-                sub?.Bundle?.NameEn ?? "Full package");
+            var programLabel = DomainLabel(sub?.Program?.NameAr, sub?.Program?.NameEn, "البرنامج غير متاح", "Program unavailable");
+            var bundleLabel = DomainLabel(sub?.Bundle?.NameAr, sub?.Bundle?.NameEn, "الباقة غير متاحة", "Bundle unavailable");
 
             const string shift = "unscheduled";
             var shiftLabel = new LocalizedTextDto("لم يحدد", "Unscheduled");
             var deliverySlotLabel = new LocalizedTextDto("لم يحدد", "Unscheduled");
 
             var deliveryDateLabel = FormatDeliveryDate(day.ServiceDate);
-            var deliveryDateTime = day.ServiceDate.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Utc);
-            var hoursToDelivery = (int)Math.Max(1, Math.Min(24, Math.Floor((deliveryDateTime - now).TotalHours)));
+            // The domain currently persists only a service date, not a scheduled delivery instant.
+            // Do not manufacture a noon UTC appointment or countdown.
+            int? hoursToDelivery = null;
+            DateTime? scheduledDeliveryAtUtc = null;
 
             var invoiceGenerated = invoiceDayIds.Contains(day.Id);
             var barcodeGenerated = barcodeDayIds.Contains(day.Id);
@@ -1035,6 +1053,27 @@ public sealed class RestaurantOrderService
                 prepStatus = "docs-ready";
             else
                 prepStatus = "needs-docs";
+
+            var documentsStatus = invoiceGenerated && barcodeGenerated && labelsGenerated
+                ? "ready"
+                : invoiceGenerated || barcodeGenerated || labelsGenerated ? "partial" : "missing";
+            var kitchenStatus = dailyOrdersByDay.TryGetValue(day.Id, out var dailyOrder)
+                ? dailyOrder.Status switch
+                {
+                    OrderStatus.Preparing => "preparing",
+                    OrderStatus.ReadyForPickup or OrderStatus.AssignedToDriver or OrderStatus.PickedUp => "ready-for-pickup",
+                    OrderStatus.OnTheWay => "out-for-delivery",
+                    OrderStatus.Delivered => "completed",
+                    OrderStatus.RestaurantConfirmed => "confirmed",
+                    _ => "unknown"
+                }
+                : day.Status switch
+            {
+                SubscriptionDayStatus.Preparing => "preparing",
+                SubscriptionDayStatus.OutForDelivery => "out-for-delivery",
+                SubscriptionDayStatus.Delivered => "completed",
+                _ => "confirmed"
+            };
 
             var orderCode = $"ORD-{day.ServiceDate:MMdd}-{day.Id.ToString()[..4].ToUpperInvariant()}";
             var batchCode = $"BATCH-{day.ServiceDate:dd}";
@@ -1061,7 +1100,8 @@ public sealed class RestaurantOrderService
                 Route: $"/restaurant/orders/detail/{orderCode}",
                 LabelsRoute: "/restaurant/orders/labels",
                 IsPrinted: isPrinted
-            ));
+            ) { ServiceDate = day.ServiceDate, ScheduledDeliveryAtUtc = scheduledDeliveryAtUtc,
+                KitchenStatus = kitchenStatus, DocumentsStatus = documentsStatus });
 
         }
 
@@ -1072,7 +1112,7 @@ public sealed class RestaurantOrderService
 
         var summaries = new List<Upcoming24hSummaryDto>
         {
-            new("total", new LocalizedTextDto("خلال 24 ساعة", "Within 24h"), totalCount, new LocalizedTextDto("طلبات للتحضير النهائي", "Orders for final prep"), "primary", "lucidePackage"),
+            new("total", new LocalizedTextDto("طلبات التجهيز", "Preparation orders"), totalCount, new LocalizedTextDto("طلبات للتحضير النهائي", "Orders for final prep"), "primary", "lucidePackage"),
             new("invoices", new LocalizedTextDto("فواتير جاهزة", "Invoices ready"), invoiceCount, new LocalizedTextDto("تم التوليد تلقائيًا", "Auto-generated"), "accent", "lucideFileText"),
             new("barcodes", new LocalizedTextDto("باركود جاهز", "Barcodes ready"), barcodeCount, new LocalizedTextDto("جاهز للمسح", "Ready to scan"), "warning", "lucideScanBarcode"),
             new("labels", new LocalizedTextDto("ملصقات جاهزة", "Labels ready"), labelCount, new LocalizedTextDto("جاهز للطباعة", "Ready to print"), "neutral", "lucidePrinter")
@@ -1081,10 +1121,12 @@ public sealed class RestaurantOrderService
         var dateLabel = FormatDateLabel(DateOnly.FromDateTime(now));
 
         var data = new Upcoming24hDataDto(
-            Title: new LocalizedTextDto("تحضير 24 ساعة", "Upcoming 24h prep"),
+            Title: new LocalizedTextDto("تجهيز الطلبات", "Order preparation"),
             Subtitle: new LocalizedTextDto("إشعار التسليم النهائي · فواتير وباركود وملصقات ثم التحضير الأخير", "Final delivery notice · invoices, barcodes, labels, then final prep"),
             DateLabel: dateLabel,
-            WindowHint: new LocalizedTextDto("نافذة 24 ساعة", "24h window"),
+            WindowHint: targetDate.HasValue
+                ? new LocalizedTextDto("تاريخ الخدمة المحدد", "Selected service date")
+                : new LocalizedTextDto("طلبات اليوم وغدًا حسب تاريخ الخدمة", "Today and tomorrow by service date"),
             PrintLabel: new LocalizedTextDto("طباعة الملصقات", "Print labels"),
             Summaries: summaries,
             Orders: items
@@ -1380,22 +1422,28 @@ public sealed class RestaurantOrderService
         });
     }
 
+    private static LocalizedTextDto DomainLabel(string? ar, string? en, string missingAr, string missingEn)
+    {
+        var nameAr = string.IsNullOrWhiteSpace(ar) ? null : ar;
+        var nameEn = string.IsNullOrWhiteSpace(en) ? null : en;
+        return new LocalizedTextDto(nameAr ?? nameEn ?? missingAr, nameEn ?? nameAr ?? missingEn);
+    }
+
     private static LocalizedTextDto BuildMealSummary(List<Meal> meals, Bundle? bundle)
     {
         if (meals.Count == 0)
         {
-            return new LocalizedTextDto(
-                bundle?.NameAr ?? "باقة كاملة",
-                bundle?.NameEn ?? "Full package");
+            return new LocalizedTextDto("الوجبات غير متاحة", "Meals unavailable");
         }
 
-        var namesAr = string.Join(" + ", meals.Take(3).Select(m => m.NameAr));
-        var namesEn = string.Join(" + ", meals.Take(3).Select(m => m.NameEn));
+        var names = meals.Take(3).Select(m => DomainLabel(m.NameAr, m.NameEn, "الوجبة غير متاحة", "Meal unavailable")).ToList();
+        var namesAr = string.Join(" + ", names.Select(m => m.Ar));
+        var namesEn = string.Join(" + ", names.Select(m => m.En));
 
-        var prefixAr = bundle?.NameAr ?? "باقة";
-        var prefixEn = bundle?.NameEn ?? "Package";
-
-        return new LocalizedTextDto($"{prefixAr} · {namesAr}", $"{prefixEn} · {namesEn}");
+        if (string.IsNullOrWhiteSpace(bundle?.NameAr) && string.IsNullOrWhiteSpace(bundle?.NameEn))
+            return new LocalizedTextDto(namesAr, namesEn);
+        var prefix = DomainLabel(bundle?.NameAr, bundle?.NameEn, "الباقة غير متاحة", "Bundle unavailable");
+        return new LocalizedTextDto($"{prefix.Ar} · {namesAr}", $"{prefix.En} · {namesEn}");
     }
 
     private static LocalizedTextDto GetSlotLabel(string slot)

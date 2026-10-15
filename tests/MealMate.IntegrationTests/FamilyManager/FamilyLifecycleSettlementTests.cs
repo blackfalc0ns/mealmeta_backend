@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
+using MealMate.Application.Common.Models;
 using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Application.Features.FamilyManager;
 using MealMate.Application.Features.FamilyCheckout;
@@ -18,6 +19,7 @@ using MealMate.Persistence;
 using MealMate.Persistence.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Npgsql;
 using NSubstitute;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -28,17 +30,183 @@ namespace MealMate.IntegrationTests.FamilyManager;
 public sealed class FamilyLifecycleSettlementTests : IAsyncLifetime
 {
     private static readonly DateTime UtcNow = new(2026, 10, 9, 9, 0, 0, DateTimeKind.Utc);
-    private PostgreSqlContainer _container = null!;
+    private MealMate.Testing.PostgresTestDatabase _container = null!;
 
     public async Task InitializeAsync()
     {
-        _container = new PostgreSqlBuilder().WithImage("postgres:16-alpine").Build();
+        _container = new();
         await _container.StartAsync();
         await using var db = CreateDb();
         await db.Database.MigrateAsync();
     }
 
     public async Task DisposeAsync() => await _container.DisposeAsync();
+
+    [Fact]
+    public async Task Detach_persists_on_postgres_without_changing_subscription_or_service_days()
+    {
+        var seed = await SeedPaidFamilyAsync();
+        Guid linkedUserId;
+        await using (var arrange = CreateDb())
+        {
+            var access = await arrange.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == seed.MemberId);
+            access.HasSeparateAccount = true;
+            access.RequiresPasswordSetup = false;
+            access.IsPaused = false;
+            access.LinkedCustomerUserId = linkedUserId = Guid.NewGuid();
+            await arrange.SaveChangesAsync();
+        }
+
+        await using (var act = CreateDb())
+        {
+            var currentUser = Substitute.For<ICurrentUser>();
+            currentUser.UserId.Returns(seed.ManagerId);
+            currentUser.UserType.Returns(UserType.Customer);
+            var users = Substitute.For<IUserAccountService>();
+            users.FindByIdAsync(linkedUserId, Arg.Any<CancellationToken>()).Returns(new UserAccountDto(
+                linkedUserId, null, null, "Member", UserType.Customer, AccountStatus.Active,
+                null, true, true, UtcNow.AddDays(-10), UtcNow.AddDays(-1), HasSetPassword: true));
+            var clock = Substitute.For<IDateTimeProvider>();
+            clock.UtcNow.Returns(UtcNow);
+            clock.TodayUtc.Returns(new DateOnly(2026, 10, 9));
+            var handlers = new FamilyManagerHandlers(act, currentUser, clock,
+                Substitute.For<IFamilyPricingSettingsReader>(), users,
+                transactions: new PostgresApplicationTransactionExecutor(act),
+                locks: new PostgresApplicationLockManager(act));
+
+            var detached = await handlers.Handle(new DetachFamilyMemberCommand(seed.MemberId), CancellationToken.None);
+            Assert.True(detached.IsSuccess, detached.IsFailure ? detached.Error.Code : null);
+        }
+
+        await using var verify = CreateDb();
+        var member = await verify.FamilyMembers.SingleAsync(x => x.Id == seed.MemberId);
+        var subscription = await verify.Subscriptions.SingleAsync(x => x.Id == seed.SubscriptionId);
+        var days = await verify.SubscriptionDays.Where(x => x.SubscriptionId == seed.SubscriptionId)
+            .OrderBy(x => x.ServiceDate).Select(x => new { x.Id, x.ServiceDate, x.Status }).ToListAsync();
+        Assert.True((await verify.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == seed.MemberId))
+            .DetachedFromFamilyManagement);
+        Assert.Equal(seed.GroupId, member.FamilyGroupId);
+        Assert.Equal(seed.GroupId, subscription.FamilyGroupId);
+        Assert.Equal(seed.MemberId, subscription.FamilyMemberId);
+        Assert.Equal(SubscriptionStatus.Active, subscription.Status);
+        Assert.Equal(seed.ServiceDates.OrderBy(x => x), days.Select(x => x.ServiceDate));
+        Assert.Equal([SubscriptionDayStatus.Locked72h, SubscriptionDayStatus.Open], days.Select(x => x.Status));
+    }
+
+    [Fact]
+    public async Task Concurrent_credential_requests_with_same_operation_key_reset_once_and_replay_without_plaintext()
+    {
+        var seed = await SeedPaidFamilyAsync();
+        Guid linkedUserId;
+        await using (var arrange = CreateDb())
+        {
+            linkedUserId = await arrange.FamilyMemberAccesses.Where(x => x.FamilyMemberId == seed.MemberId)
+                .Select(x => x.LinkedCustomerUserId!.Value).SingleAsync();
+        }
+
+        var account = new UserAccountDto(linkedUserId, null, null, "Member", UserType.Customer,
+            AccountStatus.Active, null, true, true, UtcNow.AddDays(-10), null, HasSetPassword: true);
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(linkedUserId, Arg.Any<CancellationToken>()).Returns(account);
+        users.GeneratePasswordResetTokenAsync(linkedUserId, Arg.Any<CancellationToken>()).Returns("reset-token");
+        var resetCount = 0;
+        users.ResetPasswordAsync(linkedUserId, "reset-token", Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                Interlocked.Increment(ref resetCount);
+                return Task.FromResult(Result.Success());
+            });
+        var operationKey = "credential-operation-concurrency-001";
+        var request = new UpdateFamilyMemberAccessRequest(HasSeparateAccount: true, IsPaused: null, Remove: null,
+            GenerateTemporaryPassword: true, CredentialOperationKey: operationKey);
+
+        await using var firstDb = CreateDb();
+        await using var secondDb = CreateDb();
+        var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task<MealMate.Application.Common.Models.Result<FamilyMemberAccessDto>> RunAsync(AppDbContext db)
+        {
+            await startGate.Task;
+            return await CreateFamilyManagerHandlers(db, seed.ManagerId, users)
+                .Handle(new UpdateFamilyMemberAccessCommand(seed.MemberId, request), CancellationToken.None);
+        }
+        var first = RunAsync(firstDb);
+        var second = RunAsync(secondDb);
+        startGate.SetResult();
+
+        var results = await Task.WhenAll(first, second);
+        Assert.All(results, result => Assert.True(result.IsSuccess, result.IsFailure ? result.Error.Code : null));
+        Assert.Equal(1, resetCount);
+        var issued = Assert.Single(results.Where(x => x.Value.GeneratedPassword is not null));
+        var replay = Assert.Single(results.Where(x => x.Value.GeneratedPassword is null));
+        Assert.False(issued.Value.PasswordAlreadyIssued);
+        Assert.False(issued.Value.RequiresExplicitReset);
+        Assert.True(replay.Value.PasswordAlreadyIssued);
+        Assert.True(replay.Value.RequiresExplicitReset);
+
+        await using var verify = CreateDb();
+        Assert.Equal(1, await verify.FamilyCredentialOperations.CountAsync(x => x.FamilyMemberId == seed.MemberId));
+    }
+
+    [Fact]
+    public async Task Freeze_request_waiting_on_family_lock_rechecks_manager_authorization_after_detachment()
+    {
+        var seed = await SeedPaidFamilyAsync();
+        await using (var beforeDetach = CreateDb())
+        {
+            var subscription = await beforeDetach.Subscriptions.SingleAsync(x => x.Id == seed.SubscriptionId);
+            var authorization = await new FamilySubscriptionAccessService(beforeDetach,
+                    new FamilyActionPolicy(beforeDetach))
+                .AuthorizeAsync(subscription, seed.ManagerId, FamilyAction.RequestFreeze, CancellationToken.None);
+            Assert.True(authorization.IsSuccess, authorization.IsFailure ? authorization.Error.Code : null);
+        }
+
+        var applicationName = "family-freeze-detach-" + Guid.NewGuid().ToString("N");
+        await using var holder = CreateDb();
+        await using var transaction = await holder.Database.BeginTransactionAsync();
+        var transactionCommitted = false;
+        await holder.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT \"Id\" FROM \"FamilyGroups\" WHERE \"Id\" = {seed.GroupId} FOR UPDATE");
+        var access = await holder.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == seed.MemberId);
+        access.DetachedFromFamilyManagement = true;
+        await holder.SaveChangesAsync();
+
+        using var commandCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var commandDb = CreateDb(applicationName);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(UtcNow);
+        clock.TodayUtc.Returns(new DateOnly(2026, 10, 9));
+        var handler = new SubscriptionOperationsHandlers(commandDb, Substitute.For<IAuditLogger>(), clock,
+            Substitute.For<ISubscriptionTierUpgradeQuoteBuilder>(),
+            transactions: new PostgresApplicationTransactionExecutor(commandDb),
+            locks: new PostgresApplicationLockManager(commandDb));
+        var command = handler.Handle(new RequestSubscriptionFreezeCommand(seed.SubscriptionId,
+            seed.ServiceDates[0], seed.ServiceDates[0], CustomerActorUserId: seed.ManagerId), commandCancellation.Token);
+
+        try
+        {
+            await WaitForPostgresLockWaitAsync(applicationName, TimeSpan.FromSeconds(10), commandCancellation.Token);
+            await transaction.CommitAsync();
+            transactionCommitted = true;
+            var result = await command;
+            Assert.True(result.IsFailure);
+            Assert.Equal("family.member_detached", result.Error.Code);
+
+            await using var verify = CreateDb();
+            Assert.Empty(await verify.SubscriptionFreezeRequests.Where(x => x.SubscriptionId == seed.SubscriptionId).ToListAsync());
+            Assert.True((await verify.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == seed.MemberId))
+                .DetachedFromFamilyManagement);
+        }
+        finally
+        {
+            if (!command.IsCompleted)
+            {
+                commandCancellation.Cancel();
+                try { await command; } catch (OperationCanceledException) { }
+            }
+            if (!transactionCommitted)
+                await transaction.RollbackAsync();
+        }
+    }
 
     [Fact]
     public async Task Customer_cancellation_racing_manager_removal_creates_one_payer_credit_and_preserves_locked_day()
@@ -755,8 +923,44 @@ public sealed class FamilyLifecycleSettlementTests : IAsyncLifetime
         return new Seed(group.Id, member.Id, Guid.Empty, manager, manager, batch.Id, []);
     }
 
-    private AppDbContext CreateDb() => new(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_container.GetConnectionString()).Options,
+    private AppDbContext CreateDb(string? applicationName = null)
+    {
+        var connectionString = _container.GetConnectionString();
+        if (applicationName is not null)
+            connectionString = new NpgsqlConnectionStringBuilder(connectionString) { ApplicationName = applicationName }.ConnectionString;
+        return new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(connectionString).Options,
         Substitute.For<IDomainEventDispatcher>());
+    }
+
+    private async Task WaitForPostgresLockWaitAsync(string applicationName, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await using var monitor = CreateDb();
+            var waiting = await monitor.Database.SqlQuery<int>(
+                $"SELECT COUNT(*)::int AS \"Value\" FROM pg_stat_activity WHERE application_name = {applicationName} AND wait_event_type = 'Lock'")
+                .SingleAsync(cancellationToken);
+            if (waiting > 0) return;
+            await Task.Delay(TimeSpan.FromMilliseconds(25), cancellationToken);
+        }
+        throw new TimeoutException($"PostgreSQL backend '{applicationName}' did not enter a lock wait within {timeout}.");
+    }
+
+    private FamilyManagerHandlers CreateFamilyManagerHandlers(AppDbContext db, Guid managerId, IUserAccountService users)
+    {
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(managerId);
+        currentUser.UserType.Returns(UserType.Customer);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(UtcNow);
+        clock.TodayUtc.Returns(new DateOnly(2026, 10, 9));
+        return new FamilyManagerHandlers(db, currentUser, clock,
+            Substitute.For<IFamilyPricingSettingsReader>(), users,
+            transactions: new PostgresApplicationTransactionExecutor(db),
+            locks: new PostgresApplicationLockManager(db));
+    }
 
     private FamilyCancellationSettlement CreateService(AppDbContext db)
     {

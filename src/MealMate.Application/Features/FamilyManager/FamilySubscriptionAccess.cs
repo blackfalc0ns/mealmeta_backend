@@ -53,10 +53,10 @@ public sealed class FamilySubscriptionAccessService(IAppDbContext db, IFamilyAct
             return subscription.CustomerUserId == actorUserId
                 ? new FamilySubscriptionAccess(false, null)
                 : Error.NotFound("common.not_found");
-        if (!await db.FamilyGroups.AsNoTracking().AnyAsync(x => x.Id == groupId, cancellationToken))
+        if (!await db.FamilyGroups.IgnoreQueryFilters().AsNoTracking().AnyAsync(x => x.Id == groupId, cancellationToken))
             return Error.Conflict("family.group_not_active");
         // Resolve the historical member FK, never another member's current pointer.
-        var member = await db.FamilyMembers.AsNoTracking().FirstOrDefaultAsync(x =>
+        var member = await db.FamilyMembers.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(x =>
             x.FamilyGroupId == groupId && (subscription.FamilyMemberId.HasValue
                 ? x.Id == subscription.FamilyMemberId.Value
                 : x.MemberSubscriptionId == subscription.Id), cancellationToken);

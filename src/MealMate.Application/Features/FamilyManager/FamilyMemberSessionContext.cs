@@ -13,7 +13,13 @@ public sealed record FamilyMemberSessionContextDto(
     bool IsManager,
     Guid? MemberId,
     Guid? MemberSubscriptionId,
-    IReadOnlyList<FamilyCapabilityDto> Capabilities);
+    IReadOnlyList<FamilyCapabilityDto> Capabilities,
+    bool IsDetachedFromFamilyManagement = false,
+    FamilyMemberSetupStatus? SetupStatus = null,
+    bool HasSeparateAccount = false,
+    bool IsPaused = false,
+    bool RequiresPasswordSetup = false,
+    string? AccessStatus = null);
 
 public sealed record GetMyFamilySessionContextQuery : IQuery<IReadOnlyList<FamilyMemberSessionContextDto>>;
 
@@ -30,25 +36,26 @@ public sealed class GetMyFamilySessionContextHandler(IAppDbContext db, ICurrentU
         var managed = await db.FamilyGroups.AsNoTracking()
             .Where(x => x.ManagerCustomerUserId == actorId && !x.IsDeleted && x.Status != FamilyGroupStatus.Cancelled)
             .OrderBy(x => x.Id).ToListAsync(cancellationToken);
-        var memberships = await db.FamilyMemberAccesses.AsNoTracking().Include(x => x.FamilyMember).ThenInclude(x => x.FamilyGroup)
-            .Where(x => x.LinkedCustomerUserId == actorId && x.RemovedAtUtc == null
-                && !x.FamilyMember.IsDeleted && !x.FamilyMember.FamilyGroup.IsDeleted
-                && x.FamilyMember.FamilyGroup.Status != FamilyGroupStatus.Cancelled)
+        var memberships = await db.FamilyMemberAccesses.IgnoreQueryFilters().AsNoTracking()
+            .Include(x => x.FamilyMember).ThenInclude(x => x.FamilyGroup)
+            .Where(x => x.LinkedCustomerUserId == actorId && x.RemovedAtUtc == null && !x.IsDeleted
+                && !x.FamilyMember.IsDeleted
+                && ((!x.FamilyMember.FamilyGroup.IsDeleted && x.FamilyMember.FamilyGroup.Status != FamilyGroupStatus.Cancelled)
+                    || x.DetachedFromFamilyManagement))
             .OrderBy(x => x.FamilyMember.FamilyGroupId).ThenBy(x => x.FamilyMemberId).ToListAsync(cancellationToken);
         var result = new List<FamilyMemberSessionContextDto>();
         foreach (var group in managed)
         {
-            var managerMemberId = await db.FamilyMembers.AsNoTracking()
+            var manager = await db.FamilyMembers.AsNoTracking()
                 .Where(x => x.FamilyGroupId == group.Id && x.Role == FamilyMemberRole.Manager && !x.IsDeleted)
-                .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
-            result.Add(new(group.Id, true, managerMemberId, null, []));
+                .Select(x => new { x.Id, x.SetupStatus }).FirstOrDefaultAsync(cancellationToken);
+            result.Add(new(group.Id, true, manager?.Id, null, [], false, manager?.SetupStatus,
+                AccessStatus: "Manager"));
         }
         foreach (var access in memberships.Where(x => managed.All(g => g.Id != x.FamilyMember.FamilyGroupId)))
         {
-            if (access.IsPaused) return Error.Forbidden("family.access_paused");
-            if (!access.HasSeparateAccount) return Error.Forbidden("family.access_disabled");
-            if (access.RequiresPasswordSetup) return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
             var capabilities = new List<FamilyCapabilityDto>();
+            var isUsable = !access.IsPaused && access.HasSeparateAccount && !access.RequiresPasswordSetup;
             foreach (var action in Enum.GetValues<FamilyAction>())
             {
                 var decision = await policy.EvaluateAsync(actorId, access.FamilyMemberId, action, cancellationToken);
@@ -57,7 +64,7 @@ public sealed class GetMyFamilySessionContextHandler(IAppDbContext db, ICurrentU
             var member = access.FamilyMember;
             var canAccessSubscription = capabilities.Any(x => x.Allowed && x.Action != nameof(FamilyAction.ChangePassword));
             Guid? subscriptionId = null;
-            if (canAccessSubscription)
+            if (isUsable && canAccessSubscription)
             {
                 var projections = await new FamilyServiceSubscriptionResolver(db).ResolveAsync(
                     [member.Id], new Dictionary<Guid, Guid?> { [member.Id] = member.MemberSubscriptionId },
@@ -65,7 +72,12 @@ public sealed class GetMyFamilySessionContextHandler(IAppDbContext db, ICurrentU
                 var projection = projections.GetValueOrDefault(member.Id);
                 subscriptionId = projection?.CurrentId ?? projection?.UpcomingId;
             }
-            result.Add(new(member.FamilyGroupId, false, member.Id, subscriptionId, capabilities));
+            result.Add(new(member.FamilyGroupId, false, member.Id, subscriptionId, capabilities,
+                access.DetachedFromFamilyManagement, member.SetupStatus, access.HasSeparateAccount,
+                access.IsPaused, access.RequiresPasswordSetup,
+                access.DetachedFromFamilyManagement ? "Detached" : access.RequiresPasswordSetup ? "SetupRequired"
+                    : access.IsPaused ? "Paused"
+                    : access.HasSeparateAccount ? "Enabled" : "Disabled"));
         }
         return Result.Success<IReadOnlyList<FamilyMemberSessionContextDto>>(result);
     }

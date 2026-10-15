@@ -111,6 +111,9 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
             if (member is null
                 || await _db.FamilyMemberAccesses.AnyAsync(x => x.FamilyMemberId == command.MemberId && x.RemovedAtUtc != null, transactionCt))
                 return Error.Conflict("family.already_subscribed", "family.already_subscribed");
+            if (await _db.FamilyMemberAccesses.AnyAsync(x => x.FamilyMemberId == command.MemberId
+                    && x.DetachedFromFamilyManagement, transactionCt))
+                return Error.Conflict("family.member_detached");
 
             if (await _db.FamilyCheckoutBatches.AnyAsync(x => x.FamilyGroupId == group.Id
                 && x.Status == FamilyCheckoutBatchStatus.ReviewRequired, transactionCt))

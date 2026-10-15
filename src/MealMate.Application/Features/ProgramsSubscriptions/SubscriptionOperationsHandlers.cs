@@ -12,6 +12,7 @@ using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.FamilyManager;
 using MealMate.Domain.CalendarMeals;
 using Microsoft.EntityFrameworkCore;
 
@@ -55,6 +56,7 @@ public sealed class SubscriptionOperationsHandlers :
     private readonly IApplicationTransactionExecutor? _transactions;
     private readonly IApplicationLockManager? _locks;
     private readonly Freeze.ISubscriptionFreezePreparationService? _freezePreparation;
+    private readonly IFamilySubscriptionAccess _familyAccess;
 
     public SubscriptionOperationsHandlers(
         IAppDbContext db,
@@ -65,7 +67,8 @@ public sealed class SubscriptionOperationsHandlers :
         ISubscriptionScheduleService? schedule = null,
         IApplicationTransactionExecutor? transactions = null,
         IApplicationLockManager? locks = null,
-        Freeze.ISubscriptionFreezePreparationService? freezePreparation = null)
+        Freeze.ISubscriptionFreezePreparationService? freezePreparation = null,
+        IFamilySubscriptionAccess? familyAccess = null)
     {
         _db = db;
         _audit = audit;
@@ -76,10 +79,15 @@ public sealed class SubscriptionOperationsHandlers :
         _transactions = transactions;
         _locks = locks;
         _freezePreparation = freezePreparation;
+        _familyAccess = familyAccess ?? new FamilySubscriptionAccessService(db, new FamilyActionPolicy(db));
     }
 
     public async Task<Result<SubscriptionFreezeRequestDto>> Handle(RequestSubscriptionFreezeCommand request, CancellationToken cancellationToken)
     {
+        if (request.CustomerActorUserId.HasValue && await _db.Subscriptions.AsNoTracking()
+            .AnyAsync(x => x.Id == request.SubscriptionId && x.FamilyGroupId != null, cancellationToken)
+            && (_transactions is null || _locks is null))
+            return Error.Conflict("subscription.service_unavailable");
         if (_transactions is null) return await RequestFreezeCore(request, cancellationToken);
         return await _transactions.ExecuteResultAsync<SubscriptionFreezeRequestDto>(async ct =>
         {
@@ -95,6 +103,15 @@ public sealed class SubscriptionOperationsHandlers :
         if (subscription is null)
         {
             return Error.NotFound(MessageCodes.Common.NotFound, $"Subscription with ID '{request.SubscriptionId}' was not found.");
+        }
+
+        // Customer authorization is re-evaluated only after the shared family and
+        // subscription locks have been acquired. Admin callers use the separate
+        // admin endpoint and leave CustomerActorUserId unset.
+        if (request.CustomerActorUserId is Guid actorUserId)
+        {
+            var authorized = await _familyAccess.AuthorizeAsync(subscription, actorUserId, FamilyAction.RequestFreeze, cancellationToken);
+            if (authorized.IsFailure) return authorized.Error;
         }
 
         if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled))

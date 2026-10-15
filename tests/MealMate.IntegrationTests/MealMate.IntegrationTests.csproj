@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\Shared\PostgresTestDatabase.cs" Link="Shared\PostgresTestDatabase.cs" />
   </ItemGroup>
 
   <ItemGroup>

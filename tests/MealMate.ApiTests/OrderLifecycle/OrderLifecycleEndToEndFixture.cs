@@ -138,7 +138,7 @@ public sealed class TestPayzahPaymentService : IPaymentGatewayService
 
 public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
 {
-    private PostgreSqlContainer _container = null!;
+    private MealMate.Testing.PostgresTestDatabase _container = null!;
     public WebApplicationFactory<Program> Factory { get; private set; } = null!;
     public TestPayzahPaymentService PaymentService { get; } = new();
     public TestDriverPushNotifier PushNotifier { get; } = new();
@@ -149,9 +149,7 @@ public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
     {
         try
         {
-            _container = new PostgreSqlBuilder()
-                .WithImage("postgres:16-alpine")
-                .Build();
+            _container = new();
 
             await _container.StartAsync();
 

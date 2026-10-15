@@ -183,6 +183,22 @@ public sealed class FamilyCheckoutSelectionTests
     }
 
     [Fact]
+    public async Task Select_DetachedMemberCannotBeAddedToManagerCheckout()
+    {
+        using var fx = await Fixture.CreateAsync();
+        var access = await fx.Db.FamilyMemberAccesses.SingleAsync(x => x.FamilyMemberId == fx.MemberA.Id);
+        access.DetachedFromFamilyManagement = true;
+        await fx.Db.SaveChangesAsync();
+
+        var result = await fx.Selection.SetAsync(new SetFamilyCheckoutSelectionCommand(fx.MemberA.Id, true), default);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.member_detached");
+        (await fx.Db.FamilyCheckoutBatchLines.AnyAsync(x => x.FamilyMemberId == fx.MemberA.Id && x.CheckoutSelected))
+            .Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Select_CompletePlanMember_ChargesOnlySelected_AndKeepsDeferredPlanWithoutHold()
     {
         using var fx = await Fixture.CreateAsync();

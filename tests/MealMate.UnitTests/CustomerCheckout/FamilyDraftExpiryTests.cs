@@ -15,6 +15,39 @@ namespace MealMate.UnitTests.CustomerCheckout;
 public sealed class FamilyDraftExpiryTests
 {
     [Fact]
+    public async Task Detached_member_private_profile_and_address_book_are_not_readable_by_former_manager()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var group = new FamilyGroup { ManagerCustomerUserId = managerId, Name = "Family", Status = FamilyGroupStatus.Active };
+        var member = new FamilyMember { FamilyGroupId = group.Id, Role = FamilyMemberRole.Member,
+            DisplayName = "Member", RelationshipCode = "child", NutritionalGoalCode = "maintain" };
+        group.Members.Add(member);
+        db.AddRange(group, new FamilyMemberAccess { FamilyMemberId = member.Id,
+            LinkedCustomerUserId = Guid.NewGuid(), HasSeparateAccount = true, DetachedFromFamilyManagement = true });
+        await db.SaveChangesAsync();
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(managerId);
+        user.UserType.Returns(UserType.Customer);
+        var settings = Substitute.For<IFamilyPricingSettingsReader>();
+        settings.GetAsync(Arg.Any<CancellationToken>()).Returns(new FamilyPricingSettings());
+        var handler = new FamilyDraftHandlers(db, user, Substitute.For<IUserAccountService>(), settings,
+            Substitute.For<IFamilyPlanEligibilityService>(), Substitute.For<IFamilyQuoteService>(),
+            Substitute.For<IDateTimeProvider>(), Substitute.For<ICustomerAddressBook>());
+
+        var allergies = await handler.Handle(new GetFamilyMemberAllergiesQuery(member.Id), default);
+        var dislikes = await handler.Handle(new GetFamilyMemberDislikedFoodsQuery(member.Id), default);
+        var dietary = await handler.Handle(new GetFamilyMemberDietaryQuery(member.Id), default);
+        var addresses = await handler.Handle(new GetFamilyMemberAddressesQuery(member.Id), default);
+        allergies.IsFailure.Should().BeTrue();
+        dislikes.IsFailure.Should().BeTrue();
+        dietary.IsFailure.Should().BeTrue();
+        addresses.IsFailure.Should().BeTrue();
+        new[] { allergies.Error.Code, dislikes.Error.Code, dietary.Error.Code, addresses.Error.Code }
+            .Should().OnlyContain(x => x == "family.member_detached");
+    }
+
+    [Fact]
     public async Task Basic_member_edit_preserves_existing_nutrition_goal_and_activity()
     {
         await using var db = CreateDb();
@@ -46,6 +79,76 @@ public sealed class FamilyDraftExpiryTests
         stored.Occupation.Should().Be("Student");
         stored.NutritionalGoalCode.Should().Be("maintain");
         stored.ActivityLevel.Should().Be(FamilyActivityLevel.Active);
+    }
+
+    [Fact]
+    public async Task Manager_member_edit_is_denied_after_detachment_without_changing_roster_data()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var group = new FamilyGroup { ManagerCustomerUserId = managerId, Name = "Family", Status = FamilyGroupStatus.Active };
+        var member = new FamilyMember { FamilyGroupId = group.Id, Role = FamilyMemberRole.Member,
+            DisplayName = "Before", RelationshipCode = "child", AgeYears = 15,
+            NutritionalGoalCode = "maintain", ActivityLevel = FamilyActivityLevel.Active };
+        group.Members.Add(member);
+        db.AddRange(group, new FamilyMemberAccess { FamilyMemberId = member.Id, DetachedFromFamilyManagement = true });
+        await db.SaveChangesAsync();
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(managerId);
+        user.UserType.Returns(UserType.Customer);
+        var settings = Substitute.For<IFamilyPricingSettingsReader>();
+        settings.GetAsync(Arg.Any<CancellationToken>()).Returns(new FamilyPricingSettings());
+        var handler = new FamilyDraftHandlers(db, user, Substitute.For<IUserAccountService>(), settings,
+            Substitute.For<IFamilyPlanEligibilityService>(), Substitute.For<IFamilyQuoteService>(),
+            Substitute.For<IDateTimeProvider>(), Substitute.For<ICustomerAddressBook>());
+
+        var result = await handler.Handle(new UpdateFamilyMemberCommand(member.Id,
+            new FamilyMemberWriteDto("After", "child", FamilyMemberGender.Female, 16, null, Occupation: "Student")), default);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.member_detached");
+        db.ChangeTracker.Clear();
+        var stored = await db.FamilyMembers.SingleAsync();
+        stored.DisplayName.Should().Be("Before");
+        stored.AgeYears.Should().Be(15);
+        stored.FamilyGroupId.Should().Be(group.Id);
+    }
+
+    [Fact]
+    public async Task Manager_cannot_change_phone_of_a_linked_customer_without_phone_verification()
+    {
+        await using var db = CreateDb();
+        var managerId = Guid.NewGuid();
+        var linkedUserId = Guid.NewGuid();
+        var group = new FamilyGroup { ManagerCustomerUserId = managerId, Name = "Family", Status = FamilyGroupStatus.Active };
+        var member = new FamilyMember { FamilyGroupId = group.Id, Role = FamilyMemberRole.Member,
+            DisplayName = "Before", RelationshipCode = "child", AgeYears = 15,
+            PhoneNumber = "+96551111111", NutritionalGoalCode = "maintain", ActivityLevel = FamilyActivityLevel.Active };
+        group.Members.Add(member);
+        db.AddRange(group, new FamilyMemberAccess { FamilyMemberId = member.Id, HasSeparateAccount = true,
+            LinkedCustomerUserId = linkedUserId });
+        await db.SaveChangesAsync();
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(managerId);
+        user.UserType.Returns(UserType.Customer);
+        var users = Substitute.For<IUserAccountService>();
+        users.FindByIdAsync(linkedUserId, Arg.Any<CancellationToken>()).Returns(new UserAccountDto(
+            linkedUserId, null, "+96551111111", "Member", UserType.Customer, AccountStatus.Active,
+            null, true, true, DateTime.UtcNow.AddDays(-1), null));
+        var settings = Substitute.For<IFamilyPricingSettingsReader>();
+        settings.GetAsync(Arg.Any<CancellationToken>()).Returns(new FamilyPricingSettings());
+        var handler = new FamilyDraftHandlers(db, user, users, settings,
+            Substitute.For<IFamilyPlanEligibilityService>(), Substitute.For<IFamilyQuoteService>(),
+            Substitute.For<IDateTimeProvider>(), Substitute.For<ICustomerAddressBook>());
+
+        var result = await handler.Handle(new UpdateFamilyMemberCommand(member.Id,
+            new FamilyMemberWriteDto("After", "child", FamilyMemberGender.Female, 16, null,
+                Phone: "+96552222222")), default);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("family.member_phone_change_requires_verification");
+        db.ChangeTracker.Clear();
+        (await db.FamilyMembers.SingleAsync()).PhoneNumber.Should().Be("+96551111111");
     }
 
     [Fact]

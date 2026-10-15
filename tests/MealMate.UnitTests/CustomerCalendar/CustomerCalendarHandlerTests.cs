@@ -37,21 +37,20 @@ public sealed class CustomerCalendarHandlerTests
     }
 
     [Fact]
-    public async Task Family_calendar_redacts_plan_identifiers_until_ViewProgram_is_granted()
+    public async Task Family_calendar_read_includes_plan_prerequisite_without_granting_restaurant_writes()
     {
         var fx = await SeedAsync();
         await AttachFamilyMemberAsync(fx, editMeals: false, selectRestaurant: false);
-        var hidden = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
-        ((object?)hidden.Value.ProgramId).Should().BeNull();
-        ((object?)hidden.Value.BundleId).Should().BeNull();
-        hidden.Value.SubscriptionId.Should().Be(fx.SubscriptionId);
-        hidden.Value.Days.Should().NotBeEmpty();
-        var permissions = await fx.Db.FamilyMemberPermissions.SingleAsync();
-        permissions.ViewProgram = true;
-        await fx.Db.SaveChangesAsync();
         var visible = await fx.Handlers.Handle(new GetCustomerCalendarQuery(fx.SubscriptionId), CancellationToken.None);
+        visible.IsSuccess.Should().BeTrue();
         ((object?)visible.Value.ProgramId).Should().NotBeNull();
         ((object?)visible.Value.BundleId).Should().NotBeNull();
+        visible.Value.SubscriptionId.Should().Be(fx.SubscriptionId);
+        visible.Value.Days.Should().NotBeEmpty();
+        var denied = await fx.Handlers.Handle(new SelectCustomerDayRestaurantCommand(
+            fx.SubscriptionId, Day1, Guid.NewGuid()), CancellationToken.None);
+        denied.IsFailure.Should().BeTrue();
+        denied.Error.Code.Should().Be("family.permission_required");
     }
 
     [Theory]

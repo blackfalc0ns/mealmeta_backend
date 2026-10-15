@@ -305,6 +305,7 @@ public sealed class FamilyMemberAccessConfiguration : IEntityTypeConfiguration<F
         builder.ToTable("FamilyMemberAccesses");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.InviteTokenHash).HasMaxLength(128);
+        builder.Property(x => x.DetachedFromFamilyManagement).HasDefaultValue(false);
         builder.HasIndex(x => x.FamilyMemberId).IsUnique();
         builder.HasIndex(x => x.LinkedCustomerUserId);
         builder.HasIndex(x => x.InviteTokenHash);
@@ -312,6 +313,18 @@ public sealed class FamilyMemberAccessConfiguration : IEntityTypeConfiguration<F
             .WithOne()
             .HasForeignKey<FamilyMemberAccess>(x => x.FamilyMemberId)
             .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class FamilyCredentialOperationConfiguration : IEntityTypeConfiguration<FamilyCredentialOperation>
+{
+    public void Configure(EntityTypeBuilder<FamilyCredentialOperation> builder)
+    {
+        builder.ToTable("FamilyCredentialOperations");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.OperationKeyHash).HasMaxLength(64).IsRequired();
+        builder.HasIndex(x => new { x.FamilyMemberId, x.OperationKeyHash }).IsUnique();
+        builder.HasIndex(x => x.ActorUserId);
     }
 }
 

@@ -55,6 +55,10 @@ public sealed class CustomerFamilyManagerController : ApiControllerBase
         CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new UpdateFamilyMemberAccessCommand(memberId, request), cancellationToken));
 
+    [HttpPost("members/{memberId:guid}/detach")]
+    public async Task<IActionResult> Detach(Guid memberId, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new DetachFamilyMemberCommand(memberId), cancellationToken));
+
     [HttpGet("members/{memberId:guid}/permissions")]
     public async Task<IActionResult> GetPermissions(Guid memberId, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetFamilyMemberPermissionsQuery(memberId), cancellationToken));

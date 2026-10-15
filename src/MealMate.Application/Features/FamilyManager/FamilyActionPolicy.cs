@@ -44,9 +44,10 @@ public interface IFamilyActionPolicy
 
 /// <summary>
 /// Single shared decision source for display and enforcement: the API rejects
-/// with the same Allowed/ReasonCode the UI shows. The manager-of-the-group
-/// manages everything (confirmed product decision); a member acts on their own
-/// row only through granted keys and never gains write rights from read keys.
+/// with the same Allowed/ReasonCode the UI shows. The manager manages linked
+/// members. Detached members retain read-only roster visibility for the manager;
+/// mutations are denied. Managed members act through granted keys; detached
+/// members have every supported own action and no sibling scope.
 /// New keys default to deny for members; pausing/removing access cuts access
 /// immediately on the next evaluation.
 /// </summary>
@@ -62,14 +63,18 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
         FamilyAction action,
         CancellationToken cancellationToken = default)
     {
-        var member = await _db.FamilyMembers.AsNoTracking()
+        var member = await _db.FamilyMembers.IgnoreQueryFilters().AsNoTracking()
             .Include(x => x.FamilyGroup)
             .FirstOrDefaultAsync(x => x.Id == targetMemberId, cancellationToken);
         if (member is null || member.IsDeleted)
             return new(false, "family.member_not_found", null);
 
         var group = member.FamilyGroup;
-        if (group.IsDeleted || group.Status == FamilyGroupStatus.Cancelled)
+        var targetAccess = await _db.FamilyMemberAccesses.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
+        var isDetachedOwner = targetAccess?.DetachedFromFamilyManagement == true
+            && targetAccess.LinkedCustomerUserId == actorUserId && targetAccess.RemovedAtUtc == null;
+        if ((group.IsDeleted || group.Status == FamilyGroupStatus.Cancelled) && !isDetachedOwner)
             return new(false, "family.not_active", null);
 
         var isManager = group.ManagerCustomerUserId == actorUserId;
@@ -81,14 +86,18 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
         if (!isManager)
         {
             actorAccess = await _db.FamilyMemberAccesses.AsNoTracking()
-                .FirstOrDefaultAsync(
-                    x => x.LinkedCustomerUserId == actorUserId
+                .Where(x => x.LinkedCustomerUserId == actorUserId
                          && x.RemovedAtUtc == null
-                         && _db.FamilyMembers.Any(m => m.Id == x.FamilyMemberId
-                             && m.FamilyGroupId == group.Id && !m.IsDeleted),
-                    cancellationToken);
+                         && _db.FamilyMembers.IgnoreQueryFilters().Any(m => m.Id == x.FamilyMemberId
+                             && m.FamilyGroupId == group.Id && !m.IsDeleted))
+                .OrderByDescending(x => x.FamilyMemberId == member.Id)
+                .ThenBy(x => x.DetachedFromFamilyManagement)
+                .FirstOrDefaultAsync(cancellationToken);
             if (actorAccess is null)
                 return new(false, "family.not_member", PermissionKey(action));
+            if (action == FamilyAction.ChangePassword && actorAccess.FamilyMemberId == member.Id
+                && !actorAccess.RequiresPasswordSetup)
+                return new(true, null, PermissionKey(action));
             if (actorAccess.IsPaused)
                 return new(false, "family.access_paused", PermissionKey(action));
             // R07/B08: a disabled independent account loses family data access —
@@ -103,16 +112,25 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
             .AnyAsync(x => x.FamilyMemberId == member.Id && x.RemovedAtUtc != null, cancellationToken))
             return new(false, "family.member_not_found", PermissionKey(action));
 
-        var isOwnRow = actorAccess is not null && actorAccess.FamilyMemberId == member.Id;
+        if (isManager && targetAccess?.DetachedFromFamilyManagement == true)
+        {
+            if (action is FamilyAction.ViewCalendar or FamilyAction.ViewPlan or FamilyAction.ViewInvoices)
+                return new(true, null, PermissionKey(action));
+            return new(false, "family.member_detached", PermissionKey(action));
+        }
 
         if (action is FamilyAction.EditMealsAndDays or FamilyAction.ChangeProgram
             or FamilyAction.ChangeDeliveryTime or FamilyAction.UnitExchange)
             return new(false, "family.action_not_available", PermissionKey(action));
 
+        var isOwnRow = actorAccess is not null && actorAccess.FamilyMemberId == member.Id;
+
         // Family-scope visibility: a sibling reading another member's calendar/
         // plan/invoices needs the actor's matching family-scope grant.
         if (!isManager && !isOwnRow)
         {
+            if (actorAccess!.DetachedFromFamilyManagement || targetAccess?.DetachedFromFamilyManagement == true)
+                return new(false, "family.member_detached", PermissionKey(action));
             var actorPermissions = await _db.FamilyMemberPermissions.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.FamilyMemberId == actorAccess!.FamilyMemberId, cancellationToken);
             var familyScopeGranted = action switch
@@ -129,10 +147,20 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
 
         if (isManager)
         {
-            // The manager manages all subscription operations for every member;
-            // pausing or removing a member never blocks the manager.
+            // Pausing or removing linked access does not block manager actions.
+            // Detached targets were denied above except for read-only projections.
             return new(true, null, PermissionKey(action));
         }
+
+        // Detachment turns the linked login into an independent customer for
+        // every supported action on their own subscription. Older detached
+        // rows may still have the pre-detach manager-grant values.
+        if (isOwnRow && actorAccess!.DetachedFromFamilyManagement)
+            return new(true, null, PermissionKey(action));
+
+        // Credential ownership is independent of family data grants.
+        if (isOwnRow && action == FamilyAction.ChangePassword)
+            return new(true, null, PermissionKey(action));
 
         // Linked member acting on their own row (pause/disable checked above for
         // the actor's own access row).
@@ -140,6 +168,15 @@ public sealed class FamilyActionPolicy : IFamilyActionPolicy
             .FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
         if (permissions is null)
             return new(false, "family.permission_required", PermissionKey(action));
+
+        // Legacy rows may have writes enabled without their required read grants.
+        var calendarWrite = permissions.SelectRestaurant || permissions.EditDailyMeals || permissions.ConfirmMeals || permissions.EditAddress;
+        if (action == FamilyAction.ViewCalendar && calendarWrite)
+            return new(true, null, PermissionKey(action));
+        if (action == FamilyAction.ViewPlan && (permissions.ViewCalendar || calendarWrite
+                || permissions.EditAddress || permissions.RequestFreeze || permissions.RequestRenewal
+                || permissions.RequestUpgrade || permissions.CancelSubscription))
+            return new(true, null, PermissionKey(action));
 
         var key = PermissionKey(action);
         if (key is not null && IsGranted(permissions, key))

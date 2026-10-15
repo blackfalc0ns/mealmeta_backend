@@ -14,9 +14,13 @@ namespace MealMate.Application.Features.IdentityAccess.Auth;
 public interface IFamilyMemberFirstLoginService
 {
     Task<bool> IsPendingSetupAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<bool> IsViablePendingSetupAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<Result> CompleteHistoricalSetupRecoveryAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<Result<LoginResultDto>> BeginAsync(UserAccountDto user, IReadOnlyList<string> roles, string? deviceInfo,
         string? ipAddress, CancellationToken cancellationToken = default);
     Task<Result<LoginResultDto>> VerifyOtpAsync(string challengeToken, string code, string? deviceInfo,
+        string? ipAddress, CancellationToken cancellationToken = default);
+    Task<Result<LoginResultDto>> ResendOtpAsync(string challengeToken, string? deviceInfo,
         string? ipAddress, CancellationToken cancellationToken = default);
     Task<Result<AuthResponseDto>> SetPasswordAsync(string challengeToken, string newPassword, string? deviceInfo,
         string? ipAddress, CancellationToken cancellationToken = default);
@@ -36,6 +40,52 @@ public sealed class FamilyMemberFirstLoginService(
     public Task<bool> IsPendingSetupAsync(Guid userId, CancellationToken cancellationToken = default)
         => db.FamilyMemberAccesses.IgnoreQueryFilters().AsNoTracking().AnyAsync(access => access.LinkedCustomerUserId == userId
             && access.RequiresPasswordSetup, cancellationToken);
+
+    public async Task<bool> IsViablePendingSetupAsync(Guid userId, CancellationToken cancellationToken = default)
+        => await FindPendingAccessAsync(userId, cancellationToken) is not null;
+
+    public async Task<Result> CompleteHistoricalSetupRecoveryAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var historical = await db.FamilyMemberAccesses.IgnoreQueryFilters()
+            .Include(access => access.FamilyMember).ThenInclude(member => member.FamilyGroup)
+            .Where(access => access.LinkedCustomerUserId == userId && access.RequiresPasswordSetup)
+            .ToListAsync(cancellationToken);
+        if (historical.Count == 0) return Result.Success();
+        if (historical.Any(access => IsViableAccess(access)))
+            return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
+
+        foreach (var access in historical) access.RequiresPasswordSetup = false;
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return Result.Success();
+    }
+
+    public Task<Result<LoginResultDto>> ResendOtpAsync(string challengeToken, string? deviceInfo,
+        string? ipAddress, CancellationToken cancellationToken = default)
+        => RunLockedTransactionAsync(challengeToken, LoginChallengeSteps.FamilyVerifyOtp,
+            ct => ResendOtpCoreAsync(challengeToken, deviceInfo, ipAddress, ct), cancellationToken);
+
+    private async Task<Result<LoginResultDto>> ResendOtpCoreAsync(string challengeToken, string? deviceInfo,
+        string? ipAddress, CancellationToken cancellationToken)
+    {
+        var resolved = await challenges.ResolveAsync(challengeToken, LoginChallengeSteps.FamilyVerifyOtp, cancellationToken);
+        if (resolved.IsFailure) return InvalidChallenge();
+        var user = await users.FindByIdAsync(resolved.Value.UserId, cancellationToken);
+        var access = user is null ? null : await FindPendingAccessAsync(user.Id, cancellationToken);
+        if (user is null || user.UserType != UserType.Customer || user.AccountStatus != AccountStatus.Active
+            || access is null || !access.HasSeparateAccount || access.IsPaused || string.IsNullOrWhiteSpace(user.PhoneNumber))
+            return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
+
+        var sent = await otp.SendAsync(new OtpSendRequest(user.PhoneNumber, "WhatsApp",
+            OtpPurposes.FamilyMemberFirstLogin, user.Id), cancellationToken);
+        if (sent.IsFailure) return sent.Error;
+        var challenge = await challenges.CreateAsync(new CreateLoginChallengeRequest(user.Id,
+            LoginChallengeSteps.FamilyVerifyOtp, deviceInfo, ipAddress), cancellationToken);
+        await audit.LogAsync(new AuditEntry("FamilyMemberFirstLoginOtpResent", "User", user.Id,
+            After: new { Purpose = OtpPurposes.FamilyMemberFirstLogin }, SourceChannel: "customer-app"), cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return LoginResultDto.FromPendingChallenge(user, await users.GetRolesAsync(user.Id, cancellationToken),
+            challenge.RawToken, LoginChallengeSteps.FamilyVerifyOtp, challenge.ExpiresAtUtc);
+    }
 
     public Task<Result<LoginResultDto>> BeginAsync(UserAccountDto user, IReadOnlyList<string> roles,
         string? deviceInfo, string? ipAddress, CancellationToken cancellationToken = default)
@@ -141,6 +191,14 @@ public sealed class FamilyMemberFirstLoginService(
         if (reset.IsFailure) return reset.Error;
 
         access.RequiresPasswordSetup = false;
+        // A verified replacement password retires obsolete setup credentials on
+        // earlier memberships as well as the current onboarding membership.
+        var obsolete = await db.FamilyMemberAccesses.IgnoreQueryFilters()
+            .Include(item => item.FamilyMember).ThenInclude(member => member.FamilyGroup)
+            .Where(item => item.LinkedCustomerUserId == user.Id && item.RequiresPasswordSetup)
+            .ToListAsync(cancellationToken);
+        foreach (var item in obsolete.Where(item => !IsViableAccess(item)))
+            item.RequiresPasswordSetup = false;
         await users.SetHasPasswordAsync(user.Id, true, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         await sessions.RevokeAllUserTokensAsync(user.Id, cancellationToken);
@@ -160,11 +218,22 @@ public sealed class FamilyMemberFirstLoginService(
             .Include(access => access.FamilyMember)
             .ThenInclude(member => member.FamilyGroup)
             .FirstOrDefaultAsync(access => access.LinkedCustomerUserId == userId
-                && access.RequiresPasswordSetup && access.RemovedAtUtc == null
+                && access.RequiresPasswordSetup && access.RemovedAtUtc == null && !access.IsDeleted
+                && access.HasSeparateAccount
                 && access.FamilyMember.Role == FamilyMemberRole.Member && !access.FamilyMember.IsDeleted
                 && !access.FamilyMember.FamilyGroup.IsDeleted
-                && access.FamilyMember.FamilyGroup.Status == FamilyGroupStatus.Active
+                && (access.FamilyMember.FamilyGroup.Status == FamilyGroupStatus.Draft
+                    || access.FamilyMember.FamilyGroup.Status == FamilyGroupStatus.CheckoutPending
+                    || access.FamilyMember.FamilyGroup.Status == FamilyGroupStatus.Active)
                 && !access.IsPaused, cancellationToken);
+
+    private static bool IsViableAccess(FamilyMemberAccess access)
+        => access.RemovedAtUtc == null && !access.IsPaused && !access.IsDeleted && access.HasSeparateAccount
+            && access.FamilyMember.Role == FamilyMemberRole.Member && !access.FamilyMember.IsDeleted
+            && !access.FamilyMember.FamilyGroup.IsDeleted
+            && (access.FamilyMember.FamilyGroup.Status == FamilyGroupStatus.Draft
+                || access.FamilyMember.FamilyGroup.Status == FamilyGroupStatus.CheckoutPending
+                || access.FamilyMember.FamilyGroup.Status == FamilyGroupStatus.Active);
 
     private async Task<Result<T>> RunLockedTransactionAsync<T>(string challengeToken, string step,
         Func<CancellationToken, Task<Result<T>>> action, CancellationToken cancellationToken)
@@ -178,11 +247,12 @@ public sealed class FamilyMemberFirstLoginService(
         {
             if (locks is not null)
             {
-                var groupId = await db.FamilyMemberAccesses.AsNoTracking()
+                var groupIds = await db.FamilyMemberAccesses.IgnoreQueryFilters().AsNoTracking()
                     .Where(access => access.LinkedCustomerUserId == resolved.Value.UserId && access.RequiresPasswordSetup)
                     .Select(access => access.FamilyMember.FamilyGroupId)
-                    .FirstOrDefaultAsync(transactionToken);
-                if (groupId != Guid.Empty) await locks.LockFamilyGroupAsync(groupId, transactionToken);
+                    .Distinct().OrderBy(id => id).ToListAsync(transactionToken);
+                foreach (var groupId in groupIds) await locks.LockFamilyGroupAsync(groupId, transactionToken);
+                await locks.LockCustomerIdentityAsync(resolved.Value.UserId, transactionToken);
             }
             return await action(transactionToken);
         }
@@ -203,11 +273,12 @@ public sealed class FamilyMemberFirstLoginService(
         {
             if (locks is not null)
             {
-                var groupId = await db.FamilyMemberAccesses.IgnoreQueryFilters().AsNoTracking()
+                var groupIds = await db.FamilyMemberAccesses.IgnoreQueryFilters().AsNoTracking()
                     .Where(access => access.LinkedCustomerUserId == userId && access.RequiresPasswordSetup)
                     .Select(access => access.FamilyMember.FamilyGroupId)
-                    .FirstOrDefaultAsync(transactionToken);
-                if (groupId != Guid.Empty) await locks.LockFamilyGroupAsync(groupId, transactionToken);
+                    .Distinct().OrderBy(id => id).ToListAsync(transactionToken);
+                foreach (var groupId in groupIds) await locks.LockFamilyGroupAsync(groupId, transactionToken);
+                await locks.LockCustomerIdentityAsync(userId, transactionToken);
             }
             return await action(transactionToken);
         }, cancellationToken);
@@ -227,6 +298,22 @@ public sealed class VerifyFamilyMemberFirstLoginOtpCommandValidator : AbstractVa
         RuleFor(request => request.Code).NotEmpty().WithMessageCode(MessageCodes.Validation.OtpCodeInvalid)
             .Length(6).WithMessageCode(MessageCodes.Validation.OtpCodeInvalid);
     }
+}
+
+public sealed record ResendFamilyMemberFirstLoginOtpCommand(
+    string LoginChallengeToken, string? DeviceInfo = null, string? IpAddress = null) : ICommand<LoginResultDto>;
+
+public sealed class ResendFamilyMemberFirstLoginOtpCommandValidator : AbstractValidator<ResendFamilyMemberFirstLoginOtpCommand>
+{
+    public ResendFamilyMemberFirstLoginOtpCommandValidator()
+        => RuleFor(request => request.LoginChallengeToken).NotEmpty().WithMessageCode(MessageCodes.Validation.RequiredField);
+}
+
+public sealed class ResendFamilyMemberFirstLoginOtpCommandHandler(IFamilyMemberFirstLoginService flow)
+    : ICommandHandler<ResendFamilyMemberFirstLoginOtpCommand, LoginResultDto>
+{
+    public Task<Result<LoginResultDto>> Handle(ResendFamilyMemberFirstLoginOtpCommand request, CancellationToken cancellationToken)
+        => flow.ResendOtpAsync(request.LoginChallengeToken, request.DeviceInfo, request.IpAddress, cancellationToken);
 }
 
 public sealed class VerifyFamilyMemberFirstLoginOtpCommandHandler(IFamilyMemberFirstLoginService flow)

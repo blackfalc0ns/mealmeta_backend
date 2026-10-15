@@ -92,6 +92,7 @@ public interface IAppDbContext
     DbSet<FamilyGroup> FamilyGroups { get; }
     DbSet<FamilyMember> FamilyMembers { get; }
     DbSet<FamilyMemberAccess> FamilyMemberAccesses { get; }
+    DbSet<FamilyCredentialOperation> FamilyCredentialOperations { get; }
     DbSet<FamilyMemberPermissions> FamilyMemberPermissions { get; }
     DbSet<PromoCode> PromoCodes { get; }
     DbSet<PromoCodeRedemption> PromoCodeRedemptions { get; }

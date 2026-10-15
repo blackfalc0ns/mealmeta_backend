@@ -82,6 +82,21 @@ public sealed class CustomerOffersController : ApiControllerBase
     }
 
     [AllowAnonymous]
+    [HttpGet("{offerId:guid}/details")]
+    public async Task<IActionResult> GetOfferDetails(
+        Guid offerId,
+        [FromQuery] decimal cartAmount = 0m,
+        [FromQuery] int durationDays = 0,
+        [FromQuery] string? deliveryGovernorate = null,
+        [FromQuery] Guid? programId = null,
+        [FromQuery] Guid? bundleId = null,
+        [FromQuery] Guid? restaurantId = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetCustomerOfferDetailsQuery(
+            offerId, ResolveCustomerId(), cartAmount, durationDays, deliveryGovernorate,
+            programId, bundleId, restaurantId), cancellationToken));
+
+    [AllowAnonymous]
     [HttpPost("available")]
     public async Task<IActionResult> GetAvailableOffersPost(
         [FromBody] GetCustomerAvailableOffersQuery? bodyQuery,
@@ -152,7 +167,9 @@ public sealed class CustomerOffersController : ApiControllerBase
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var result = await Sender.Send(new GetOfferByIdQuery(id), cancellationToken);
-        return HandleResult(result);
+        var result = await Sender.Send(new GetCustomerOfferDetailsQuery(id, ResolveCustomerId()), cancellationToken);
+        return result.IsFailure
+            ? HandleResult(result)
+            : Ok(result.Value!.Offer);
     }
 }

@@ -333,6 +333,14 @@
   </data>
   <data name="family.group_not_active" xml:space="preserve"><value>Family group is not active.</value></data>
   <data name="family.member_not_found" xml:space="preserve"><value>Family member was not found.</value></data>
+  <data name="family.member_detached" xml:space="preserve"><value>This family member is detached from family management.</value></data>
+  <data name="family.member_phone_change_requires_verification" xml:space="preserve"><value>A new phone number must be verified through the trusted phone-change flow.</value></data>
+  <data name="family.permission_not_supported" xml:space="preserve"><value>This permission is not currently supported.</value></data>
+  <data name="family.permission_not_manager_owned" xml:space="preserve"><value>This permission belongs to the account owner and cannot be changed by the family manager.</value></data>
+  <data name="family.credential_operation_replayed" xml:space="preserve"><value>The password was issued by the earlier operation and cannot be recovered. Start an explicit reset operation to issue a new one.</value></data>
+  <data name="family.credential_operation_key_required" xml:space="preserve"><value>An operation identifier is required to issue a temporary password without repeating the reset.</value></data>
+  <data name="family.freeze_request_pending" xml:space="preserve"><value>The member cannot be detached while a freeze request is awaiting review.</value></data>
+  <data name="family.detach_requires_active_login" xml:space="preserve"><value>Detach requires an active member login with password setup completed.</value></data>
   <data name="family.member_paused" xml:space="preserve"><value>This family member is paused.</value></data>
   <data name="family.permission_denied" xml:space="preserve"><value>You do not have permission for this family action.</value></data>
   <data name="family.cannot_remove_manager" xml:space="preserve"><value>The family manager cannot be removed.</value></data>
@@ -1083,4 +1091,5 @@
   <data name="Campaign.SessionPaymentAmbiguous" xml:space="preserve"><value>Multiple successful payments match this legacy session; manual reconciliation is required.</value></data>
   <data name="checkout.coupon_limit_reached" xml:space="preserve"><value>The coupon is no longer available or its usage limit was reached.</value></data>
   <data name="family.coupon_limit_reached" xml:space="preserve"><value>The coupon is no longer available or its usage limit was reached.</value></data>
+  <data name="offers.customer.unavailable" xml:space="preserve"><value>This offer is unavailable or does not apply to your selection.</value></data>
 </root>

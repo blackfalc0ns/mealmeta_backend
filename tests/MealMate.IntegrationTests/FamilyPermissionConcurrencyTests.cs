@@ -14,10 +14,10 @@ namespace MealMate.IntegrationTests.FamilyManager;
 
 public sealed class FamilyPermissionConcurrencyTests : IAsyncLifetime
 {
-    private PostgreSqlContainer _container = null!;
+    private MealMate.Testing.PostgresTestDatabase _container = null!;
     public async Task InitializeAsync()
     {
-        _container = new PostgreSqlBuilder().WithImage("postgres:16-alpine").Build();
+        _container = new();
         await _container.StartAsync();
         await using var db = CreateDb();
         await db.Database.MigrateAsync();

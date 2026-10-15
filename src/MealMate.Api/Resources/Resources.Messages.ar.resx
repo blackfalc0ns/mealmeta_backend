@@ -283,6 +283,14 @@
   <data name="order.invalid_status" xml:space="preserve"><value>هذا الطلب ليس بانتظار تأكيد المطعم.</value></data>
   <data name="family.group_not_active" xml:space="preserve"><value>مجموعة العائلة غير نشطة.</value></data>
   <data name="family.member_not_found" xml:space="preserve"><value>عضو العائلة غير موجود.</value></data>
+  <data name="family.member_detached" xml:space="preserve"><value>تم فصل هذا العضو عن إدارة العائلة.</value></data>
+  <data name="family.member_phone_change_requires_verification" xml:space="preserve"><value>يجب التحقق من رقم الهاتف الجديد من خلال إجراء تغيير رقم موثوق.</value></data>
+  <data name="family.permission_not_supported" xml:space="preserve"><value>هذا الإذن غير مدعوم حاليًا.</value></data>
+  <data name="family.permission_not_manager_owned" xml:space="preserve"><value>هذا الإذن يديره صاحب الحساب ولا يمكن لمدير العائلة تغييره.</value></data>
+  <data name="family.credential_operation_replayed" xml:space="preserve"><value>صدرت كلمة المرور في العملية السابقة ولا يمكن استعادتها. ابدأ عملية إعادة تعيين صريحة لإصدار كلمة جديدة.</value></data>
+  <data name="family.credential_operation_key_required" xml:space="preserve"><value>يلزم معرّف عملية لإصدار كلمة مرور مؤقتة دون تكرار إعادة التعيين.</value></data>
+  <data name="family.freeze_request_pending" xml:space="preserve"><value>تعذر فصل العضو لوجود طلب تجميد قيد المراجعة.</value></data>
+  <data name="family.detach_requires_active_login" xml:space="preserve"><value>يتطلب الفصل حساب عضو نشطاً مع إكمال إعداد كلمة المرور.</value></data>
   <data name="family.member_paused" xml:space="preserve"><value>هذا العضو موقوف مؤقتاً.</value></data>
   <data name="family.permission_denied" xml:space="preserve"><value>ليست لديك صلاحية لهذا الإجراء.</value></data>
   <data name="family.cannot_remove_manager" xml:space="preserve"><value>لا يمكن حذف مدير العائلة.</value></data>
@@ -1025,4 +1033,5 @@
   <data name="Campaign.SessionPaymentAmbiguous" xml:space="preserve"><value>تطابق عدة مدفوعات ناجحة مع الجلسة القديمة؛ يلزم إجراء تسوية يدوية.</value></data>
   <data name="checkout.coupon_limit_reached" xml:space="preserve"><value>كود الخصم غير متاح حاليًا أو تم استنفاد الحد الأقصى للاستخدام.</value></data>
   <data name="family.coupon_limit_reached" xml:space="preserve"><value>كود الخصم غير متاح حاليًا أو تم استنفاد الحد الأقصى للاستخدام.</value></data>
+  <data name="offers.customer.unavailable" xml:space="preserve"><value>هذا العرض غير متاح أو لا ينطبق على اختياراتك.</value></data>
 </root>

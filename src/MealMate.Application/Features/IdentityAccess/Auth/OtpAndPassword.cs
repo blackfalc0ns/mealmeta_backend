@@ -7,6 +7,7 @@ using MealMate.Application.Common.Security;
 using MealMate.Application.Common.Validation;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.IdentityAccess.Auth;
 
@@ -445,7 +446,7 @@ public sealed class CustomerForgotPasswordCommandHandler : ICommandHandler<Custo
         // Generic success to avoid account enumeration
         if (user is not null && user.UserType == UserType.Customer)
         {
-            if (_familyFirstLogin is not null && await _familyFirstLogin.IsPendingSetupAsync(user.Id, cancellationToken))
+            if (_familyFirstLogin is not null && await _familyFirstLogin.IsViablePendingSetupAsync(user.Id, cancellationToken))
                 return Result.Success();
 
             var sendResult = await _otp.SendAsync(
@@ -497,6 +498,9 @@ public sealed class CustomerResetPasswordCommandHandler : ICommandHandler<Custom
     private readonly IAuditLogger _audit;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IFamilyMemberFirstLoginService? _familyFirstLogin;
+    private readonly IAppDbContext? _db;
+    private readonly IApplicationTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
 
     public CustomerResetPasswordCommandHandler(
         IUserAccountService users,
@@ -505,7 +509,10 @@ public sealed class CustomerResetPasswordCommandHandler : ICommandHandler<Custom
         IAuthLoginChallengeService challenges,
         IAuditLogger audit,
         IUnitOfWork unitOfWork,
-        IFamilyMemberFirstLoginService? familyFirstLogin = null)
+        IFamilyMemberFirstLoginService? familyFirstLogin = null,
+        IAppDbContext? db = null,
+        IApplicationTransactionExecutor? transactions = null,
+        IApplicationLockManager? locks = null)
     {
         _users = users;
         _otp = otp;
@@ -514,6 +521,9 @@ public sealed class CustomerResetPasswordCommandHandler : ICommandHandler<Custom
         _audit = audit;
         _unitOfWork = unitOfWork;
         _familyFirstLogin = familyFirstLogin;
+        _db = db;
+        _transactions = transactions;
+        _locks = locks;
     }
 
     public async Task<Result> Handle(CustomerResetPasswordCommand request, CancellationToken cancellationToken)
@@ -522,7 +532,7 @@ public sealed class CustomerResetPasswordCommandHandler : ICommandHandler<Custom
 
         var pendingUser = await _users.FindByPhoneAsync(phone, cancellationToken);
         if (pendingUser is not null && _familyFirstLogin is not null
-            && await _familyFirstLogin.IsPendingSetupAsync(pendingUser.Id, cancellationToken))
+            && await _familyFirstLogin.IsViablePendingSetupAsync(pendingUser.Id, cancellationToken))
             return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
 
         var otpResult = await _otp.VerifyAsync(
@@ -538,19 +548,49 @@ public sealed class CustomerResetPasswordCommandHandler : ICommandHandler<Custom
             return Error.NotFound(MessageCodes.Auth.UserNotFound, "User not found.");
         }
 
-        var token = await _users.GeneratePasswordResetTokenAsync(user.Id, cancellationToken);
-        var reset = await _users.ResetPasswordAsync(user.Id, token, request.NewPassword, cancellationToken);
+        // OTP attempt accounting stays outside the replacement transaction. All
+        // credential and setup changes commit together after locked authorization.
+        if (_transactions is null) return await ReplacePasswordAsync(user.Id, request.NewPassword, cancellationToken);
+        var replacement = await _transactions.ExecuteResultAsync(async ct =>
+        {
+            if (_db is not null && _locks is not null)
+            {
+                var groupIds = await _db.FamilyMemberAccesses.IgnoreQueryFilters().AsNoTracking()
+                    .Where(access => access.LinkedCustomerUserId == user.Id)
+                    .Select(access => access.FamilyMember.FamilyGroupId)
+                    .Distinct().OrderBy(id => id).ToListAsync(ct);
+                foreach (var groupId in groupIds) await _locks.LockFamilyGroupAsync(groupId, ct);
+                await _locks.LockCustomerIdentityAsync(user.Id, ct);
+            }
+            var result = await ReplacePasswordAsync(user.Id, request.NewPassword, ct);
+            return result.IsFailure ? Result.Failure<bool>(result.Error) : Result.Success(true);
+        }, cancellationToken);
+        return replacement.IsFailure ? replacement.Error : Result.Success();
+    }
+
+    private async Task<Result> ReplacePasswordAsync(Guid userId, string newPassword, CancellationToken cancellationToken)
+    {
+        if (_familyFirstLogin is not null && await _familyFirstLogin.IsViablePendingSetupAsync(userId, cancellationToken))
+            return Error.Forbidden(MessageCodes.Family.PasswordSetupRequired);
+        var token = await _users.GeneratePasswordResetTokenAsync(userId, cancellationToken);
+        var reset = await _users.ResetPasswordAsync(userId, token, newPassword, cancellationToken);
         if (reset.IsFailure)
         {
             return reset;
         }
 
-        await _sessions.RevokeAllUserTokensAsync(user.Id, cancellationToken);
-        await _challenges.InvalidateAllForUserAsync(user.Id, cancellationToken);
+        if (_familyFirstLogin is not null)
+        {
+            var recovered = await _familyFirstLogin.CompleteHistoricalSetupRecoveryAsync(userId, cancellationToken);
+            if (recovered.IsFailure) return recovered;
+        }
+
+        await _sessions.RevokeAllUserTokensAsync(userId, cancellationToken);
+        await _challenges.InvalidateAllForUserAsync(userId, cancellationToken);
         await _audit.LogAsync(new AuditEntry(
             "CustomerPasswordResetCompleted",
             "User",
-            user.Id,
+            userId,
             SourceChannel: "auth"), cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return Result.Success();

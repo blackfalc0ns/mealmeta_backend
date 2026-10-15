@@ -140,6 +140,60 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+var mobileAdvertisingPreviewSeedIndex = Array.FindIndex(
+    args,
+    arg => string.Equals(arg, "--seed-mobile-advertising-preview", StringComparison.OrdinalIgnoreCase));
+if (mobileAdvertisingPreviewSeedIndex >= 0)
+{
+    if (!app.Environment.IsDevelopment())
+    {
+        throw new InvalidOperationException("Mobile advertising preview seeding is allowed only when ASPNETCORE_ENVIRONMENT=Development.");
+    }
+
+    var confirmDatabaseIndex = Array.FindIndex(args, arg => string.Equals(arg, "--confirm-database", StringComparison.OrdinalIgnoreCase));
+    var connectionString = app.Configuration.GetConnectionString("MealMateDb");
+    var connection = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+    if (confirmDatabaseIndex < 0 || confirmDatabaseIndex + 1 >= args.Length
+        || !string.Equals(args[confirmDatabaseIndex + 1], connection.Database, StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            "Mobile advertising preview seeding requires --confirm-database <configured-database-name> to match the current Development database. No migrations or seed writes were run.");
+    }
+
+    Guid? customerId = null;
+    var dryRun = args.Any(arg => string.Equals(arg, "--dry-run", StringComparison.OrdinalIgnoreCase));
+    var placementKey = "offers.hero";
+    var assetFileIndex = Array.FindIndex(args, arg => string.Equals(arg, "--asset-file", StringComparison.OrdinalIgnoreCase));
+    if (assetFileIndex < 0 || assetFileIndex + 1 >= args.Length || string.IsNullOrWhiteSpace(args[assetFileIndex + 1]))
+    {
+        throw new ArgumentException("Usage: --seed-mobile-advertising-preview --confirm-database <name> --asset-file <repo-owned-jpeg> [--placement-key <key>] [--customer-id <existing-user-id>] [--dry-run]");
+    }
+    var assetFilePath = args[assetFileIndex + 1];
+    var placementKeyIndex = Array.FindIndex(args, arg => string.Equals(arg, "--placement-key", StringComparison.OrdinalIgnoreCase));
+    if (placementKeyIndex >= 0)
+    {
+        if (placementKeyIndex + 1 >= args.Length || string.IsNullOrWhiteSpace(args[placementKeyIndex + 1]))
+        {
+            throw new ArgumentException("Usage: --placement-key <existing-mobile-placement-key>");
+        }
+        placementKey = args[placementKeyIndex + 1].Trim();
+    }
+    var customerIdIndex = Array.FindIndex(
+        args,
+        arg => string.Equals(arg, "--customer-id", StringComparison.OrdinalIgnoreCase));
+    if (customerIdIndex >= 0)
+    {
+        if (customerIdIndex + 1 >= args.Length || !Guid.TryParse(args[customerIdIndex + 1], out var parsedCustomerId))
+        {
+            throw new ArgumentException("Usage: --seed-mobile-advertising-preview [--customer-id <existing-customer-user-id>]");
+        }
+        customerId = parsedCustomerId;
+    }
+
+    await MobileAdvertisingPreviewSeeder.SeedAsync(app.Services, placementKey, assetFilePath, customerId, dryRun);
+    return;
+}
+
 app.UseForwardedHeaders();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMealMateLocalization();

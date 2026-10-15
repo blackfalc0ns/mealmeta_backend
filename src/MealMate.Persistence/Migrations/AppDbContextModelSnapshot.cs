@@ -10421,6 +10421,11 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("FamilyMemberId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("DetachedFromFamilyManagement")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("HasSeparateAccount")
                         .HasColumnType("boolean");
 
@@ -10465,6 +10470,26 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("LinkedCustomerUserId");
 
                     b.ToTable("FamilyMemberAccesses", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.FamilyCredentialOperation", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uuid");
+                    b.Property<DateTime>("CreatedAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("CreatedByUserId").HasColumnType("uuid");
+                    b.Property<DateTime?>("DeletedAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("DeletedByUserId").HasColumnType("uuid");
+                    b.Property<Guid>("FamilyMemberId").HasColumnType("uuid");
+                    b.Property<Guid>("ActorUserId").HasColumnType("uuid");
+                    b.Property<string>("OperationKeyHash").IsRequired().HasMaxLength(64).HasColumnType("character varying(64)");
+                    b.Property<DateTime>("CompletedAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<bool>("IsDeleted").HasColumnType("boolean");
+                    b.Property<DateTime?>("ModifiedAtUtc").HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("ModifiedByUserId").HasColumnType("uuid");
+                    b.HasKey("Id");
+                    b.HasIndex("ActorUserId");
+                    b.HasIndex("FamilyMemberId", "OperationKeyHash").IsUnique();
+                    b.ToTable("FamilyCredentialOperations", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.FamilyMemberPermissions", b =>

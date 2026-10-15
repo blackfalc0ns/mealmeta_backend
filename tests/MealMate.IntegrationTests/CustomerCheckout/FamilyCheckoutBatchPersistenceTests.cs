@@ -22,20 +22,20 @@ namespace MealMate.IntegrationTests.CustomerCheckout;
 /// </summary>
 public sealed class FamilyCheckoutBatchPersistenceTests : IAsyncLifetime
 {
-    private PostgreSqlContainer _container = null!;
+    private MealMate.Testing.PostgresTestDatabase _container = null!;
 
     public async Task InitializeAsync()
     {
         try
         {
-            _container = new PostgreSqlBuilder().WithImage("postgres:16-alpine").Build();
+            _container = new();
             await _container.StartAsync();
             await using var db = CreateDb();
             await db.Database.MigrateAsync();
         }
         catch (Exception ex)
         {
-            throw new XunitException("Docker is required for family checkout batch integration tests.", ex);
+            throw new XunitException("Docker or an explicitly configured local PostgreSQL test database is required.", ex);
         }
     }
 

@@ -91,7 +91,7 @@ public sealed class SubscriptionFlowCouponService : ISubscriptionFlowCouponServi
         Guid excludeSubscriptionId = default,
         string subscriptionType = "Individual")
     {
-        var code = (promoCode ?? string.Empty).Trim().ToUpper();
+        var code = (promoCode ?? string.Empty).Trim().ToUpperInvariant();
         if (code.Length == 0)
             return Rejected(null, null, SubscriptionCouponStatuses.NotFound);
 

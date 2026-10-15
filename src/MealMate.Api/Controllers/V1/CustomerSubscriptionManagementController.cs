@@ -358,53 +358,82 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
     [HttpPut("{id:guid}/auto-renewal/consent")]
     public async Task<IActionResult> RecordAutoRenewalConsent(Guid id, [FromBody] AutoRenewalConsentRequest body,
         [FromServices] IAppDbContext db, [FromServices] IFamilySubscriptionAccess access,
-        IDateTimeProvider clock, CancellationToken ct)
+        IDateTimeProvider clock, CancellationToken ct,
+        [FromServices] IApplicationTransactionExecutor? transactions = null,
+        [FromServices] IApplicationLockManager? locks = null)
     {
         if (!IsCustomer()) return Forbid();
         if (body is null || !body.Accepted || string.IsNullOrWhiteSpace(body.ConsentVersion) || body.ConsentVersion.Length > 40 ||
             body.Amount <= 0 || decimal.Round(body.Amount, 3) != body.Amount || string.IsNullOrWhiteSpace(body.Currency) || body.Currency.Length != 3)
             return BadRequest(new { error = "auto_renewal.invalid_consent" });
 
-        var subscription = await db.Subscriptions.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (subscription is null) return NotFound(new { error = "subscription.not_found" });
-        var authorized = await access.AuthorizeAsync(subscription, _currentUser.UserId!.Value, FamilyAction.RequestRenewal, ct);
-        if (authorized.IsFailure) return HandleResult(authorized.Error);
-        if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled))
-            return Conflict(new { error = "auto_renewal.subscription_not_eligible" });
-        var currentAmount = subscription.PaidAmount.Amount;
-        var currentCurrency = subscription.PaidAmount.CurrencyCode;
-        if (body.Amount != currentAmount || !body.Currency.Equals(currentCurrency, StringComparison.OrdinalIgnoreCase))
-            return Conflict(new { error = "auto_renewal.price_changed", amount = currentAmount, currency = currentCurrency });
+        return await WithSubscriptionWriteLockAsync(id, db, access, transactions, locks, ct, async (subscription, token) =>
+        {
+            if (subscription.Status is not (SubscriptionStatus.Active or SubscriptionStatus.Scheduled))
+                return Conflict(new { error = "auto_renewal.subscription_not_eligible" });
+            var currentAmount = subscription.PaidAmount.Amount;
+            var currentCurrency = subscription.PaidAmount.CurrencyCode;
+            if (body.Amount != currentAmount || !body.Currency.Equals(currentCurrency, StringComparison.OrdinalIgnoreCase))
+                return Conflict(new { error = "auto_renewal.price_changed", amount = currentAmount, currency = currentCurrency });
 
-        subscription.AutoRenewConsentAtUtc = clock.UtcNow;
-        subscription.AutoRenewConsentWithdrawnAtUtc = null;
-        subscription.AutoRenewConsentVersion = body.ConsentVersion.Trim();
-        subscription.AutoRenewConsentAmount = body.Amount;
-        subscription.AutoRenewConsentCurrency = currentCurrency;
-        subscription.AutoRenewConsentActorUserId = _currentUser.UserId.Value;
-        subscription.AutoRenewConsentWithdrawnByUserId = null;
-        await db.SaveChangesAsync(ct);
-        return Accepted(new { subscriptionId = id, consentActive = true, consentVersion = subscription.AutoRenewConsentVersion,
-            consentAmount = subscription.AutoRenewConsentAmount, currency = subscription.AutoRenewConsentCurrency,
-            consentedAtUtc = subscription.AutoRenewConsentAtUtc, billingStatus = "NotConnected", requiresPaymentSetup = true,
-            autoChargeEnabled = false });
+            subscription.AutoRenewConsentAtUtc = clock.UtcNow;
+            subscription.AutoRenewConsentWithdrawnAtUtc = null;
+            subscription.AutoRenewConsentVersion = body.ConsentVersion.Trim();
+            subscription.AutoRenewConsentAmount = body.Amount;
+            subscription.AutoRenewConsentCurrency = currentCurrency;
+            subscription.AutoRenewConsentActorUserId = _currentUser.UserId!.Value;
+            subscription.AutoRenewConsentWithdrawnByUserId = null;
+            await db.SaveChangesAsync(token);
+            return Accepted(new { subscriptionId = id, consentActive = true, consentVersion = subscription.AutoRenewConsentVersion,
+                consentAmount = subscription.AutoRenewConsentAmount, currency = subscription.AutoRenewConsentCurrency,
+                consentedAtUtc = subscription.AutoRenewConsentAtUtc, billingStatus = "NotConnected", requiresPaymentSetup = true,
+                autoChargeEnabled = false });
+        });
     }
 
     /// <summary>Withdraw customer consent. Provider-side recurring cancellation must be completed before automatic billing is enabled.</summary>
     [HttpDelete("{id:guid}/auto-renewal/consent")]
     public async Task<IActionResult> WithdrawAutoRenewalConsent(Guid id, [FromServices] IAppDbContext db,
-        [FromServices] IFamilySubscriptionAccess access, IDateTimeProvider clock, CancellationToken ct)
+        [FromServices] IFamilySubscriptionAccess access, IDateTimeProvider clock, CancellationToken ct,
+        [FromServices] IApplicationTransactionExecutor? transactions = null,
+        [FromServices] IApplicationLockManager? locks = null)
     {
         if (!IsCustomer()) return Forbid();
-        var subscription = await db.Subscriptions.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (subscription is null) return NotFound(new { error = "subscription.not_found" });
-        var authorized = await access.AuthorizeAsync(subscription, _currentUser.UserId!.Value, FamilyAction.RequestRenewal, ct);
-        if (authorized.IsFailure) return HandleResult(authorized.Error);
-        subscription.AutoRenewConsentWithdrawnAtUtc = clock.UtcNow;
-        subscription.AutoRenewConsentWithdrawnByUserId = _currentUser.UserId.Value;
-        await db.SaveChangesAsync(ct);
-        return Ok(new { subscriptionId = id, consentActive = false, withdrawnAtUtc = subscription.AutoRenewConsentWithdrawnAtUtc,
-            billingStatus = "NotConnected", autoChargeEnabled = false });
+        return await WithSubscriptionWriteLockAsync(id, db, access, transactions, locks, ct, async (subscription, token) =>
+        {
+            subscription.AutoRenewConsentWithdrawnAtUtc = clock.UtcNow;
+            subscription.AutoRenewConsentWithdrawnByUserId = _currentUser.UserId!.Value;
+            await db.SaveChangesAsync(token);
+            return Ok(new { subscriptionId = id, consentActive = false, withdrawnAtUtc = subscription.AutoRenewConsentWithdrawnAtUtc,
+                billingStatus = "NotConnected", autoChargeEnabled = false });
+        });
+    }
+
+    private async Task<IActionResult> WithSubscriptionWriteLockAsync(Guid subscriptionId, IAppDbContext db,
+        IFamilySubscriptionAccess access, IApplicationTransactionExecutor? transactions, IApplicationLockManager? locks,
+        CancellationToken ct, Func<MealMate.Domain.ProgramsSubscriptions.Subscription, CancellationToken, Task<IActionResult>> write)
+    {
+        var initialGroupId = await db.Subscriptions.AsNoTracking().Where(x => x.Id == subscriptionId)
+            .Select(x => x.FamilyGroupId).SingleOrDefaultAsync(ct);
+        if (initialGroupId.HasValue && (transactions is null || locks is null))
+            return Conflict(new { error = "subscription.service_unavailable" });
+
+        async Task<IActionResult> Execute(CancellationToken token, bool lockScope)
+        {
+            var groupId = await db.Subscriptions.AsNoTracking().Where(x => x.Id == subscriptionId)
+                .Select(x => x.FamilyGroupId).SingleOrDefaultAsync(token);
+            if (lockScope && groupId is Guid familyId) await locks!.LockFamilyGroupAsync(familyId, token);
+            if (lockScope) await locks!.LockSubscriptionAsync(subscriptionId, token);
+            var subscription = await db.Subscriptions.FirstOrDefaultAsync(x => x.Id == subscriptionId, token);
+            if (subscription is null) return NotFound(new { error = "subscription.not_found" });
+            var authorization = await access.AuthorizeAsync(subscription, _currentUser.UserId!.Value, FamilyAction.RequestRenewal, token);
+            if (authorization.IsFailure) return HandleResult(authorization.Error);
+            return await write(subscription, token);
+        }
+
+        if (transactions is null || locks is null)
+            return await Execute(ct, false);
+        return await transactions.ExecuteAsync(token => Execute(token, true), ct);
     }
 
     /// <summary>Create an idempotent renewal intent and return the frozen context used to reopen subscription flow.</summary>
@@ -418,9 +447,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         var result = await _renewalService.RequestRenewalAsync(id, _currentUser.UserId!.Value, ct);
         if (result.IsFailure)
         {
-            if (result.Error.Type == ErrorType.NotFound) return NotFound(new { error = "subscription.not_found" });
-            if (result.Error.Type == ErrorType.Conflict) return Conflict(new { error = result.Error.Code });
-            return BadRequest(new { error = result.Error.Code });
+            return HandleResult(result.Error);
         }
         return Accepted(result.Value);
     }

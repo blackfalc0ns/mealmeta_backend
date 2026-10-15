@@ -94,14 +94,65 @@ public sealed class FamilyApiBoundaryTests
     [Theory]
     [InlineData(true, true)]
     [InlineData(false, false)]
-    public async Task Member_session_context_denies_paused_or_disabled_access(bool separate, bool paused)
+    public async Task Member_session_context_reports_paused_or_disabled_family_access_without_hiding_customer_identity(bool separate, bool paused)
     {
         await using var fx = await Fixture.Create();
         fx.Access.HasSeparateAccount = separate;
         fx.Access.IsPaused = paused;
         await fx.Db.SaveChangesAsync();
         using var response = await fx.Get(fx.Actor, "me");
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var context = Assert.Single((await response.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray());
+        Assert.Equal(paused ? "Paused" : "Disabled", context.GetProperty("accessStatus").GetString());
+        Assert.Equal(JsonValueKind.Null, context.GetProperty("memberSubscriptionId").ValueKind);
+        foreach (var capability in context.GetProperty("capabilities").EnumerateArray())
+            Assert.Equal(capability.GetProperty("action").GetString() == "ChangePassword", capability.GetProperty("allowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Detached_context_and_manager_denial_are_consistent_and_localized()
+    {
+        await using var fx = await Fixture.Create();
+        fx.Access.DetachedFromFamilyManagement = true;
+        (await fx.Db.FamilyMemberPermissions.SingleAsync(x => x.FamilyMemberId == fx.Member.Id)).ViewCalendar = false;
+        await fx.Db.SaveChangesAsync();
+
+        using var contextResponse = await fx.Get(fx.Actor, "me");
+        Assert.Equal(HttpStatusCode.OK, contextResponse.StatusCode);
+        var context = Assert.Single((await contextResponse.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray());
+        Assert.True(context.GetProperty("isDetachedFromFamilyManagement").GetBoolean());
+        Assert.True(context.GetProperty("capabilities").EnumerateArray()
+            .Single(x => x.GetProperty("action").GetString() == "ViewCalendar")
+            .GetProperty("allowed").GetBoolean());
+        foreach (var capability in context.GetProperty("capabilities").EnumerateArray())
+        {
+            var unsupported = capability.GetProperty("action").GetString() is
+                "EditMealsAndDays" or "ChangeProgram" or "ChangeDeliveryTime" or "UnitExchange";
+            Assert.Equal(!unsupported, capability.GetProperty("allowed").GetBoolean());
+        }
+
+        using var capabilitiesResponse = await fx.Get(fx.Manager, $"members/{fx.Member.Id}/capabilities");
+        Assert.Equal(HttpStatusCode.OK, capabilitiesResponse.StatusCode);
+        foreach (var capability in (await capabilitiesResponse.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray())
+        {
+            var readOnly = capability.GetProperty("action").GetString() is "ViewCalendar" or "ViewPlan" or "ViewInvoices";
+            Assert.Equal(readOnly, capability.GetProperty("allowed").GetBoolean());
+            Assert.Equal(readOnly ? null : "family.member_detached", capability.GetProperty("reasonCode").ValueKind == JsonValueKind.Null
+                ? null : capability.GetProperty("reasonCode").GetString());
+        }
+
+        var details = new List<string>();
+        foreach (var language in new[] { "ar", "en", "ar" })
+        {
+            using var response = await fx.Put(fx.Manager, $"members/{fx.Member.Id}/access",
+                new { hasSeparateAccount = false, isPaused = true }, language);
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("family.member_detached", body.GetProperty("code").GetString());
+            details.Add(body.GetProperty("detail").GetString()!);
+        }
+        Assert.Equal(details[0], details[2]);
+        Assert.NotEqual(details[0], details[1]);
     }
 
     [Fact]
@@ -230,6 +281,16 @@ public sealed class FamilyApiBoundaryTests
         public Task<HttpResponseMessage> Get(Guid actor, string route, string language = "en")
         {
             var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/customer/family/" + route);
+            request.Headers.Add("X-Fixture-Actor", actor.ToString());
+            request.Headers.Add("Accept-Language", language);
+            return _client.SendAsync(request);
+        }
+        public Task<HttpResponseMessage> Put(Guid actor, string route, object body, string language = "en")
+        {
+            var request = new HttpRequestMessage(HttpMethod.Put, "/api/v1/customer/family/" + route)
+            {
+                Content = JsonContent.Create(body),
+            };
             request.Headers.Add("X-Fixture-Actor", actor.ToString());
             request.Headers.Add("Accept-Language", language);
             return _client.SendAsync(request);

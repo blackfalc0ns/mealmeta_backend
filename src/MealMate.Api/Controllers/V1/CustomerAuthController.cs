@@ -49,6 +49,16 @@ public sealed class CustomerAuthController : ApiControllerBase
             Request.Headers.UserAgent.ToString(),
             HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken));
 
+    [HttpPost("family-first-login/resend-otp")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ResendFamilyMemberFirstLoginOtp(
+        [FromBody] FamilyMemberFirstLoginResendOtpRequest body,
+        CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new ResendFamilyMemberFirstLoginOtpCommand(
+            body.LoginChallengeToken,
+            Request.Headers.UserAgent.ToString(),
+            HttpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken));
+
     [HttpPost("family-first-login/set-password")]
     [AllowAnonymous]
     public async Task<IActionResult> SetFamilyMemberFirstLoginPassword(
@@ -145,6 +155,7 @@ public sealed record CustomerResendPhoneOtpRequest(string Phone, string? Country
 public sealed record CustomerForgotPasswordRequest(string Phone, string? CountryCode);
 public sealed record CustomerResetPasswordRequest(string Phone, string OtpCode, string NewPassword, string? CountryCode);
 public sealed record FamilyMemberFirstLoginOtpRequest(string LoginChallengeToken, string OtpCode);
+public sealed record FamilyMemberFirstLoginResendOtpRequest(string LoginChallengeToken);
 public sealed record FamilyMemberFirstLoginSetPasswordRequest(string LoginChallengeToken, string NewPassword);
 public sealed record OtpActionResponse(bool Success, bool OtpSent, string NextStep);
 public sealed record ResetPasswordResponse(bool Success, bool PasswordReset, string NextStep);

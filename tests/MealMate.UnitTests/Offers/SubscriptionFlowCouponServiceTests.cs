@@ -23,6 +23,27 @@ public sealed class SubscriptionFlowCouponServiceTests
     private static readonly Guid BundleId = Guid.NewGuid();
 
     [Fact]
+    public async Task AdminPromoCode_NormalizationIsIndependentOfProcessCulture()
+    {
+        await using var db = CreateDb();
+        var promo = SeedAdminPromo(db, "Individual");
+        await db.SaveChangesAsync();
+        var originalCulture = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("tr-TR");
+            var evaluation = await EvaluateAsync(db, " admin10 ");
+            evaluation.IsValid.Should().BeTrue();
+            evaluation.Code.Should().Be(promo.Code);
+            db.PromoCodeRedemptions.Should().BeEmpty("preview must not consume the coupon");
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = originalCulture;
+        }
+    }
+
+    [Fact]
     public async Task ValidOffer_EvaluatesEligibleWithDiscount()
     {
         await using var db = CreateDb();

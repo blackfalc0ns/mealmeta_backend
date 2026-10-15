@@ -129,6 +129,7 @@ public sealed class AppDbContext
     public DbSet<FamilyGroup> FamilyGroups => Set<FamilyGroup>();
     public DbSet<FamilyMember> FamilyMembers => Set<FamilyMember>();
     public DbSet<FamilyMemberAccess> FamilyMemberAccesses => Set<FamilyMemberAccess>();
+    public DbSet<FamilyCredentialOperation> FamilyCredentialOperations => Set<FamilyCredentialOperation>();
     public DbSet<FamilyMemberPermissions> FamilyMemberPermissions => Set<FamilyMemberPermissions>();
     public DbSet<PromoCode> PromoCodes => Set<PromoCode>();
     public DbSet<PromoCodeRedemption> PromoCodeRedemptions => Set<PromoCodeRedemption>();

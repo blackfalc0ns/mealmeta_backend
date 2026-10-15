@@ -11,7 +11,7 @@ using NSubstitute;
 namespace MealMate.UnitTests.FamilyManager;
 
 /// <summary>
-/// FamilyActionPolicy decision matrix: the manager manages everything,
+/// FamilyActionPolicy decision matrix: the manager manages linked members,
 /// members act only through granted keys (default deny on the new keys),
 /// read keys never grant write, and pause/removal cuts access immediately.
 /// </summary>
@@ -32,6 +32,82 @@ public sealed class FamilyActionPolicyTests
             member.ReasonCode.Should().Be("family.password_setup_required");
             (await fx.Policy.EvaluateAsync(fx.ManagerId, fx.Member.Id, action)).Allowed.Should().BeTrue();
         }
+    }
+
+    [Fact]
+    public async Task Detached_member_has_all_supported_own_actions_even_when_old_grants_are_false_and_manager_is_read_only()
+    {
+        using var fx = new Fixture();
+        fx.MemberAccess.DetachedFromFamilyManagement = true;
+        await fx.Db.SaveChangesAsync();
+
+        var unsupported = new[] { FamilyAction.EditMealsAndDays, FamilyAction.ChangeProgram,
+            FamilyAction.ChangeDeliveryTime, FamilyAction.UnitExchange };
+        foreach (var action in Enum.GetValues<FamilyAction>())
+        {
+            var own = await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, action);
+            own.Allowed.Should().Be(!unsupported.Contains(action), action.ToString());
+            own.ReasonCode.Should().Be(unsupported.Contains(action) ? "family.action_not_available" : null);
+        }
+        foreach (var action in Enum.GetValues<FamilyAction>())
+        {
+            var decision = await fx.Policy.EvaluateAsync(fx.ManagerId, fx.Member.Id, action);
+            var readOnly = action is FamilyAction.ViewCalendar or FamilyAction.ViewPlan or FamilyAction.ViewInvoices;
+            if (unsupported.Contains(action)) readOnly = false;
+            decision.Allowed.Should().Be(readOnly, $"manager action {action}");
+            decision.ReasonCode.Should().Be(readOnly ? null : "family.member_detached");
+        }
+    }
+
+    [Fact]
+    public async Task Detached_member_effective_policy_ignores_stale_false_flags_but_keeps_unsupported_actions_denied()
+    {
+        using var fx = new Fixture();
+        fx.MemberAccess.DetachedFromFamilyManagement = true;
+        await fx.Db.SaveChangesAsync();
+        var unsupported = new[] { FamilyAction.EditMealsAndDays, FamilyAction.ChangeProgram,
+            FamilyAction.ChangeDeliveryTime, FamilyAction.UnitExchange };
+        foreach (var action in Enum.GetValues<FamilyAction>())
+        {
+            var decision = await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, action);
+            decision.Allowed.Should().Be(!unsupported.Contains(action), action.ToString());
+        }
+    }
+
+    [Fact]
+    public async Task Detached_capabilities_report_independent_customer_rights_even_when_grant_flags_are_stale()
+    {
+        using var fx = new Fixture();
+        fx.MemberAccess.DetachedFromFamilyManagement = true;
+        await fx.Db.SaveChangesAsync();
+        var actor = Substitute.For<ICurrentUser>();
+        actor.UserId.Returns(fx.MemberUserId);
+        actor.UserType.Returns(UserType.Customer);
+
+        var result = await new GetMyFamilyCapabilitiesHandler(fx.Db, actor)
+            .Handle(new GetMyFamilyCapabilitiesQuery(fx.Member.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var unsupported = new[] { FamilyAction.EditMealsAndDays, FamilyAction.ChangeProgram,
+            FamilyAction.ChangeDeliveryTime, FamilyAction.UnitExchange };
+        foreach (var capability in result.Value)
+        {
+            capability.Allowed.Should().Be(!unsupported.Contains(Enum.Parse<FamilyAction>(capability.Action)));
+        }
+    }
+
+    [Fact]
+    public async Task Detached_member_cannot_use_family_scope_grants_for_sibling()
+    {
+        using var fx = new Fixture();
+        fx.MemberAccess.DetachedFromFamilyManagement = true;
+        fx.Permissions!.ViewFamilyCalendars = true;
+        fx.Permissions.ViewFamilyPlans = true;
+        await fx.Db.SaveChangesAsync();
+
+        var decision = await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.SiblingMember.Id, FamilyAction.ViewCalendar);
+        decision.Allowed.Should().BeFalse();
+        decision.ReasonCode.Should().Be("family.member_detached");
     }
 
     private static readonly DateTime Now = new(2026, 10, 6, 9, 0, 0, DateTimeKind.Utc);
@@ -107,7 +183,39 @@ public sealed class FamilyActionPolicyTests
         (await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, FamilyAction.EditMealsAndDays)).Allowed
             .Should().BeFalse();
         (await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, FamilyAction.ChangePassword)).Allowed
-            .Should().BeFalse();
+            .Should().BeTrue("credentials belong to the authenticated customer");
+    }
+
+    [Theory]
+    [InlineData(FamilyAction.SelectRestaurant)]
+    [InlineData(FamilyAction.EditDailyMeals)]
+    [InlineData(FamilyAction.ConfirmMeals)]
+    public async Task Legacy_calendar_write_grants_include_the_reads_needed_to_reach_the_action(FamilyAction action)
+    {
+        using var fx = new Fixture();
+        if (action == FamilyAction.SelectRestaurant) fx.Permissions!.SelectRestaurant = true;
+        if (action == FamilyAction.EditDailyMeals) fx.Permissions!.EditDailyMeals = true;
+        if (action == FamilyAction.ConfirmMeals) fx.Permissions!.ConfirmMeals = true;
+        await fx.Db.SaveChangesAsync();
+        (await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, FamilyAction.ViewCalendar)).Allowed.Should().BeTrue();
+        (await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, FamilyAction.ViewPlan)).Allowed.Should().BeTrue();
+        (await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, action)).Allowed.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Detached_own_service_survives_an_inactive_historical_group_without_restoring_manager_control(bool deleted)
+    {
+        using var fx = new Fixture();
+        fx.MemberAccess.DetachedFromFamilyManagement = true;
+        var group = await fx.Db.FamilyGroups.SingleAsync(x => x.Id == fx.Member.FamilyGroupId);
+        group.Status = FamilyGroupStatus.Cancelled;
+        group.IsDeleted = deleted;
+        await fx.Db.SaveChangesAsync();
+        (await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, FamilyAction.ViewCalendar)).Allowed.Should().BeTrue();
+        (await fx.Policy.EvaluateAsync(fx.MemberUserId, fx.Member.Id, FamilyAction.EditDailyMeals)).Allowed.Should().BeTrue();
+        (await fx.Policy.EvaluateAsync(fx.ManagerId, fx.Member.Id, FamilyAction.EditDailyMeals)).Allowed.Should().BeFalse();
     }
 
     [Fact]

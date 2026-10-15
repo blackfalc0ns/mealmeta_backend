@@ -14,6 +14,24 @@ namespace MealMate.UnitTests.Offers;
 
 public class OfferQueriesTests
 {
+    [Fact]
+    public void OfferDto_ExposesPersistedNavigationScope()
+    {
+        var programId = Guid.NewGuid();
+        var bundleId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+        var offer = new Offer { NameAr = "عرض", NameEn = "Offer" };
+        offer.EligiblePrograms.Add(new OfferProgram { ProgramId = programId });
+        offer.EligibleBundles.Add(new OfferBundle { BundleId = bundleId });
+        offer.EligibleRestaurants.Add(new OfferRestaurant { RestaurantId = restaurantId });
+        var dto = MealMate.Application.Features.Offers.Commands.CreateOfferDraftCommandHandler.MapOfferDto(offer);
+        using var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(dto));
+        json.RootElement.GetProperty("EligibleProgramIds")[0].GetGuid().Should().Be(programId);
+        json.RootElement.GetProperty("EligibleBundleIds")[0].GetGuid().Should().Be(bundleId);
+        json.RootElement.GetProperty("EligibleRestaurantIds")[0].GetGuid().Should().Be(restaurantId);
+        json.RootElement.GetProperty("SourceType").GetString().Should().Be("Offer");
+    }
+
     private AppDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -111,5 +129,44 @@ public class OfferQueriesTests
         result.IsSuccess.Should().BeTrue();
         result.Value.Should().HaveCount(1);
         result.Value![0].NameEn.Should().Be("Available Offer");
+    }
+
+    [Fact]
+    public async Task CustomerDetails_ReturnsScopeAndServerClock_WithoutConsumingCoupon()
+    {
+        using var db = CreateDbContext();
+        var now = new DateTime(2026, 10, 14, 9, 0, 0, DateTimeKind.Utc);
+        var programId = Guid.NewGuid();
+        var offer = new Offer
+        {
+            NameAr = "عرض", NameEn = "Offer", Status = OfferStatus.Active,
+            StartsAtUtc = now.AddDays(-1), EndsAtUtc = now.AddDays(1), PerCustomerLimit = 1,
+            PromoCode = "SAVE10"
+        };
+        offer.EligiblePrograms.Add(new OfferProgram { ProgramId = programId });
+        db.Offers.Add(offer);
+        await db.SaveChangesAsync();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+        var available = new GetCustomerAvailableOffersQueryHandler(db, new OfferEligibilityEngine(), clock);
+        var handler = new GetCustomerOfferDetailsQueryHandler(available, clock);
+
+        var result = await handler.Handle(new GetCustomerOfferDetailsQuery(offer.Id, Guid.NewGuid(), ProgramId: programId), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.Offer.Id.Should().Be(offer.Id);
+        result.Value.Offer.EligibleProgramIds.Should().ContainSingle().Which.Should().Be(programId);
+        result.Value.ServerNowUtc.Should().Be(now);
+        db.OfferRedemptions.Should().BeEmpty();
+        (await db.Offers.SingleAsync()).CurrentUsageCount.Should().Be(0);
+
+        var wrongProgram = await handler.Handle(new GetCustomerOfferDetailsQuery(offer.Id, Guid.NewGuid(), ProgramId: Guid.NewGuid()), CancellationToken.None);
+        wrongProgram.IsFailure.Should().BeTrue();
+        wrongProgram.Error.Type.Should().Be(ErrorType.NotFound);
+        offer.Status = OfferStatus.Draft;
+        await db.SaveChangesAsync();
+        var inactive = await handler.Handle(new GetCustomerOfferDetailsQuery(offer.Id, Guid.NewGuid()), CancellationToken.None);
+        inactive.IsFailure.Should().BeTrue();
+        inactive.Error.Type.Should().Be(ErrorType.NotFound);
     }
 }

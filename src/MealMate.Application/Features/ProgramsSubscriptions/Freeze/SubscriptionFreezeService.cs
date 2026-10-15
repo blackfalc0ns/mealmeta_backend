@@ -101,13 +101,13 @@ public sealed class SubscriptionFreezeService : ISubscriptionFreezeService
         if (_sender is not null)
         {
             return await _sender.Send(new RequestSubscriptionFreezeCommand(
-                subscriptionId, request.StartDate, request.EndDate, request.Reason, request.AcknowledgeLostSelections), ct);
+                subscriptionId, request.StartDate, request.EndDate, request.Reason, request.AcknowledgeLostSelections, customerUserId), ct);
         }
 
         // Direct execution fallback if MediatR is not injected
         var handler = new SubscriptionOperationsHandlers(_db, null!, _clock, null!, null!, null!);
         return await handler.Handle(new RequestSubscriptionFreezeCommand(
-            subscriptionId, request.StartDate, request.EndDate, request.Reason, request.AcknowledgeLostSelections), ct);
+            subscriptionId, request.StartDate, request.EndDate, request.Reason, request.AcknowledgeLostSelections, customerUserId), ct);
     }
 
     private async Task<Subscription?> ResolveCurrentSubscriptionAsync(Guid customerUserId, CancellationToken ct)

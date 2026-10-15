@@ -46,11 +46,9 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         foreach (var subscription in subscriptions)
             cards.Add(await MapSubscription(subscription, includeInvoices: true, ct, customerUserId));
 
-        var current = cards
-            .Where(x => IsCurrentStatus(x.Status))
-            .OrderBy(x => CurrentStatusPriority(x.Status))
-            .ThenByDescending(x => x.StartDate)
-            .FirstOrDefault();
+        var ownMemberIds = await GetOwnFamilyMemberIdsAsync(customerUserId, ct);
+        var currentSubscriptionId = SelectCurrentSubscription(subscriptions, customerUserId, ownMemberIds)?.Id;
+        var current = cards.FirstOrDefault(x => x.SubscriptionId == currentSubscriptionId);
 
         return new CustomerSubscriptionManagementScreenDto(
             current,
@@ -66,11 +64,9 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         foreach (var subscription in subscriptions)
             cards.Add(await MapSlimSubscription(subscription, ct, actorUserId: customerUserId));
 
-        var current = cards
-            .Where(x => IsCurrentStatus(x.Status))
-            .OrderBy(x => CurrentStatusPriority(x.Status))
-            .ThenByDescending(x => x.StartDate)
-            .FirstOrDefault();
+        var ownMemberIds = await GetOwnFamilyMemberIdsAsync(customerUserId, ct);
+        var currentSubscriptionId = SelectCurrentSubscription(subscriptions, customerUserId, ownMemberIds)?.Id;
+        var current = cards.FirstOrDefault(x => x.SubscriptionId == currentSubscriptionId);
 
         return new CustomerCurrentSubscriptionScreenDto(
             current,
@@ -289,6 +285,21 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         return query.OrderByDescending(x => x.CreatedAtUtc);
     }
 
+    private async Task<HashSet<Guid>> GetOwnFamilyMemberIdsAsync(Guid customerUserId, CancellationToken ct) =>
+        (await _db.FamilyMemberAccesses.AsNoTracking()
+            .Where(x => x.LinkedCustomerUserId == customerUserId && x.RemovedAtUtc == null)
+            .Select(x => x.FamilyMemberId).ToListAsync(ct)).ToHashSet();
+
+    private static Subscription? SelectCurrentSubscription(
+        IReadOnlyList<Subscription> subscriptions, Guid actorUserId, HashSet<Guid> ownFamilyMemberIds) =>
+        subscriptions.Where(x => IsCurrentStatus(CustomerFacingStatus(x.Status)))
+            .OrderBy(x => x.FamilyGroupId.HasValue
+                ? (x.FamilyMemberId.HasValue && ownFamilyMemberIds.Contains(x.FamilyMemberId.Value) ? 0 : 1)
+                : (x.CustomerUserId == actorUserId ? 0 : 1))
+            .ThenBy(x => CurrentStatusPriority(CustomerFacingStatus(x.Status)))
+            .ThenByDescending(x => x.StartDate)
+            .FirstOrDefault();
+
     private async Task<IReadOnlyList<Subscription>> VisibleCustomerSubscriptions(Guid customerUserId, bool includeHistory, CancellationToken ct)
     {
         var subscriptions = await QueryCustomerSubscriptions(customerUserId, includeHistory).ToListAsync(ct);
@@ -427,6 +438,12 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             return new Dictionary<Guid, FamilySubscriptionDisplay>();
 
         var familyIds = familySubscriptions.Select(x => x.FamilyGroupId!.Value).Distinct().ToList();
+        var familyMemberIds = familySubscriptions.Where(x => x.FamilyMemberId.HasValue)
+            .Select(x => x.FamilyMemberId!.Value).Distinct().ToList();
+        var memberNames = familyMemberIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.FamilyMembers.AsNoTracking().Where(x => familyMemberIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.DisplayName, ct);
         var groups = await _db.FamilyGroups.AsNoTracking()
             .Where(x => familyIds.Contains(x.Id))
             .Select(x => new { x.Id, x.Name, x.QuotedFinalPrice, MemberCount = x.Members.Count })
@@ -487,7 +504,8 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
 
             displays[subscription.Id] = new FamilySubscriptionDisplay(
                 "FAMILY", familyId, Math.Max(memberCount, 1), group?.Name, Math.Max(amount.Value, 0m),
-                SubscriptionLocalization.FamilyStatusNameAr(subscription.Status));
+                SubscriptionLocalization.FamilyStatusNameAr(subscription.Status), subscription.FamilyMemberId,
+                subscription.FamilyMemberId is Guid memberId && memberNames.TryGetValue(memberId, out var name) ? name : null);
         }
 
         return displays;
@@ -498,6 +516,10 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         if (subscription.FamilyGroupId is not Guid familyId)
             return new("INDIVIDUAL", null, 1, null, subscription.PaidAmount.Amount, SubscriptionLocalization.StatusNameAr(subscription.Status));
         var group = await _db.FamilyGroups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == familyId, ct);
+        var member = await _db.FamilyMembers.AsNoTracking().FirstOrDefaultAsync(x =>
+            x.FamilyGroupId == familyId && (subscription.FamilyMemberId.HasValue
+                ? x.Id == subscription.FamilyMemberId.Value
+                : x.MemberSubscriptionId == subscription.Id), ct);
         var line = await _db.FamilyCheckoutBatchLines.AsNoTracking().Include(x => x.Batch)
             .FirstOrDefaultAsync(x => x.SubscriptionId == subscription.Id && x.FamilyMemberId == subscription.FamilyMemberId
                 && x.Batch.FamilyGroupId == familyId && x.Batch.Status == FamilyCheckoutBatchStatus.Paid, ct);
@@ -517,7 +539,8 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             amount = legacy?.PaidAmount;
             memberCount = legacy?.MemberCount ?? 1;
         }
-        return new("FAMILY", familyId, memberCount, group?.Name, amount, SubscriptionLocalization.FamilyStatusNameAr(subscription.Status));
+        return new("FAMILY", familyId, memberCount, group?.Name, amount,
+            SubscriptionLocalization.FamilyStatusNameAr(subscription.Status), member?.Id, member?.DisplayName);
     }
 
     private IQueryable<InvoiceReceiptRow> InvoiceReceiptQuery(Guid customerUserId)
@@ -558,7 +581,8 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
             common.Restaurant, common.PendingFreeze, canViewInvoices ? common.PendingUpgrade : null, await AuthorizeActionsAsync(subscription, actorUserId, common.Actions, ct), invoices, common.ActiveFreeze,
-            family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName);
+            family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName,
+            family.FamilyMemberId, family.FamilyMemberName);
     }
 
     private async Task<CustomerSubscriptionSlimDto> MapSlimSubscription(
@@ -572,7 +596,8 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
             common.Restaurant, common.PendingFreeze, canViewInvoices ? common.PendingUpgrade : null, await AuthorizeActionsAsync(subscription, actorUserId!.Value, common.Actions, ct), common.ActiveFreeze,
-            family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName);
+            family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName,
+            family.FamilyMemberId, family.FamilyMemberName);
     }
 
     private async Task<CustomerSubscriptionActionsDto> AuthorizeActionsAsync(Subscription subscription, Guid actor,
@@ -1028,7 +1053,9 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         int MemberCount,
         string? FamilyName,
         decimal? PaidAmount,
-        string StatusNameAr);
+        string StatusNameAr,
+        Guid? FamilyMemberId = null,
+        string? FamilyMemberName = null);
     private sealed record SubscriptionCommonData(
         string StatusNameAr,
         string TierNameAr,

@@ -210,7 +210,7 @@ public sealed class FamilyDraftHandlers :
             from m in _db.FamilyMembers.AsNoTracking()
             where (m.PhoneNumber != null && candidates.Contains(m.PhoneNumber))
                || (from a in _db.FamilyMemberAccesses.AsNoTracking()
-                   where a.LinkedCustomerUserId == account.Id && a.RemovedAtUtc == null
+                   where a.LinkedCustomerUserId == account.Id && a.RemovedAtUtc == null && !a.DetachedFromFamilyManagement
                    select a.FamilyMemberId).Contains(m.Id)
             select new { m.DisplayName, m.AgeYears, m.Gender }
         ).FirstOrDefaultAsync(cancellationToken);
@@ -260,6 +260,8 @@ public sealed class FamilyDraftHandlers :
 
         var access = await _db.FamilyMemberAccesses
             .FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
+        if (access?.DetachedFromFamilyManagement == true)
+            return Error.Conflict("family.member_detached");
         var targetUserId = access?.LinkedCustomerUserId
             ?? (member.Role == FamilyMemberRole.Manager ? managerId.Value : null);
         if (targetUserId is null)
@@ -565,6 +567,8 @@ public sealed class FamilyDraftHandlers :
 
         var access = await _db.FamilyMemberAccesses
             .FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
+        if (access?.DetachedFromFamilyManagement == true)
+            return Error.Conflict("family.member_detached");
         var targetUserId = access?.LinkedCustomerUserId
             ?? (member.Role == FamilyMemberRole.Manager ? managerId.Value : null);
         if (targetUserId is null)
@@ -963,12 +967,17 @@ public sealed class FamilyDraftHandlers :
             }
             else
             {
+                if (_locks is not null)
+                    await _locks.LockCustomerIdentityAsync(account.Id, cancellationToken);
                 var occupied = await IsInAnotherFamilyAsync(account.Id, managerId.Value, cancellationToken);
                 if (occupied)
                     return Error.Conflict("family.already_in_family", "This phone already belongs to another family.");
             }
             hasSeparateAccount = true;
         }
+
+        if (_locks is not null)
+            await _locks.LockCustomerIdentityAsync(account.Id, cancellationToken);
 
         var write = request.Member;
         if (string.IsNullOrWhiteSpace(write.DisplayName) && !string.IsNullOrWhiteSpace(account.FullName))
@@ -996,7 +1005,7 @@ public sealed class FamilyDraftHandlers :
                 from m in _db.FamilyMembers.AsNoTracking()
                 where (m.PhoneNumber != null && candidatePhones.Contains(m.PhoneNumber))
                    || (from a in _db.FamilyMemberAccesses.AsNoTracking()
-                       where a.LinkedCustomerUserId == account.Id && a.RemovedAtUtc == null
+                       where a.LinkedCustomerUserId == account.Id && a.RemovedAtUtc == null && !a.DetachedFromFamilyManagement
                        select a.FamilyMemberId).Contains(m.Id)
                 where m.Gender == FamilyMemberGender.Male || m.Gender == FamilyMemberGender.Female
                 select (FamilyMemberGender?)m.Gender
@@ -1062,6 +1071,20 @@ public sealed class FamilyDraftHandlers :
         var memberResult = await RequireMemberAsync(group, request.MemberId, managerId.Value, cancellationToken);
         if (memberResult.IsFailure) return memberResult.Error;
         var member = memberResult.Value;
+        var access = await _db.FamilyMemberAccesses.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.FamilyMemberId == member.Id, cancellationToken);
+        if (access?.DetachedFromFamilyManagement == true)
+            return Error.Conflict("family.member_detached");
+
+        if (!string.IsNullOrWhiteSpace(request.Member.Phone) && access?.LinkedCustomerUserId is Guid linkedUserId)
+        {
+            var linkedAccount = await _users.FindByIdAsync(linkedUserId, cancellationToken);
+            var linkedPhone = PhoneNumberNormalizer.Normalize(linkedAccount?.PhoneNumber);
+            var requestedPhone = PhoneNumberNormalizer.Normalize(request.Member.Phone);
+            if ((access.HasSeparateAccount || linkedPhone is not null)
+                && (linkedPhone is null || requestedPhone is null || linkedPhone != requestedPhone))
+                return Error.Validation("family.member_phone_change_requires_verification");
+        }
 
         var write = member.Role == FamilyMemberRole.Manager
             ? request.Member with { RelationshipCode = "self" }
@@ -1695,7 +1718,12 @@ public sealed class FamilyDraftHandlers :
     {
         var member = group.Members.FirstOrDefault(x => x.Id == memberId);
         if (member is not null)
+        {
+            if (await _db.FamilyMemberAccesses.AsNoTracking()
+                    .AnyAsync(x => x.FamilyMemberId == member.Id && x.DetachedFromFamilyManagement, cancellationToken))
+                return Error.Conflict("family.member_detached");
             return member;
+        }
 
         var stale = await _db.FamilyMembers.IgnoreQueryFilters().AsNoTracking()
             .AnyAsync(
@@ -1741,6 +1769,7 @@ public sealed class FamilyDraftHandlers :
             join family in _db.FamilyGroups.AsNoTracking() on member.FamilyGroupId equals family.Id
             where access.LinkedCustomerUserId == customerUserId
                   && access.RemovedAtUtc == null
+                  && !access.DetachedFromFamilyManagement
                   && family.ManagerCustomerUserId != currentManagerId
                   && family.Status != FamilyGroupStatus.Cancelled
             select access.Id).AnyAsync(cancellationToken);

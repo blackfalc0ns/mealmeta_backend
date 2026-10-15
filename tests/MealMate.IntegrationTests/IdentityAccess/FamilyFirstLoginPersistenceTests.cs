@@ -25,7 +25,7 @@ namespace MealMate.IntegrationTests.IdentityAccess;
 
 public sealed class FamilyFirstLoginPersistenceTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder().WithImage("postgres:16-alpine").Build();
+    private readonly MealMate.Testing.PostgresTestDatabase _container = new();
     private static readonly DateTime Now = new(2026, 10, 14, 12, 0, 0, DateTimeKind.Utc);
 
     public async Task InitializeAsync()
