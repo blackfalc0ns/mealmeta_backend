@@ -1167,7 +1167,7 @@ public sealed class FamilyManagerHandlerTests
         ok.Value.Groups.Single(g => g.Code == "meals").LabelAr.Should().Be("إدارة التقويم");
         ok.Value.Groups.Single(g => g.Code == "meals").LabelEn.Should().Be("Calendar management");
         ok.Value.Groups.Single(g => g.Code == "meals").Permissions
-            .Select(p => p.Key).Should().Equal("viewCalendar", "manageCalendar", "editMealsAndDays", "unitExchange");
+            .Select(p => p.Key).Should().Equal("viewCalendar", "manageCalendar");
         ok.Value.Groups.SelectMany(g => g.Permissions).Select(p => p.Key)
             .Should().NotContain(new[] { "viewFamilyCalendars", "viewFamilyInvoices" });
         ok.Value.EditDailyMeals.Should().BeTrue();
@@ -1180,6 +1180,8 @@ public sealed class FamilyManagerHandlerTests
         calendarToggle.Value.SelectRestaurant.Should().BeTrue();
         calendarToggle.Value.EditDailyMeals.Should().BeTrue();
         calendarToggle.Value.ConfirmMeals.Should().BeTrue();
+        calendarToggle.Value.EditMealsAndDays.Should().BeTrue();
+        calendarToggle.Value.UnitExchange.Should().BeTrue();
 
         var loaded = await fx.Handlers.Handle(new GetFamilyMemberPermissionsQuery(fx.MemberId), CancellationToken.None);
         loaded.Value.Groups.Should().HaveCount(4);

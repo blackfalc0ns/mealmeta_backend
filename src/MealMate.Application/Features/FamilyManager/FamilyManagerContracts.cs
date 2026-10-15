@@ -222,9 +222,8 @@ public static class FamilyPermissionCatalog
             messages.GetArabicMessage($"family.permission_group.{key}"), messages.GetEnglishMessage($"family.permission_group.{key}"), items);
         return [
             Group("meals", Item("viewCalendar", p.ViewCalendar, required: ["viewProgram"]),
-                Item("manageCalendar", p.SelectRestaurant || p.EditDailyMeals || p.ConfirmMeals, required: ["viewCalendar", "viewProgram"]),
-                Item("editMealsAndDays", p.EditMealsAndDays, required: ["viewCalendar", "viewProgram"]),
-                Item("unitExchange", p.UnitExchange, required: ["viewCalendar", "viewProgram"])),
+                Item("manageCalendar", p.SelectRestaurant || p.EditDailyMeals || p.ConfirmMeals || p.EditMealsAndDays || p.UnitExchange,
+                    required: ["viewCalendar", "viewProgram"])),
             Group("program", Item("viewProgram", true, configurable: false), Item("viewFamilyPlans", p.ViewFamilyPlans),
                 Item("requestFreeze", p.RequestFreeze, required: ["viewProgram"]),
                 Item("requestRenewal", p.RequestRenewal, required: ["viewProgram"]),

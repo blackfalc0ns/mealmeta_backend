@@ -740,6 +740,8 @@ public sealed class FamilyManagerHandlers :
             perms.SelectRestaurant = manageCalendar;
             perms.EditDailyMeals = manageCalendar;
             perms.ConfirmMeals = manageCalendar;
+            perms.EditMealsAndDays = manageCalendar;
+            perms.UnitExchange = manageCalendar;
         }
         if (request.Request.RequestFreeze is { } requestFreeze) perms.RequestFreeze = requestFreeze;
         if (request.Request.RequestRenewal is { } requestRenewal) perms.RequestRenewal = requestRenewal;
