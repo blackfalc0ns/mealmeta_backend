@@ -6,6 +6,9 @@ public static class CatalogImageStorage
     public const string BundlePrefix = "uploads/admin/bundles/";
     public const string TierPrefix = "uploads/admin/tiers/";
     public const string FamilyPrefix = "uploads/admin/family/";
+    public const string OfferPrefix = "uploads/admin/offers/";
+    public const string MarketingPrefix = "uploads/admin/marketing/";
+    public const string AdsPrefix = "uploads/admin/ads/";
     public const string IngredientPrefix = "uploads/restaurant/ingredients/";
     public const int MaxKeyLength = 500;
 
