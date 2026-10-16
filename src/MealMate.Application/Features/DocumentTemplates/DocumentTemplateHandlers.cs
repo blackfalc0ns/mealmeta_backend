@@ -167,7 +167,13 @@ public sealed class GetDocumentTemplatesQueryHandler : IQueryHandler<GetDocument
 {
     private readonly IAppDbContext _db;
 
-    public GetDocumentTemplatesQueryHandler(IAppDbContext db) => _db = db;
+    private readonly IDateTimeProvider _clock;
+
+    public GetDocumentTemplatesQueryHandler(IAppDbContext db, IDateTimeProvider clock)
+    {
+        _db = db;
+        _clock = clock;
+    }
 
     public async Task<Result<IReadOnlyList<DocumentTemplateDto>>> Handle(GetDocumentTemplatesQuery request, CancellationToken cancellationToken)
     {
@@ -182,6 +188,18 @@ public sealed class GetDocumentTemplatesQueryHandler : IQueryHandler<GetDocument
             .ThenByDescending(x => x.Status == DocumentTemplateStatus.Published)
             .ThenByDescending(x => x.ModifiedAtUtc ?? x.CreatedAtUtc)
             .ToListAsync(cancellationToken);
+
+        if (items.Count == 0 && !request.Kind.HasValue && !request.Status.HasValue)
+        {
+            var seedHandler = new SeedDocumentTemplatesCommandHandler(_db, _clock);
+            await seedHandler.Handle(new SeedDocumentTemplatesCommand(), cancellationToken);
+
+            items = await _db.DocumentTemplates.AsNoTracking()
+                .OrderBy(x => x.Kind)
+                .ThenByDescending(x => x.Status == DocumentTemplateStatus.Published)
+                .ThenByDescending(x => x.ModifiedAtUtc ?? x.CreatedAtUtc)
+                .ToListAsync(cancellationToken);
+        }
 
         IReadOnlyList<DocumentTemplateDto> mapped = items.Select(DocumentTemplateMapper.ToDto).ToList();
         return Result<IReadOnlyList<DocumentTemplateDto>>.Success(mapped);
