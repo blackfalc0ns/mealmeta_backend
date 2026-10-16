@@ -58,7 +58,7 @@ public sealed record CustomerDeliveryDriverDto(
     string NameAr,
     string NameEn,
     string Name,
-    string MaskedPhone,
+    string? MaskedPhone,
     string? AvatarUrl,
     double? Rating);
 

@@ -176,6 +176,7 @@ public sealed class CustomerDeliveryDetailsQueryTests
         delivery.DeliveredAtUtc.Should().BeNull(); // no fabricated clock
         delivery.ArrivedAtUtc.Should().Be(Now.AddMinutes(-15));
         delivery.Driver.Should().NotBeNull(); // documented handover identity survives
+        delivery.Driver!.MaskedPhone.Should().BeNull(); // missing contact data stays absent
     }
 
     [Fact]
