@@ -157,7 +157,9 @@ public sealed class CustomerDeliveryPresentationBuilder : ICustomerDeliveryPrese
                 Location: location,
                 EtaMinutes: etaMinutes,
                 EtaSource: etaSource,
-                DestinationAddress: stop is null ? null : new CustomerDeliveryDestinationDto(
+                DestinationAddress: stop is null || snapshot.DeliveryStatus == CustomerDeliveryStatusCodes.TrackingUnavailable
+                    ? null
+                    : new CustomerDeliveryDestinationDto(
                     stop.FullAddress,
                     (double?)stop.Latitude,
                     (double?)stop.Longitude),

@@ -103,6 +103,90 @@ public sealed class CustomerDeliveryWidgetQueryTests
         return order;
     }
 
+    private async Task<(SubscriptionDay Day, TripStop Stop, IReadOnlyList<DriverProfile> Drivers)> SeedAttemptAsync(
+        Guid userId,
+        SubscriptionDayStatus dayStatus,
+        OrderStatus orderStatus,
+        TripStopStatus stopStatus,
+        int activeAssignments,
+        int priorDriversWithHandover = 0,
+        bool currentDriverHasHandover = false)
+    {
+        var subscription = await SeedIndividualAsync(userId, dayStatus);
+        var day = await _db.SubscriptionDays.SingleAsync(d => d.SubscriptionId == subscription.Id);
+        var order = await SeedReadyOrderAsync(day);
+        order.Status = orderStatus;
+
+        var trip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(),
+            Code = $"TRP-{Guid.NewGuid():N}",
+            Status = TripStatus.InProgress,
+            PlannedDate = ServiceDate
+        };
+        var drivers = Enumerable.Range(0, activeAssignments + priorDriversWithHandover)
+            .Select(i => new DriverProfile
+            {
+                UserId = Guid.NewGuid(),
+                FullNameAr = $"سائق {i}",
+                FullNameEn = $"Driver {i}"
+            })
+            .ToList();
+        _db.Trips.Add(trip);
+        _db.DriverProfiles.AddRange(drivers);
+        for (var i = 0; i < drivers.Count; i++)
+        {
+            _db.DriverAssignments.Add(new DriverAssignment
+            {
+                TripId = trip.Id,
+                DriverProfileId = drivers[i].Id,
+                Status = i < activeAssignments ? "Active" : "Inactive",
+                AssignedAtUtc = Now.AddMinutes(-30 + i)
+            });
+        }
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            SubscriptionDayId = day.Id,
+            DailyOrderId = order.Id,
+            OrderCode = "#BX-ATTEMPT",
+            CustomerMaskedId = "CUST",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            FullAddress = "Stored destination address",
+            MealSummaryAr = "وجبة",
+            MealSummaryEn = "Meal",
+            SlotLabel = "lunch",
+            Status = stopStatus,
+            Latitude = 29.33m,
+            Longitude = 48.07m
+        };
+        _db.TripStops.Add(stop);
+
+        var handoverDriverIndexes = Enumerable.Range(activeAssignments, priorDriversWithHandover).ToList();
+        if (currentDriverHasHandover && activeAssignments > 0)
+        {
+            handoverDriverIndexes.Add(0);
+        }
+
+        foreach (var i in handoverDriverIndexes)
+        {
+            _db.OrderHandovers.Add(new OrderHandover
+            {
+                DailyOrderId = order.Id,
+                TripId = trip.Id,
+                TripStopId = stop.Id,
+                DriverProfileId = drivers[i].Id,
+                HandedOverAtUtc = Now.AddMinutes(-10 - i),
+                Status = "Completed"
+            });
+        }
+
+        await _db.SaveChangesAsync();
+        return (day, stop, drivers);
+    }
+
     [Fact]
     public async Task Ready_box_appears_before_any_trip_stop_exists()
     {
@@ -329,6 +413,76 @@ public sealed class CustomerDeliveryWidgetQueryTests
         item.DestinationAddress!.AddressLine.Should().Be("شارع، مدينة، الدور 1");
         item.EtaMinutes.Should().Be(12);
         item.EtaSource.Should().Be(CustomerDeliveryEtaSources.RoadRoute);
+    }
+
+    [Fact]
+    public async Task Reassigned_picked_up_attempt_does_not_reuse_previous_drivers_handover_time()
+    {
+        var userId = Guid.NewGuid();
+        _user.UserId.Returns(userId);
+        var (_, stop, _) = await SeedAttemptAsync(
+            userId,
+            SubscriptionDayStatus.OutForDelivery,
+            OrderStatus.OnTheWay,
+            TripStopStatus.PickedUp,
+            activeAssignments: 1,
+            priorDriversWithHandover: 1);
+
+        var result = await CreateHandler().Handle(
+            new GetCustomerDeliveryWidgetQuery(ServiceDate, null), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Subject;
+        item.TripStopId.Should().Be(stop.Id);
+        item.DeliveryStatus.Should().Be(CustomerDeliveryStatusCodes.OutForDelivery);
+        item.PickedUpAtUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Multiple_active_assignments_suppress_destination_for_retained_attempt()
+    {
+        var userId = Guid.NewGuid();
+        _user.UserId.Returns(userId);
+        var (_, stop, _) = await SeedAttemptAsync(
+            userId,
+            SubscriptionDayStatus.OutForDelivery,
+            OrderStatus.OnTheWay,
+            TripStopStatus.Pending,
+            activeAssignments: 2);
+
+        var result = await CreateHandler().Handle(
+            new GetCustomerDeliveryWidgetQuery(ServiceDate, null), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Subject;
+        item.DeliveryStatus.Should().Be(CustomerDeliveryStatusCodes.TrackingUnavailable);
+        item.TripStopId.Should().Be(stop.Id);
+        item.DestinationAddress.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Conflicting_driver_handovers_suppress_destination_for_retained_attempt()
+    {
+        var userId = Guid.NewGuid();
+        _user.UserId.Returns(userId);
+        var (_, stop, _) = await SeedAttemptAsync(
+            userId,
+            SubscriptionDayStatus.OutForDelivery,
+            OrderStatus.OnTheWay,
+            TripStopStatus.PickedUp,
+            activeAssignments: 1,
+            priorDriversWithHandover: 1,
+            currentDriverHasHandover: true);
+
+        var result = await CreateHandler().Handle(
+            new GetCustomerDeliveryWidgetQuery(ServiceDate, null), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Subject;
+        item.DeliveryStatus.Should().Be(CustomerDeliveryStatusCodes.TrackingUnavailable);
+        item.TripStopId.Should().Be(stop.Id);
+        item.PickedUpAtUtc.Should().BeNull();
+        item.DestinationAddress.Should().BeNull();
     }
 
     [Fact]
