@@ -1,4 +1,5 @@
 using MealMate.Domain.Offers;
+using MealMate.Domain.Enums;
 
 namespace MealMate.Application.Features.Offers.Services;
 
@@ -12,7 +13,10 @@ public sealed record OfferEligibilityContext(
     Guid? ProgramId = null,
     Guid? BundleId = null,
     Guid? RestaurantId = null,
-    bool HasPromoCode = false
+    bool HasPromoCode = false,
+    RestaurantTier? Tier = null,
+    string? SubscriptionType = null,
+    bool IsOfferPromoCode = false
 );
 
 public sealed record OfferEligibilityResult(

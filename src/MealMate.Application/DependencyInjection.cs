@@ -76,6 +76,7 @@ public static class DependencyInjection
         services.AddScoped<Features.ProgramsSubscriptions.ISubscriptionTierUpgradeQuoteBuilder, Features.ProgramsSubscriptions.SubscriptionTierUpgradeQuoteBuilder>();
         services.AddScoped<Features.ProgramsSubscriptions.IRestaurantDiversificationCalculator, Features.ProgramsSubscriptions.RestaurantDiversificationCalculator>();
         services.AddScoped<Features.PrepDocuments.IPrepDocumentsGenerator, Features.PrepDocuments.PrepDocumentsGenerator>();
+        services.AddScoped<Features.AdminOrders.AdminOrderDocumentsQueryService>();
         services.AddScoped<Features.CustomerCalendar.ISubscriptionDayDispatchService, Features.CustomerCalendar.SubscriptionDayDispatchService>();
         services.AddScoped<Features.IdentityAccess.Customers.ICustomerDeliveryAddressService, Features.IdentityAccess.Customers.CustomerDeliveryAddressService>();
         services.AddScoped<Features.IdentityAccess.Customers.ICustomerAddressBook, Features.IdentityAccess.Customers.CustomerAddressHandlers>();
@@ -163,3 +164,5 @@ public static class DependencyInjection
         return services;
     }
 }
+
+

@@ -48,6 +48,7 @@ public sealed class Offer : AuditableEntity
 
     public ICollection<OfferProgram> EligiblePrograms { get; set; } = new List<OfferProgram>();
     public ICollection<OfferBundle> EligibleBundles { get; set; } = new List<OfferBundle>();
+    public ICollection<OfferPackageTarget> PackageTargets { get; set; } = new List<OfferPackageTarget>();
     public ICollection<OfferRestaurant> EligibleRestaurants { get; set; } = new List<OfferRestaurant>();
     public ICollection<OfferRedemption> Redemptions { get; set; } = new List<OfferRedemption>();
     public ICollection<OfferAuditLog> AuditLogs { get; set; } = new List<OfferAuditLog>();

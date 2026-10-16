@@ -233,6 +233,7 @@ public interface IAppDbContext
     DbSet<Offer> Offers { get; }
     DbSet<OfferProgram> OfferPrograms { get; }
     DbSet<OfferBundle> OfferBundles { get; }
+    DbSet<OfferPackageTarget> OfferPackageTargets { get; }
     DbSet<OfferRestaurant> OfferRestaurants { get; }
     DbSet<OfferRedemption> OfferRedemptions { get; }
     DbSet<OfferAuditLog> OfferAuditLogs { get; }

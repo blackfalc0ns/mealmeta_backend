@@ -26,6 +26,7 @@ public sealed class GetOffersListQueryHandler : IQueryHandler<GetOffersListQuery
         var query = _context.Offers.AsNoTracking()
             .Include(o => o.EligiblePrograms)
             .Include(o => o.EligibleBundles)
+            .Include(o => o.PackageTargets)
             .Include(o => o.EligibleRestaurants)
             .AsQueryable();
 

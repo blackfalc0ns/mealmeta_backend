@@ -646,3 +646,82 @@ public sealed class ReviewAdRefundRequestCommandHandler(
         return Result.Success();
     }
 }
+
+public sealed record AdAdminPlacementDto(
+    Guid Id,
+    Guid AdAuctionId,
+    string PlacementKey,
+    Guid RestaurantId,
+    string RestaurantNameAr,
+    string RestaurantNameEn,
+    string Status,
+    string? CreativeStorageKey,
+    string? TargetType,
+    Guid? TargetId,
+    DateTime? DisplayStartsAtUtc,
+    DateTime? DisplayEndsAtUtc,
+    string? ReviewNotes,
+    string? StopReason,
+    DateTime CreatedAtUtc
+);
+
+public sealed record GetAdminAdPlacementsQuery(string? Status = null) : IQuery<IReadOnlyList<AdAdminPlacementDto>>;
+
+public sealed class GetAdminAdPlacementsQueryHandler(IAppDbContext context)
+    : IQueryHandler<GetAdminAdPlacementsQuery, IReadOnlyList<AdAdminPlacementDto>>
+{
+    public async Task<Result<IReadOnlyList<AdAdminPlacementDto>>> Handle(
+        GetAdminAdPlacementsQuery request, CancellationToken ct)
+    {
+        var query = context.AdPlacements
+            .AsNoTracking()
+            .Include(p => p.AdAuction)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(request.Status) && Enum.TryParse<AdPlacementStatus>(request.Status, true, out var parsedStatus))
+        {
+            query = query.Where(p => p.Status == parsedStatus);
+        }
+
+        var placements = await query
+            .OrderByDescending(p => p.CreatedAtUtc)
+            .ToListAsync(ct);
+
+        var restaurantIds = placements.Select(p => p.RestaurantId).Distinct().ToList();
+        var restaurants = await context.RestaurantRegistrations
+            .AsNoTracking()
+            .Where(r => restaurantIds.Contains(r.Id))
+            .ToDictionaryAsync(r => r.Id, r => new { NameAr = r.TradeNameAr ?? r.LegalNameAr ?? string.Empty, NameEn = r.TradeNameEn ?? r.LegalNameEn ?? string.Empty }, ct);
+
+        var spaceIds = placements.Select(p => p.AdSpaceId).Distinct().ToList();
+        var spaces = await context.AdSpaces
+            .AsNoTracking()
+            .Where(s => spaceIds.Contains(s.Id))
+            .ToDictionaryAsync(s => s.Id, s => s.PlacementKey, ct);
+
+        var dtos = placements.Select(p =>
+        {
+            restaurants.TryGetValue(p.RestaurantId, out var rest);
+            spaces.TryGetValue(p.AdSpaceId, out var key);
+            return new AdAdminPlacementDto(
+                p.Id,
+                p.AdAuctionId,
+                key ?? string.Empty,
+                p.RestaurantId,
+                rest?.NameAr ?? "مطعم",
+                rest?.NameEn ?? "Restaurant",
+                p.Status.ToString(),
+                p.CreativeStorageKey,
+                p.TargetType,
+                p.TargetId,
+                p.DisplayStartsAtUtc,
+                p.DisplayEndsAtUtc,
+                p.ReviewNotes,
+                p.StopReason,
+                p.CreatedAtUtc);
+        }).ToList();
+
+        return Result.Success<IReadOnlyList<AdAdminPlacementDto>>(dtos);
+    }
+}
+

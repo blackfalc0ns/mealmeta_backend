@@ -696,6 +696,7 @@ public sealed class PricingAndClassificationHandlers :
                     .AsNoTracking()
                     .Include(o => o.EligiblePrograms)
                     .Include(o => o.EligibleBundles)
+                    .Include(o => o.PackageTargets)
                     .Include(o => o.EligibleRestaurants)
                     .FirstOrDefaultAsync(o => o.Id == request.OfferId.Value, cancellationToken);
             }
@@ -706,6 +707,7 @@ public sealed class PricingAndClassificationHandlers :
                     .AsNoTracking()
                     .Include(o => o.EligiblePrograms)
                     .Include(o => o.EligibleBundles)
+                    .Include(o => o.PackageTargets)
                     .Include(o => o.EligibleRestaurants)
                     .FirstOrDefaultAsync(o => o.PromoCode != null && o.PromoCode.ToUpper() == codeNormalized, cancellationToken);
             }
@@ -730,7 +732,11 @@ public sealed class PricingAndClassificationHandlers :
                     ProgramId: request.ProgramId,
                     BundleId: request.BundleId,
                     RestaurantId: null,
-                    HasPromoCode: !string.IsNullOrWhiteSpace(request.PromoCode) || request.PromoCodeDiscountKwd > 0);
+                    HasPromoCode: !string.IsNullOrWhiteSpace(request.PromoCode) || request.PromoCodeDiscountKwd > 0,
+                    Tier: request.Tier,
+                    SubscriptionType: request.CustomerSubscriptionType,
+                    IsOfferPromoCode: offer.PromoCode is not null
+                        && string.Equals(offer.PromoCode, request.PromoCode, StringComparison.OrdinalIgnoreCase));
 
                 var eval = _offerEngine.Evaluate(offer, evalCtx, _clock.UtcNow);
                 if (eval.IsEligible)

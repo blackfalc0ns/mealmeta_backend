@@ -6,6 +6,8 @@ using MealMate.Application.Features.Offers.DTOs;
 using MealMate.Domain.Offers;
 using MealMate.Domain.Offers.Enums;
 using MealMate.Domain.ValueObjects;
+using MealMate.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.Offers.Commands;
 
@@ -38,7 +40,8 @@ public sealed record CreateOfferDraftCommand(
     string? TermsAndConditionsEn = null,
     List<Guid>? ProgramIds = null,
     List<Guid>? BundleIds = null,
-    List<Guid>? RestaurantIds = null
+    List<Guid>? RestaurantIds = null,
+    List<OfferPackageTargetInput>? PackageTargets = null
 ) : ICommand<OfferDto>;
 
 public sealed class CreateOfferDraftCommandValidator : AbstractValidator<CreateOfferDraftCommand>
@@ -69,6 +72,9 @@ public sealed class CreateOfferDraftCommandHandler : ICommandHandler<CreateOffer
         {
             return Error.Validation("Offer.InvalidDates", "StartsAtUtc must be before EndsAtUtc.");
         }
+
+        var targetValidation = await OfferPackageTargetCommandValidation.ValidateAsync(_context, request.PackageTargets, cancellationToken);
+        if (targetValidation is not null) return targetValidation;
 
         var offer = new Offer
         {
@@ -125,6 +131,22 @@ public sealed class CreateOfferDraftCommandHandler : ICommandHandler<CreateOffer
             }
         }
 
+        if (request.PackageTargets is not null)
+        {
+            foreach (var target in request.PackageTargets)
+            {
+                offer.PackageTargets.Add(new OfferPackageTarget
+                {
+                    Offer = offer,
+                    SubscriptionType = target.SubscriptionType.Trim(),
+                    ProgramId = target.ProgramId,
+                    BundleId = target.BundleId,
+                    Tier = target.Tier,
+                    AllowedDurationDays = target.AllowedDurationDays.Distinct().Order().ToArray()
+                });
+            }
+        }
+
         _context.Offers.Add(offer);
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -164,6 +186,52 @@ public sealed class CreateOfferDraftCommandHandler : ICommandHandler<CreateOffer
         o.EligiblePrograms.Select(p => p.ProgramId).Distinct().ToArray(),
         o.EligibleBundles.Select(b => b.BundleId).Distinct().ToArray(),
         o.EligibleRestaurants.Select(r => r.RestaurantId).Distinct().ToArray(),
-        o.CampaignId.HasValue ? "Campaign" : "Offer"
+        o.CampaignId.HasValue ? "Campaign" : "Offer",
+        o.PackageTargets.Select(MapPackageTarget).ToArray()
     );
+
+    private static OfferPackageTargetDto MapPackageTarget(OfferPackageTarget target) =>
+        new(target.SubscriptionType, target.ProgramId, target.BundleId, target.Tier,
+            target.AllowedDurationDays.Order().ToArray());
+}
+
+internal static class OfferPackageTargetCommandValidation
+{
+    public static async Task<Error?> ValidateAsync(
+        IAppDbContext context,
+        IReadOnlyCollection<OfferPackageTargetInput>? targets,
+        CancellationToken cancellationToken)
+    {
+        if (targets is null || targets.Count == 0) return null;
+
+        var duplicate = targets.GroupBy(x => $"{x.SubscriptionType.Trim().ToUpperInvariant()}|{x.ProgramId}|{x.BundleId}|{x.Tier}")
+            .FirstOrDefault(x => x.Count() > 1);
+        if (duplicate is not null)
+            return Error.Validation("Offer.PackageTargetDuplicate", "Package targets must be unique for each subscription type, program, bundle and tier.");
+
+        foreach (var target in targets)
+        {
+            if (!string.Equals(target.SubscriptionType, "Individual", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(target.SubscriptionType, "Family", StringComparison.OrdinalIgnoreCase))
+                return Error.Validation("Offer.InvalidSubscriptionType", "Package target subscription type must be Individual or Family.");
+            if (!Enum.IsDefined(target.Tier))
+                return Error.Validation("Offer.InvalidTier", "Package target tier is not supported.");
+            if (target.ProgramId == Guid.Empty || target.BundleId == Guid.Empty)
+                return Error.Validation("Offer.InvalidPackageTarget", "Package target program and bundle are required.");
+            var durations = target.AllowedDurationDays?.Distinct().ToArray() ?? [];
+            if (durations.Length == 0 || durations.Any(x => x <= 0))
+                return Error.Validation("Offer.InvalidDurations", "Package target durations must contain positive unique values.");
+        }
+
+        var programIds = targets.Select(x => x.ProgramId).Distinct().ToArray();
+        var bundleIds = targets.Select(x => x.BundleId).Distinct().ToArray();
+        var programs = await context.Programs.AsNoTracking().Where(x => programIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(cancellationToken);
+        var bundles = await context.Bundles.AsNoTracking().Where(x => bundleIds.Contains(x.Id)).Select(x => new { x.Id, x.ProgramId }).ToListAsync(cancellationToken);
+        if (programs.Count != programIds.Length || bundles.Count != bundleIds.Length)
+            return Error.Validation("Offer.PackageTargetNotFound", "Every package target program and bundle must exist.");
+        if (targets.Any(x => bundles.First(b => b.Id == x.BundleId).ProgramId != x.ProgramId))
+            return Error.Validation("Offer.BundleProgramMismatch", "Each package target bundle must belong to its selected program.");
+
+        return null;
+    }
 }

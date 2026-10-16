@@ -69,6 +69,31 @@ public sealed class OfferBundleConfiguration : IEntityTypeConfiguration<OfferBun
     }
 }
 
+public sealed class OfferPackageTargetConfiguration : IEntityTypeConfiguration<OfferPackageTarget>
+{
+    public void Configure(EntityTypeBuilder<OfferPackageTarget> builder)
+    {
+        builder.ToTable("OfferPackageTargets");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.SubscriptionType).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.AllowedDurationDays).HasColumnType("integer[]").IsRequired();
+        builder.HasIndex(x => new { x.OfferId, x.SubscriptionType, x.ProgramId, x.BundleId, x.Tier }).IsUnique();
+        builder.HasIndex(x => new { x.ProgramId, x.BundleId, x.Tier });
+        builder.HasOne(x => x.Offer)
+            .WithMany(x => x.PackageTargets)
+            .HasForeignKey(x => x.OfferId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<MealMate.Domain.ProgramsSubscriptions.Program>()
+            .WithMany()
+            .HasForeignKey(x => x.ProgramId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<MealMate.Domain.ProgramsSubscriptions.Bundle>()
+            .WithMany()
+            .HasForeignKey(x => x.BundleId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
 public sealed class OfferRestaurantConfiguration : IEntityTypeConfiguration<OfferRestaurant>
 {
     public void Configure(EntityTypeBuilder<OfferRestaurant> builder)

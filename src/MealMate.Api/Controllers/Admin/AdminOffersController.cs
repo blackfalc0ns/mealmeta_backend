@@ -69,4 +69,21 @@ public sealed class AdminOffersController : ApiControllerBase
         var result = await Sender.Send(new GetOfferRedemptionsQuery(id, page), cancellationToken);
         return HandleResult(result);
     }
+
+    [HttpPost("preview")]
+    [HasPermission(PermissionCodes.OffersView)]
+    public async Task<IActionResult> Preview([FromBody] EvaluateOfferDiscountQuery query, CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(query, cancellationToken);
+        return HandleResult(result);
+    }
+
+    [HttpPost("{id:guid}/preview")]
+    [HasPermission(PermissionCodes.OffersView)]
+    public async Task<IActionResult> PreviewOffer(Guid id, [FromBody] EvaluateOfferDiscountQuery query, CancellationToken cancellationToken)
+    {
+        query = query with { OfferId = id };
+        var result = await Sender.Send(query, cancellationToken);
+        return HandleResult(result);
+    }
 }

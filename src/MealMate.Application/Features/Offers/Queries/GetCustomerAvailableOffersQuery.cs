@@ -45,6 +45,7 @@ public sealed class GetCustomerAvailableOffersQueryHandler : IQueryHandler<GetCu
             .AsNoTracking()
             .Include(o => o.EligiblePrograms)
             .Include(o => o.EligibleBundles)
+            .Include(o => o.PackageTargets)
             .Include(o => o.EligibleRestaurants)
             .Where(o => o.Status == OfferStatus.Active && o.StartsAtUtc <= now && o.EndsAtUtc >= now)
             .ToListAsync(cancellationToken);

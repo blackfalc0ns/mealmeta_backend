@@ -1062,7 +1062,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         {
             var evaluation = await _coupons.EvaluateAsync(
                 promoCode, customerUserId, request.ProgramId, request.BundleId, request.DurationDays,
-                priceValue.FinalCustomerPrice, ct);
+                priceValue.FinalCustomerPrice, ct, tier: request.Tier);
             if (evaluation.IsValid)
             {
                 var discounted = await _sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,

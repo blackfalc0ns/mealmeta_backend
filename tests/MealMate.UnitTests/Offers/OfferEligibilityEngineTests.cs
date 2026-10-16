@@ -2,6 +2,7 @@ using FluentAssertions;
 using MealMate.Application.Features.Offers.Services;
 using MealMate.Domain.Offers;
 using MealMate.Domain.Offers.Enums;
+using MealMate.Domain.Enums;
 using MealMate.Domain.ValueObjects;
 using Xunit;
 
@@ -67,5 +68,94 @@ public class OfferEligibilityEngineTests
 
         result.IsEligible.Should().BeTrue();
         result.CalculatedDiscountAmount.Should().Be(15.000m);
+    }
+
+    [Fact]
+    public void Evaluate_RequiresExactPackageTargetTupleAndAllowedDuration()
+    {
+        var offer = new Offer
+        {
+            Status = OfferStatus.Active,
+            StartsAtUtc = DateTime.UtcNow.AddDays(-1),
+            EndsAtUtc = DateTime.UtcNow.AddDays(5),
+            DiscountType = DiscountType.Percentage,
+            DiscountRate = Percentage.FromFraction(0.20m),
+            PerCustomerLimit = 1,
+            PackageTargets =
+            [
+                new OfferPackageTarget
+                {
+                    SubscriptionType = "Individual",
+                    ProgramId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+                    BundleId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+                    Tier = RestaurantTier.Platinum,
+                    AllowedDurationDays = [30, 60]
+                }
+            ]
+        };
+
+        var eligible = new OfferEligibilityContext(
+            Guid.NewGuid(), 0, 0, 100m, 60, ProgramId: Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            BundleId: Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), Tier: RestaurantTier.Platinum,
+            SubscriptionType: "Individual");
+        _engine.Evaluate(offer, eligible, DateTime.UtcNow).IsEligible.Should().BeTrue();
+
+        var wrongTier = eligible with { Tier = RestaurantTier.Elite };
+        var wrongDuration = eligible with { DurationDays = 90 };
+        _engine.Evaluate(offer, wrongTier, DateTime.UtcNow).IneligibilityReasons
+            .Should().Contain(x => x.Contains("package target"));
+        _engine.Evaluate(offer, wrongDuration, DateTime.UtcNow).IneligibilityReasons
+            .Should().Contain(x => x.Contains("package target"));
+    }
+
+    [Fact]
+    public void Evaluate_UsesLegacyEligibilityWhenOfferHasNoPackageTargets()
+    {
+        var programId = Guid.NewGuid();
+        var offer = new Offer
+        {
+            Status = OfferStatus.Active,
+            StartsAtUtc = DateTime.UtcNow.AddDays(-1),
+            EndsAtUtc = DateTime.UtcNow.AddDays(5),
+            DiscountType = DiscountType.Percentage,
+            DiscountRate = Percentage.FromFraction(0.10m),
+            EligiblePrograms = [new OfferProgram { ProgramId = programId }]
+        };
+
+        var result = _engine.Evaluate(offer,
+            new OfferEligibilityContext(Guid.NewGuid(), 0, 0, 100m, 30, ProgramId: programId), DateTime.UtcNow);
+
+        result.IsEligible.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Evaluate_UsesExactTargetsAsScopeAndAllowsItsOwnPromoCode()
+    {
+        var programId = Guid.NewGuid();
+        var bundleId = Guid.NewGuid();
+        var offer = new Offer
+        {
+            Status = OfferStatus.Active,
+            StartsAtUtc = DateTime.UtcNow.AddDays(-1),
+            EndsAtUtc = DateTime.UtcNow.AddDays(5),
+            PromoCode = "SAVE20",
+            DiscountType = DiscountType.Percentage,
+            DiscountRate = Percentage.FromFraction(0.20m),
+            AllowPromoCodeStacking = true,
+            PackageTargets = [new OfferPackageTarget
+            {
+                SubscriptionType = "Individual", ProgramId = programId, BundleId = bundleId,
+                Tier = RestaurantTier.Basic, AllowedDurationDays = [30]
+            }],
+            EligiblePrograms = [new OfferProgram { ProgramId = Guid.NewGuid() }],
+            EligibleBundles = [new OfferBundle { BundleId = Guid.NewGuid() }]
+        };
+
+        var result = _engine.Evaluate(offer, new OfferEligibilityContext(
+            Guid.NewGuid(), 0, 0, 100m, 30, ProgramId: programId, BundleId: bundleId,
+            Tier: RestaurantTier.Basic, SubscriptionType: "Individual", HasPromoCode: true,
+            IsOfferPromoCode: true), DateTime.UtcNow);
+
+        result.IsEligible.Should().BeTrue();
     }
 }

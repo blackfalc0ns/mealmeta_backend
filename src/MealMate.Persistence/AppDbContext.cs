@@ -318,6 +318,7 @@ public sealed class AppDbContext
     public DbSet<Offer> Offers => Set<Offer>();
     public DbSet<OfferProgram> OfferPrograms => Set<OfferProgram>();
     public DbSet<OfferBundle> OfferBundles => Set<OfferBundle>();
+    public DbSet<OfferPackageTarget> OfferPackageTargets => Set<OfferPackageTarget>();
     public DbSet<OfferRestaurant> OfferRestaurants => Set<OfferRestaurant>();
     public DbSet<OfferRedemption> OfferRedemptions => Set<OfferRedemption>();
     public DbSet<OfferAuditLog> OfferAuditLogs => Set<OfferAuditLog>();

@@ -1,6 +1,21 @@
+using MealMate.Domain.Enums;
 using MealMate.Domain.Offers.Enums;
 
 namespace MealMate.Application.Features.Offers.DTOs;
+
+public sealed record OfferPackageTargetDto(
+    string SubscriptionType,
+    Guid ProgramId,
+    Guid BundleId,
+    RestaurantTier Tier,
+    IReadOnlyList<int> AllowedDurationDays);
+
+public sealed record OfferPackageTargetInput(
+    string SubscriptionType,
+    Guid ProgramId,
+    Guid BundleId,
+    RestaurantTier Tier,
+    IReadOnlyList<int> AllowedDurationDays);
 
 public sealed record OfferDto(
     Guid Id,
@@ -35,7 +50,8 @@ public sealed record OfferDto(
     IReadOnlyList<Guid>? EligibleProgramIds = null,
     IReadOnlyList<Guid>? EligibleBundleIds = null,
     IReadOnlyList<Guid>? EligibleRestaurantIds = null,
-    string SourceType = "Offer"
+    string SourceType = "Offer",
+    IReadOnlyList<OfferPackageTargetDto>? PackageTargets = null
 );
 
 public sealed record OfferRedemptionResultDto(

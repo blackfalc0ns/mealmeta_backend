@@ -20,6 +20,7 @@ public sealed class GetOfferByIdQueryHandler : IQueryHandler<GetOfferByIdQuery, 
         var offer = await _context.Offers
             .Include(o => o.EligiblePrograms)
             .Include(o => o.EligibleBundles)
+            .Include(o => o.PackageTargets)
             .Include(o => o.EligibleRestaurants)
             .FirstOrDefaultAsync(o => o.Id == request.Id, cancellationToken);
 

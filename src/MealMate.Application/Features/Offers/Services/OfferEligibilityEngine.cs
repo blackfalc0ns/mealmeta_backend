@@ -81,14 +81,30 @@ public sealed class OfferEligibilityEngine : IOfferEligibilityEngine
         }
 
         // 9. Program Scope Check
-        if (offer.EligiblePrograms.Count > 0 && context.ProgramId.HasValue &&
+        if (offer.PackageTargets.Count > 0)
+        {
+            var packageMatch = context.ProgramId.HasValue && context.BundleId.HasValue && context.Tier.HasValue
+                && !string.IsNullOrWhiteSpace(context.SubscriptionType)
+                && offer.PackageTargets.Any(target =>
+                    target.ProgramId == context.ProgramId.Value
+                    && target.BundleId == context.BundleId.Value
+                    && target.Tier == context.Tier.Value
+                    && string.Equals(target.SubscriptionType, context.SubscriptionType, StringComparison.OrdinalIgnoreCase)
+                    && target.AllowedDurationDays.Contains(context.DurationDays));
+            if (!packageMatch)
+            {
+                reasons.Add("Offer does not match the selected package target (subscription type, program, bundle, tier and duration).");
+            }
+        }
+
+        if (offer.PackageTargets.Count == 0 && offer.EligiblePrograms.Count > 0 && context.ProgramId.HasValue &&
             !offer.EligiblePrograms.Any(p => p.ProgramId == context.ProgramId.Value))
         {
             reasons.Add("Offer is not applicable to the selected program.");
         }
 
         // 10. Bundle Scope Check
-        if (offer.EligibleBundles.Count > 0 && context.BundleId.HasValue &&
+        if (offer.PackageTargets.Count == 0 && offer.EligibleBundles.Count > 0 && context.BundleId.HasValue &&
             !offer.EligibleBundles.Any(b => b.BundleId == context.BundleId.Value))
         {
             reasons.Add("Offer is not applicable to the selected bundle.");

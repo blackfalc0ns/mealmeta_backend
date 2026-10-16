@@ -53,6 +53,11 @@ public sealed class AdminAdvertisingController : ApiControllerBase
     public async Task<IActionResult> GetAuctions(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetOpenAuctionsQuery(), cancellationToken));
 
+    [HttpGet("placements")]
+    [HasPermission(PermissionCodes.CampaignsView)]
+    public async Task<IActionResult> GetPlacements([FromQuery] string? status, CancellationToken cancellationToken)
+        => HandleResult(await Sender.Send(new GetAdminAdPlacementsQuery(status), cancellationToken));
+
     [HttpPost("placements/{id:guid}/review")]
     [HasPermission(PermissionCodes.CampaignsManage)]
     public async Task<IActionResult> ReviewCreative(Guid id, [FromBody] ReviewCreativeRequest request, CancellationToken cancellationToken)

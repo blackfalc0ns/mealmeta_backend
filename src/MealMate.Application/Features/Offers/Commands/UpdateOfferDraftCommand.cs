@@ -38,6 +38,7 @@ public sealed record UpdateOfferDraftCommand(
     string? PromoCode = null,
     string? TermsAndConditionsAr = null,
     string? TermsAndConditionsEn = null
+    ,List<OfferPackageTargetInput>? PackageTargets = null
 ) : ICommand<OfferDto>;
 
 public sealed class UpdateOfferDraftCommandValidator : AbstractValidator<UpdateOfferDraftCommand>
@@ -61,6 +62,7 @@ public sealed class UpdateOfferDraftCommandHandler : ICommandHandler<UpdateOffer
     public async Task<Result<OfferDto>> Handle(UpdateOfferDraftCommand request, CancellationToken cancellationToken)
     {
         var offer = await _context.Offers
+            .Include(o => o.PackageTargets)
             .FirstOrDefaultAsync(o => o.Id == request.OfferId, cancellationToken);
 
         if (offer == null)
@@ -72,6 +74,9 @@ public sealed class UpdateOfferDraftCommandHandler : ICommandHandler<UpdateOffer
         {
             return Error.Validation("Offer.NotDraft", $"Only offers in 'Draft' status can be modified (current status: '{offer.Status}').");
         }
+
+        var targetValidation = await OfferPackageTargetCommandValidation.ValidateAsync(_context, request.PackageTargets, cancellationToken);
+        if (targetValidation is not null) return targetValidation;
 
         offer.NameAr = request.NameAr.Trim();
         offer.NameEn = request.NameEn.Trim();
@@ -99,6 +104,20 @@ public sealed class UpdateOfferDraftCommandHandler : ICommandHandler<UpdateOffer
         offer.PromoCode = request.PromoCode;
         offer.TermsAndConditionsAr = request.TermsAndConditionsAr;
         offer.TermsAndConditionsEn = request.TermsAndConditionsEn;
+
+        if (request.PackageTargets is not null)
+        {
+            _context.OfferPackageTargets.RemoveRange(offer.PackageTargets);
+            offer.PackageTargets = request.PackageTargets.Select(target => new OfferPackageTarget
+            {
+                OfferId = offer.Id,
+                SubscriptionType = target.SubscriptionType.Trim(),
+                ProgramId = target.ProgramId,
+                BundleId = target.BundleId,
+                Tier = target.Tier,
+                AllowedDurationDays = target.AllowedDurationDays.Distinct().Order().ToArray()
+            }).ToList();
+        }
 
         await _context.SaveChangesAsync(cancellationToken);
 

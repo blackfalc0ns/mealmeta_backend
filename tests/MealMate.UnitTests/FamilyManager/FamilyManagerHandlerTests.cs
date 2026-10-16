@@ -118,7 +118,7 @@ public sealed class FamilyManagerHandlerTests
         exchangePermission.IsSupported.Should().BeTrue();
         exchangePermission.IsManagerConfigurable.Should().BeTrue();
         exchangePermission.RequiredPermissions.Should().BeEquivalentTo(new[] { "viewCalendar", "viewProgram" });
-        catalog.Should().NotContain(x => x.Key is "changeProgram" or "changeDeliveryTime");
+        catalog.Should().NotContain(x => x.Key == "changeProgram" || x.Key == "changeDeliveryTime");
     }
     [Theory]
     [InlineData(FamilyGroupStatus.Draft)]

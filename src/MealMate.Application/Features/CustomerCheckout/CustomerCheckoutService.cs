@@ -158,7 +158,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         {
             couponEvaluation = await _coupons.EvaluateAsync(
                 promoCode, customerUserId, request.ProgramId, request.BundleId, request.DurationDays,
-                preview.Value.FinalCustomerPrice, ct, subscriptionType: "Individual");
+                preview.Value.FinalCustomerPrice, ct, subscriptionType: "Individual", tier: request.Tier);
             if (!couponEvaluation.IsValid)
             {
                 return new Error("checkout.coupon_rejected", couponEvaluation.MessageEn, ErrorType.Validation,
@@ -515,13 +515,15 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         if (heldRedemption is not null || heldPromoRedemption is not null)
         {
             var heldOffer = heldRedemption is null ? null : await _db.Offers.AsNoTracking()
+                .Include(x => x.PackageTargets)
                 .FirstOrDefaultAsync(x => x.Id == heldRedemption.OfferId, ct);
             var heldPromo = heldPromoRedemption is null ? null : await _db.PromoCodes.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.Id == heldPromoRedemption.PromoCodeId, ct);
             var heldCode = heldPromo?.Code ?? heldOffer?.PromoCode;
             var reevaluation = await _coupons.EvaluateAsync(
                 heldCode, customerUserId, subscription.ProgramId, subscription.BundleId, subscription.DurationDays,
-                preview.Value.FinalCustomerPrice, ct, excludeSubscriptionId: subscription.Id);
+                preview.Value.FinalCustomerPrice, ct, excludeSubscriptionId: subscription.Id,
+                tier: subscription.SelectedTier);
             if (!reevaluation.IsValid)
             {
                 return new Error("checkout.coupon_no_longer_valid", reevaluation.MessageEn, ErrorType.Validation,

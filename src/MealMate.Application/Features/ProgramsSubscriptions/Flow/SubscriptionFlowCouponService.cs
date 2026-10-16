@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.Offers.Services;
 using MealMate.Domain.Offers;
 using MealMate.Domain.Offers.Enums;
+using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
@@ -48,7 +49,8 @@ public interface ISubscriptionFlowCouponService
         decimal grossCartAmount,
         CancellationToken ct = default,
         Guid excludeSubscriptionId = default,
-        string subscriptionType = "Individual");
+        string subscriptionType = "Individual",
+        RestaurantTier? tier = null);
 
     Task CreateCheckoutHoldAsync(SubscriptionCouponEvaluation evaluation, Guid subscriptionId, Guid customerUserId,
         decimal discountAmount, CancellationToken ct = default);
@@ -89,7 +91,8 @@ public sealed class SubscriptionFlowCouponService : ISubscriptionFlowCouponServi
         decimal grossCartAmount,
         CancellationToken ct = default,
         Guid excludeSubscriptionId = default,
-        string subscriptionType = "Individual")
+        string subscriptionType = "Individual",
+        RestaurantTier? tier = null)
     {
         var code = (promoCode ?? string.Empty).Trim().ToUpperInvariant();
         if (code.Length == 0)
@@ -133,6 +136,7 @@ public sealed class SubscriptionFlowCouponService : ISubscriptionFlowCouponServi
         var offer = await _db.Offers.AsNoTracking()
             .Include(o => o.EligiblePrograms)
             .Include(o => o.EligibleBundles)
+            .Include(o => o.PackageTargets)
             .Include(o => o.EligibleRestaurants)
             .FirstOrDefaultAsync(o => o.PromoCode != null && o.PromoCode.Trim().ToUpper() == code, ct);
         if (offer is null)
@@ -162,7 +166,10 @@ public sealed class SubscriptionFlowCouponService : ISubscriptionFlowCouponServi
             ProgramId: programId,
             BundleId: bundleId,
             RestaurantId: null,
-            HasPromoCode: true);
+            HasPromoCode: true,
+            Tier: tier,
+            SubscriptionType: subscriptionType,
+            IsOfferPromoCode: true);
 
         var verdict = _engine.Evaluate(offer, context, now);
         if (verdict.IsEligible)
