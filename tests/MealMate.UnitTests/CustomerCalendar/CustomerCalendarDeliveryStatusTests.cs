@@ -196,10 +196,9 @@ public sealed class CustomerCalendarDeliveryStatusTests
         var widget = await new GetCustomerDeliveryWidgetQueryHandler(
                 fx.Db, fx.CustomerUser,
                 new MealMate.Application.Features.FamilyManager.FamilyCalendarAccessGate(fx.Db, fx.CustomerUser),
-                new CustomerDeliveryReadService(fx.Db),
-                CreateNullLocationBuilder(),
-                Substitute.For<IDateTimeProvider>(),
-                Messages())
+                new CustomerDeliveryPresentationBuilder(
+                    fx.Db, new CustomerDeliveryReadService(fx.Db), CreateNullLocationBuilder(), Messages()),
+                Substitute.For<IDateTimeProvider>())
             .Handle(new GetCustomerDeliveryWidgetQuery(ServiceDate, fx.SubscriptionId), CancellationToken.None);
 
         screen.Value!.Days.Should().ContainSingle().Which.DeliveryStatus.Should().Be("OutForDelivery");

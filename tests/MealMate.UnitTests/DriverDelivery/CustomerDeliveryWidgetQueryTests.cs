@@ -55,10 +55,9 @@ public sealed class CustomerDeliveryWidgetQueryTests
             _db,
             _user,
             new FamilyCalendarAccessGate(_db, _user),
-            new CustomerDeliveryReadService(_db),
-            _locationBuilder,
-            _clock,
-            _messages);
+            new CustomerDeliveryPresentationBuilder(
+                _db, new CustomerDeliveryReadService(_db), _locationBuilder, _messages),
+            _clock);
     }
 
     private async Task<Subscription> SeedIndividualAsync(
@@ -448,5 +447,64 @@ public sealed class CustomerDeliveryWidgetQueryTests
 
         result.IsFailure.Should().BeTrue();
         result.Error.Type.Should().Be(ErrorType.Forbidden);
+    }
+
+    [Fact]
+    public async Task Widget_items_expose_the_subscription_day_details_link_even_before_a_trip()
+    {
+        var userId = Guid.NewGuid();
+        _user.UserId.Returns(userId);
+        var subscription = await SeedIndividualAsync(userId);
+        var day = await _db.SubscriptionDays.SingleAsync(d => d.SubscriptionId == subscription.Id);
+        var handler = CreateHandler();
+
+        var result = await handler.Handle(new GetCustomerDeliveryWidgetQuery(ServiceDate, null), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Subject;
+        item.DeliveryDetailsUrl.Should().Be($"/api/v1/customer/subscription-days/{day.Id}/delivery-details");
+        item.DetailsUrl.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Driver_rating_uses_the_real_batched_aggregation_rounded_like_the_driver_profile()
+    {
+        var userId = Guid.NewGuid();
+        _user.UserId.Returns(userId);
+        var subscription = await SeedIndividualAsync(userId, SubscriptionDayStatus.OutForDelivery);
+        var day = await _db.SubscriptionDays.SingleAsync(d => d.SubscriptionId == subscription.Id);
+        var order = await SeedReadyOrderAsync(day);
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "سائق مُقيَّم", FullNameEn = "Rated driver" };
+        _db.DriverProfiles.Add(driver);
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-R", Status = TripStatus.InProgress, PlannedDate = ServiceDate };
+        _db.Trips.Add(trip);
+        _db.DriverAssignments.Add(new DriverAssignment { TripId = trip.Id, DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = Now });
+        _db.TripStops.Add(new TripStop
+        {
+            TripId = trip.Id,
+            SubscriptionDayId = day.Id,
+            DailyOrderId = order.Id,
+            OrderCode = "#BX-RATE",
+            CustomerMaskedId = "CUST",
+            ZoneNameAr = "z",
+            ZoneNameEn = "z",
+            MealSummaryAr = "وجبة",
+            MealSummaryEn = "Meal",
+            SlotLabel = "lunch",
+            Status = TripStopStatus.PickedUp
+        });
+        _db.DriverRatings.AddRange(
+            new DriverRating { DriverProfileId = driver.Id, Score = 4 },
+            new DriverRating { DriverProfileId = driver.Id, Score = 5 });
+        await _db.SaveChangesAsync();
+
+        var handler = CreateHandler();
+        var result = await handler.Handle(new GetCustomerDeliveryWidgetQuery(ServiceDate, null), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Subject;
+        item.Driver!.Id.Should().Be(driver.Id);
+        item.Driver.Rating.Should().Be(4.5); // Math.Round(Average, 2) — same policy as the driver profile
     }
 }

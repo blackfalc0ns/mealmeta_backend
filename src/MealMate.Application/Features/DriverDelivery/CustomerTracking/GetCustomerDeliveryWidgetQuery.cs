@@ -2,7 +2,6 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
-using MealMate.Application.Features.Catalog;
 using MealMate.Application.Features.FamilyManager;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
@@ -44,7 +43,15 @@ public sealed record CustomerDeliveryWidgetItemDto(
     int? EtaMinutes,
     string? EtaSource,
     CustomerDeliveryDestinationDto? DestinationAddress,
-    string? DetailsUrl);
+    string? DetailsUrl)
+{
+    /// <summary>
+    /// Additive day-level details link keyed by SubscriptionDayId: available even
+    /// before any trip stop exists and after delivery. <see cref="DetailsUrl"/> keeps
+    /// its legacy trip-stop-based meaning and stays null without an attempt.
+    /// </summary>
+    public string? DeliveryDetailsUrl { get; init; }
+}
 
 public sealed record CustomerDeliveryDriverDto(
     Guid Id,
@@ -110,33 +117,24 @@ public static class CustomerBusinessDates
 public sealed class GetCustomerDeliveryWidgetQueryHandler
     : IQueryHandler<GetCustomerDeliveryWidgetQuery, CustomerDeliveryWidgetResponseDto>
 {
-    private static readonly string[] VehicleTypeCodes =
-        VehicleCatalogData.Types.Select(t => t.Code).ToArray();
-
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly IFamilyCalendarAccessGate _accessGate;
-    private readonly ICustomerDeliveryReadService _readService;
-    private readonly ICustomerDeliveryLocationBuilder _locationBuilder;
+    private readonly ICustomerDeliveryPresentationBuilder _presentationBuilder;
     private readonly IDateTimeProvider _clock;
-    private readonly ILocalizedMessageProvider _messages;
 
     public GetCustomerDeliveryWidgetQueryHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         IFamilyCalendarAccessGate accessGate,
-        ICustomerDeliveryReadService readService,
-        ICustomerDeliveryLocationBuilder locationBuilder,
-        IDateTimeProvider clock,
-        ILocalizedMessageProvider messages)
+        ICustomerDeliveryPresentationBuilder presentationBuilder,
+        IDateTimeProvider clock)
     {
         _db = db;
         _currentUser = currentUser;
         _accessGate = accessGate;
-        _readService = readService;
-        _locationBuilder = locationBuilder;
+        _presentationBuilder = presentationBuilder;
         _clock = clock;
-        _messages = messages;
     }
 
     public async Task<Result<CustomerDeliveryWidgetResponseDto>> Handle(
@@ -149,7 +147,6 @@ public sealed class GetCustomerDeliveryWidgetQueryHandler
         }
 
         var serviceDate = request.ServiceDate ?? CustomerBusinessDates.TodayInBusinessTimezone(_clock.UtcNow);
-        var isAr = _messages.IsArabic();
 
         var authorization = await ResolveAuthorizedSubscriptionIdsAsync(request.SubscriptionId, cancellationToken);
         if (authorization.Error is not null)
@@ -178,115 +175,8 @@ public sealed class GetCustomerDeliveryWidgetQueryHandler
                 serviceDate, _clock.UtcNow, CustomerDeliveryWidgetDefaults.RefreshSeconds, []));
         }
 
-        var projections = await _readService.GetForDaysAsync(
+        var items = await _presentationBuilder.BuildAsync(
             days.Select(d => d.Id).ToList(), cancellationToken);
-
-        var stopIds = projections.Values
-            .Where(p => p.Attempt is not null)
-            .Select(p => p.Attempt!.TripStopId)
-            .Distinct()
-            .ToList();
-        var stopDetails = await _db.TripStops.AsNoTracking()
-            .Where(s => stopIds.Contains(s.Id))
-            .Select(s => new
-            {
-                s.Id,
-                s.OrderCode,
-                s.FullAddress,
-                s.ZoneNameAr,
-                s.ZoneNameEn,
-                s.Latitude,
-                s.Longitude
-            })
-            .ToListAsync(cancellationToken);
-        var stopById = stopDetails.ToDictionary(s => s.Id);
-
-        var driverIds = projections.Values
-            .Where(p => p.DriverProfileId.HasValue)
-            .Select(p => p.DriverProfileId!.Value)
-            .Distinct()
-            .ToList();
-        var driversById = await LoadDriversAsync(driverIds, cancellationToken);
-
-        var items = new List<CustomerDeliveryWidgetItemDto>(days.Count);
-        foreach (var day in days)
-        {
-            if (!projections.TryGetValue(day.Id, out var projection))
-            {
-                continue;
-            }
-
-            var snapshot = projection.Snapshot;
-            var attempt = projection.Attempt;
-            stopById.TryGetValue(attempt?.TripStopId ?? Guid.Empty, out var stop);
-
-            // Ambiguous current attempts expose no driver or route data at all; terminal
-            // boxes keep the driver identity (who delivered) but never a live route.
-            var showDriverAndVehicle = projection.DriverProfileId.HasValue
-                && snapshot.DeliveryStatus != CustomerDeliveryStatusCodes.TrackingUnavailable
-                && (snapshot.IsTrackable || snapshot.IsTerminal);
-
-            CustomerDeliveryLocationDto? location = null;
-            int? etaMinutes = null;
-            string? etaSource = null;
-            if (showDriverAndVehicle && !snapshot.IsTerminal && attempt is not null && stop is not null)
-            {
-                var locationResult = await _locationBuilder.BuildAsync(new CustomerDeliveryLocationRequest(
-                    projection.DriverProfileId!.Value,
-                    attempt.TripId,
-                    attempt.TripStopId,
-                    IsArrived: attempt.ArrivedAtUtc.HasValue && attempt.Status == Domain.Enums.TripStopStatus.PickedUp,
-                    IsTerminal: snapshot.IsTerminal,
-                    projection.HasEarlierUndeliveredStops,
-                    stop.Latitude,
-                    stop.Longitude), cancellationToken);
-
-                if (locationResult.Latitude.HasValue && locationResult.Longitude.HasValue)
-                {
-                    location = new CustomerDeliveryLocationDto(
-                        locationResult.Latitude.Value,
-                        locationResult.Longitude.Value,
-                        locationResult.CapturedAtUtc!.Value,
-                        locationResult.ReceivedAtUtc,
-                        locationResult.IsLive);
-                }
-
-                etaMinutes = locationResult.EtaMinutes;
-                etaSource = locationResult.EtaSource;
-            }
-
-            driversById.TryGetValue(projection.DriverProfileId ?? Guid.Empty, out var driver);
-
-            items.Add(new CustomerDeliveryWidgetItemDto(
-                SubscriptionId: projection.SubscriptionId,
-                SubscriptionDayId: projection.SubscriptionDayId,
-                OrderId: projection.DailyOrderId,
-                TripStopId: attempt?.TripStopId,
-                OrderCode: projection.OrderCode,
-                DeliveryStatus: snapshot.DeliveryStatus,
-                DeliveryStatusTextAr: snapshot.StatusTextAr,
-                DeliveryStatusTextEn: snapshot.StatusTextEn,
-                DeliveryStatusText: isAr ? snapshot.StatusTextAr : snapshot.StatusTextEn,
-                IsTerminal: snapshot.IsTerminal,
-                IsTrackable: snapshot.IsTrackable,
-                UnavailableReasonCode: snapshot.UnavailableReasonCode,
-                ReadyAtUtc: snapshot.ReadyAtUtc,
-                PickedUpAtUtc: snapshot.PickedUpAtUtc,
-                ArrivedAtUtc: snapshot.ArrivedAtUtc,
-                DeliveredAtUtc: snapshot.DeliveredAtUtc,
-                Driver: showDriverAndVehicle ? driver?.ToDto(isAr) : null,
-                Vehicle: showDriverAndVehicle ? driver?.ToVehicleDto(isAr) : null,
-                Location: location,
-                EtaMinutes: etaMinutes,
-                EtaSource: etaSource,
-                DestinationAddress: stop is null ? null : new CustomerDeliveryDestinationDto(
-                    stop.FullAddress,
-                    (double?)stop.Latitude,
-                    (double?)stop.Longitude),
-                DetailsUrl: attempt is null
-                    ? null
-                    : $"/api/v1/customer/orders/{attempt.TripStopId}/live-tracking"));
-        }
 
         return Result.Success(new CustomerDeliveryWidgetResponseDto(
             serviceDate, _clock.UtcNow, CustomerDeliveryWidgetDefaults.RefreshSeconds, items));
@@ -362,87 +252,4 @@ public sealed class GetCustomerDeliveryWidgetQueryHandler
 
         return new SubscriptionAuthorization(authorized, null);
     }
-
-    private async Task<Dictionary<Guid, DriverPresentation>> LoadDriversAsync(
-        IReadOnlyCollection<Guid> driverIds,
-        CancellationToken cancellationToken)
-    {
-        var result = new Dictionary<Guid, DriverPresentation>(driverIds.Count);
-        if (driverIds.Count == 0)
-        {
-            return result;
-        }
-
-        var profiles = await _db.DriverProfiles.AsNoTracking()
-            .Where(d => driverIds.Contains(d.Id))
-            .ToListAsync(cancellationToken);
-
-        var userIds = profiles.Select(p => p.UserId).Distinct().ToList();
-        var phones = await _db.DriverRegistrations.AsNoTracking()
-            .Where(r => r.ResultingDriverProfileId != null && driverIds.Contains(r.ResultingDriverProfileId.Value)
-                        || r.SubmittedByUserId != null && userIds.Contains(r.SubmittedByUserId.Value))
-            .Select(r => new { r.ResultingDriverProfileId, r.SubmittedByUserId, r.Phone })
-            .ToListAsync(cancellationToken);
-
-        foreach (var profile in profiles)
-        {
-            var phone = phones
-                .Where(p => p.ResultingDriverProfileId == profile.Id
-                            || (p.SubmittedByUserId.HasValue && p.SubmittedByUserId.Value == profile.UserId))
-                .Select(p => p.Phone)
-                .FirstOrDefault();
-
-            result[profile.Id] = new DriverPresentation(profile, phone, AvatarUrlOf(profile));
-        }
-
-        return result;
-    }
-
-    /// <summary>Approved profile images only, exposed through the authorized content
-    /// route — never a raw private storage key.</summary>
-    private static string? AvatarUrlOf(DriverProfile profile)
-        => profile.ProfileImageStatus == VerificationStatus.Approved
-               && !string.IsNullOrWhiteSpace(profile.ProfileImageStorageKey)
-            ? $"/api/v1/uploads/content?key={Uri.EscapeDataString(profile.ProfileImageStorageKey)}"
-            : null;
-
-    private sealed record DriverPresentation(
-        DriverProfile Profile,
-        string? Phone,
-        string? AvatarUrl)
-    {
-        public CustomerDeliveryDriverDto ToDto(bool isAr)
-        {
-            var nameAr = string.IsNullOrWhiteSpace(Profile.FullNameAr) ? Profile.FullNameEn : Profile.FullNameAr;
-            var nameEn = string.IsNullOrWhiteSpace(Profile.FullNameEn) ? Profile.FullNameAr : Profile.FullNameEn;
-            return new CustomerDeliveryDriverDto(
-                Profile.Id,
-                nameAr ?? string.Empty,
-                nameEn ?? string.Empty,
-                isAr ? nameAr ?? string.Empty : nameEn ?? string.Empty,
-                MaskPhone(Phone),
-                AvatarUrl,
-                Rating: null); // no verified driver-rating source exists; null instead of a fabricated value
-        }
-
-        public CustomerDeliveryVehicleDto ToVehicleDto(bool isAr)
-        {
-            var typeCode = Profile.VehicleType ?? string.Empty;
-            var catalogType = VehicleCatalogData.Types
-                .FirstOrDefault(t => string.Equals(t.Code, typeCode, StringComparison.OrdinalIgnoreCase));
-            var labelAr = catalogType?.NameAr ?? typeCode;
-            var labelEn = catalogType?.NameEn ?? typeCode;
-            return new CustomerDeliveryVehicleDto(
-                typeCode,
-                labelAr,
-                labelEn,
-                isAr ? labelAr : labelEn,
-                Profile.VehiclePlate ?? string.Empty);
-        }
-    }
-
-    private static string? MaskPhone(string? phone)
-        => string.IsNullOrWhiteSpace(phone) || phone.Length <= 4
-            ? phone
-            : $"{phone[..3]}***{phone[^2..]}";
 }
