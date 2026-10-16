@@ -44,7 +44,7 @@ public sealed class SignalRCustomerDeliveryChangeNotifier(
                       && !member.IsDeleted
                       && access.RemovedAtUtc == null
                       && access.LinkedCustomerUserId.HasValue
-                select access.LinkedCustomerUserId.Value)
+                select access.LinkedCustomerUserId.GetValueOrDefault())
                 .ToListAsync(cancellationToken);
             candidateRecipients.UnionWith(linkedUserIds);
         }
