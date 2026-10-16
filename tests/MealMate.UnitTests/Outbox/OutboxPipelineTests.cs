@@ -1,6 +1,7 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Outbox;
+using MealMate.Application.Features.DriverDelivery.CustomerTracking;
 using MealMate.Domain.Common;
 using MealMate.Persistence;
 using MealMate.Persistence.Outbox;
@@ -67,6 +68,40 @@ public class OutboxPipelineTests
         reloaded.Should().NotBeNull();
         reloaded!.ProcessedAtUtc.Should().NotBeNull();
         reloaded.LastError.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task OutboxJob_RoutesCustomerDeliveryToTypedNotification_WithoutResolvingGenericHandlers()
+    {
+        var options = CreateOptions();
+        await using var db = new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
+        var mediator = Substitute.For<IMediator>();
+        var message = new OutboxMessage
+        {
+            EventType = CustomerDeliveryChangedV1.OutboxEventType,
+            PayloadJson = "{}",
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+        var dayId = Guid.NewGuid();
+        message.PayloadJson = System.Text.Json.JsonSerializer.Serialize(
+            new CustomerDeliveryChangedV1(message.Id, dayId, DateTime.UtcNow));
+        db.OutboxMessages.Add(message);
+        await db.SaveChangesAsync();
+
+        var sp = BuildServiceProvider(options, mediator);
+        var job = new OutboxBackgroundJob(sp.GetRequiredService<IServiceScopeFactory>());
+
+        var processedCount = await job.ProcessPendingMessagesAsync(CancellationToken.None);
+
+        processedCount.Should().Be(1);
+        await mediator.Received(1).Publish(
+            Arg.Is<CustomerDeliveryChangedOutboxNotification>(notification =>
+                notification.Message.MessageId == message.Id
+                && notification.Message.EventType == CustomerDeliveryChangedV1.OutboxEventType),
+            Arg.Any<CancellationToken>());
+        await mediator.DidNotReceive().Publish(
+            Arg.Any<OutboxLifecycleNotification>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -4,6 +4,7 @@ using MealMate.Persistence.CustomerCheckout;
 using MealMate.Persistence.Common;
 using MealMate.Persistence.Identity;
 using MealMate.Persistence.Interceptors;
+using MealMate.Application.Features.DriverDelivery.CustomerTracking;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -51,6 +52,8 @@ public static class DependencyInjection
         services.AddScoped<IApplicationLockManager>(sp => sp.GetRequiredService<PostgresApplicationLockManager>());
         services.AddScoped<MealMate.Application.Features.CollaborativeCampaigns.Services.ICampaignCapacityLockRepository, MealMate.Persistence.CollaborativeCampaigns.CampaignCapacityLockRepository>();
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
+        services.AddScoped<ICustomerDeliveryChangeTransport>(_ =>
+            new CustomerTracking.PostgresCustomerDeliveryChangeTransport(connectionString));
         services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallParticipantLockService, VoiceCalls.PostgresVoiceCallParticipantLockService>();
         services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallRecoveryCoordinator, VoiceCalls.PostgresVoiceCallRecoveryCoordinator>();
 
