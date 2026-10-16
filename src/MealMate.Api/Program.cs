@@ -36,6 +36,16 @@ builder.Services
 builder.Services.AddMemoryCache();
 builder.Services.AddSignalR().AddHubOptions<VoiceCallV2Hub>(options =>
     options.MaximumReceiveMessageSize = VoiceCallV2Hub.MaximumReceiveMessageSize);
+builder.Services.AddScoped<SignalRCustomerDeliveryChangeNotifier>();
+var customerDeliveryListenerConnectionString =
+    Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION")
+    ?? builder.Configuration.GetConnectionString(MealMate.Persistence.DependencyInjection.ConnectionStringName)
+    ?? throw new InvalidOperationException("Customer delivery realtime requires the configured MealMate database connection.");
+builder.Services.AddSingleton(sp => new CustomerDeliveryPostgresNotificationListener(
+    customerDeliveryListenerConnectionString,
+    sp.GetRequiredService<IServiceScopeFactory>(),
+    sp.GetRequiredService<ILogger<CustomerDeliveryPostgresNotificationListener>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CustomerDeliveryPostgresNotificationListener>());
 builder.Services.AddSingleton<VoiceCallV2ConnectionRegistry>();
 builder.Services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallV2RealtimeTransport, VoiceCallV2RealtimeTransport>();
 builder.Services.AddScoped<IRegistrationReviewNotifier, SignalRRegistrationReviewNotifier>();
@@ -421,6 +431,7 @@ app.MapHub<DispatcherHub>(DispatcherHub.HubAlternativePath);
 app.MapHub<DriverHub>(DriverHub.HubPath);
 app.MapHub<DriverHub>(DriverHub.HubAlternativePath);
 app.MapHub<VoiceCallHub>(VoiceCallHub.HubPath);
+app.MapHub<CustomerDeliveryHub>(CustomerDeliveryHub.HubPath);
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = registration => !registration.Tags.Contains("ready"),

@@ -149,6 +149,9 @@ public interface IAppDbContext
     DbSet<MealInvoice> MealInvoices { get; }
     DbSet<MealBarcode> MealBarcodes { get; }
     DbSet<MealLabel> MealLabels { get; }
+    DbSet<ReceiptTemplate> ReceiptTemplates { get; }
+    DbSet<RestaurantReceiptSettings> RestaurantReceiptSettings { get; }
+    DbSet<ReceiptPrintLog> ReceiptPrintLogs { get; }
     DbSet<RestaurantDailyOrder> RestaurantDailyOrders { get; }
     DbSet<OrderHandover> OrderHandovers { get; }
 

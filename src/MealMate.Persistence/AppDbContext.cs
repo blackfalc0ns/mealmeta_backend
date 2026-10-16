@@ -19,6 +19,7 @@ using MealMate.Domain.RestaurantFinance;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.VoiceCalls;
 using MealMate.Persistence.Common;
+using MealMate.Persistence.Features.DriverDelivery;
 using MealMate.Persistence.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -34,12 +35,17 @@ public sealed class AppDbContext
     : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>, IUnitOfWork, IAppDbContext
 {
     private readonly IDomainEventDispatcher _domainEventDispatcher;
+    private readonly IDateTimeProvider? _dateTimeProvider;
 
     public AppDbContext(
         DbContextOptions<AppDbContext> options,
-        IDomainEventDispatcher domainEventDispatcher)
+        IDomainEventDispatcher domainEventDispatcher,
+        IDateTimeProvider? dateTimeProvider = null)
         : base(options)
-        => _domainEventDispatcher = domainEventDispatcher;
+    {
+        _domainEventDispatcher = domainEventDispatcher;
+        _dateTimeProvider = dateTimeProvider;
+    }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -190,6 +196,9 @@ public sealed class AppDbContext
     public DbSet<MealBarcode> MealBarcodes => Set<MealBarcode>();
     public DbSet<MealLabel> MealLabels => Set<MealLabel>();
     public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();
+    public DbSet<ReceiptTemplate> ReceiptTemplates => Set<ReceiptTemplate>();
+    public DbSet<RestaurantReceiptSettings> RestaurantReceiptSettings => Set<RestaurantReceiptSettings>();
+    public DbSet<ReceiptPrintLog> ReceiptPrintLogs => Set<ReceiptPrintLog>();
     public DbSet<OrderHandover> OrderHandovers => Set<OrderHandover>();
     public DbSet<OrderHandoverRevocation> OrderHandoverRevocations => Set<OrderHandoverRevocation>();
     public DbSet<RestaurantDriverLink> RestaurantDriverLinks => Set<RestaurantDriverLink>();
@@ -363,9 +372,54 @@ public sealed class AppDbContext
     public async Task ReloadEntityAsync(object entity, CancellationToken cancellationToken = default) =>
         await Entry(entity).ReloadAsync(cancellationToken);
 
-    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    public override int SaveChanges() => SaveChanges(acceptAllChangesOnSuccess: true);
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
-        var domainEvents = ChangeTracker
+        var stagedOutbox = StageCustomerDeliveryInvalidations();
+
+        try
+        {
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+        }
+        catch
+        {
+            RemoveFailedSaveInvalidations(stagedOutbox);
+            throw;
+        }
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        => SaveChangesAsync(acceptAllChangesOnSuccess: true, cancellationToken);
+
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        var stagedOutbox = StageCustomerDeliveryInvalidations();
+        var domainEvents = CollectDomainEvents();
+
+        try
+        {
+            var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+
+            if (domainEvents.Count != 0)
+            {
+                await _domainEventDispatcher.DispatchAsync(domainEvents, cancellationToken);
+            }
+
+            return result;
+        }
+        catch
+        {
+            RemoveFailedSaveInvalidations(stagedOutbox);
+            throw;
+        }
+    }
+
+    private IReadOnlyList<OutboxMessage> StageCustomerDeliveryInvalidations()
+        => CustomerDeliveryChangeOutboxCapture.Stage(this, _dateTimeProvider?.UtcNow ?? DateTime.UtcNow);
+
+    private List<IDomainEvent> CollectDomainEvents()
+        => ChangeTracker
             .Entries<BaseEntity>()
             .Select(e => e.Entity)
             .SelectMany(e =>
@@ -376,14 +430,15 @@ public sealed class AppDbContext
             })
             .ToList();
 
-        var result = await base.SaveChangesAsync(cancellationToken);
-
-        if (domainEvents.Count != 0)
+    private void RemoveFailedSaveInvalidations(IEnumerable<OutboxMessage> stagedOutbox)
+    {
+        foreach (var message in stagedOutbox)
         {
-            await _domainEventDispatcher.DispatchAsync(domainEvents, cancellationToken);
+            if (Entry(message).State == EntityState.Added)
+            {
+                Entry(message).State = EntityState.Detached;
+            }
         }
-
-        return result;
     }
 
     public async Task<ITransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)

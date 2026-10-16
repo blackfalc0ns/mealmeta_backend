@@ -23,6 +23,7 @@ public static class ProgramsSubscriptionsSeeder
         await EnsureBundleSlotCountsAsync(db, logger, cancellationToken);
         await ProgramNutritionStandardsSeeder.SeedAsync(db, logger, cancellationToken);
         await FoodSafetyCatalogSeeder.SeedAsync(db, cancellationToken);
+        await ReceiptTemplatesSeeder.SeedAsync(db, logger, cancellationToken);
     }
 
     private static async Task EnsureProgramDisplayContentAsync(AppDbContext db, ILogger logger, CancellationToken cancellationToken)

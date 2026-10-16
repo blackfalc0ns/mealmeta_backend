@@ -1,6 +1,7 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Outbox;
 using MealMate.Application.Features.CollaborativeCampaigns.Services;
+using MealMate.Application.Features.DriverDelivery.CustomerTracking;
 using MealMate.Domain.Common;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -254,7 +255,14 @@ public sealed class OutboxBackgroundJob : BackgroundService, IOutboxService
                     msg.PayloadJson,
                     msg.CreatedAtUtc);
 
-                await mediator.Publish(notification, cts.Token);
+                if (string.Equals(notification.EventType, CustomerDeliveryChangedV1.OutboxEventType, StringComparison.Ordinal))
+                {
+                    await mediator.Publish(new CustomerDeliveryChangedOutboxNotification(notification), cts.Token);
+                }
+                else
+                {
+                    await mediator.Publish(notification, cts.Token);
+                }
 
                 cts.Cancel();
                 await Task.WhenAny(heartbeatTask, Task.Delay(50));

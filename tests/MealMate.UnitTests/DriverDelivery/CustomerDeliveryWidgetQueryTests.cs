@@ -55,10 +55,9 @@ public sealed class CustomerDeliveryWidgetQueryTests
             _db,
             _user,
             new FamilyCalendarAccessGate(_db, _user),
-            new CustomerDeliveryReadService(_db),
-            _locationBuilder,
-            _clock,
-            _messages);
+            new CustomerDeliveryPresentationBuilder(
+                _db, new CustomerDeliveryReadService(_db), _locationBuilder, _messages),
+            _clock);
     }
 
     private async Task<Subscription> SeedIndividualAsync(
@@ -102,6 +101,90 @@ public sealed class CustomerDeliveryWidgetQueryTests
         _db.RestaurantDailyOrders.Add(order);
         await _db.SaveChangesAsync();
         return order;
+    }
+
+    private async Task<(SubscriptionDay Day, TripStop Stop, IReadOnlyList<DriverProfile> Drivers)> SeedAttemptAsync(
+        Guid userId,
+        SubscriptionDayStatus dayStatus,
+        OrderStatus orderStatus,
+        TripStopStatus stopStatus,
+        int activeAssignments,
+        int priorDriversWithHandover = 0,
+        bool currentDriverHasHandover = false)
+    {
+        var subscription = await SeedIndividualAsync(userId, dayStatus);
+        var day = await _db.SubscriptionDays.SingleAsync(d => d.SubscriptionId == subscription.Id);
+        var order = await SeedReadyOrderAsync(day);
+        order.Status = orderStatus;
+
+        var trip = new Trip
+        {
+            RestaurantId = Guid.NewGuid(),
+            Code = $"TRP-{Guid.NewGuid():N}",
+            Status = TripStatus.InProgress,
+            PlannedDate = ServiceDate
+        };
+        var drivers = Enumerable.Range(0, activeAssignments + priorDriversWithHandover)
+            .Select(i => new DriverProfile
+            {
+                UserId = Guid.NewGuid(),
+                FullNameAr = $"سائق {i}",
+                FullNameEn = $"Driver {i}"
+            })
+            .ToList();
+        _db.Trips.Add(trip);
+        _db.DriverProfiles.AddRange(drivers);
+        for (var i = 0; i < drivers.Count; i++)
+        {
+            _db.DriverAssignments.Add(new DriverAssignment
+            {
+                TripId = trip.Id,
+                DriverProfileId = drivers[i].Id,
+                Status = i < activeAssignments ? "Active" : "Inactive",
+                AssignedAtUtc = Now.AddMinutes(-30 + i)
+            });
+        }
+
+        var stop = new TripStop
+        {
+            TripId = trip.Id,
+            SubscriptionDayId = day.Id,
+            DailyOrderId = order.Id,
+            OrderCode = "#BX-ATTEMPT",
+            CustomerMaskedId = "CUST",
+            ZoneNameAr = "السالمية",
+            ZoneNameEn = "Salmiya",
+            FullAddress = "Stored destination address",
+            MealSummaryAr = "وجبة",
+            MealSummaryEn = "Meal",
+            SlotLabel = "lunch",
+            Status = stopStatus,
+            Latitude = 29.33m,
+            Longitude = 48.07m
+        };
+        _db.TripStops.Add(stop);
+
+        var handoverDriverIndexes = Enumerable.Range(activeAssignments, priorDriversWithHandover).ToList();
+        if (currentDriverHasHandover && activeAssignments > 0)
+        {
+            handoverDriverIndexes.Add(0);
+        }
+
+        foreach (var i in handoverDriverIndexes)
+        {
+            _db.OrderHandovers.Add(new OrderHandover
+            {
+                DailyOrderId = order.Id,
+                TripId = trip.Id,
+                TripStopId = stop.Id,
+                DriverProfileId = drivers[i].Id,
+                HandedOverAtUtc = Now.AddMinutes(-10 - i),
+                Status = "Completed"
+            });
+        }
+
+        await _db.SaveChangesAsync();
+        return (day, stop, drivers);
     }
 
     [Fact]
@@ -333,6 +416,76 @@ public sealed class CustomerDeliveryWidgetQueryTests
     }
 
     [Fact]
+    public async Task Reassigned_picked_up_attempt_does_not_reuse_previous_drivers_handover_time()
+    {
+        var userId = Guid.NewGuid();
+        _user.UserId.Returns(userId);
+        var (_, stop, _) = await SeedAttemptAsync(
+            userId,
+            SubscriptionDayStatus.OutForDelivery,
+            OrderStatus.OnTheWay,
+            TripStopStatus.PickedUp,
+            activeAssignments: 1,
+            priorDriversWithHandover: 1);
+
+        var result = await CreateHandler().Handle(
+            new GetCustomerDeliveryWidgetQuery(ServiceDate, null), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Subject;
+        item.TripStopId.Should().Be(stop.Id);
+        item.DeliveryStatus.Should().Be(CustomerDeliveryStatusCodes.OutForDelivery);
+        item.PickedUpAtUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Multiple_active_assignments_suppress_destination_for_retained_attempt()
+    {
+        var userId = Guid.NewGuid();
+        _user.UserId.Returns(userId);
+        var (_, stop, _) = await SeedAttemptAsync(
+            userId,
+            SubscriptionDayStatus.OutForDelivery,
+            OrderStatus.OnTheWay,
+            TripStopStatus.Pending,
+            activeAssignments: 2);
+
+        var result = await CreateHandler().Handle(
+            new GetCustomerDeliveryWidgetQuery(ServiceDate, null), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Subject;
+        item.DeliveryStatus.Should().Be(CustomerDeliveryStatusCodes.TrackingUnavailable);
+        item.TripStopId.Should().Be(stop.Id);
+        item.DestinationAddress.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Conflicting_driver_handovers_suppress_destination_for_retained_attempt()
+    {
+        var userId = Guid.NewGuid();
+        _user.UserId.Returns(userId);
+        var (_, stop, _) = await SeedAttemptAsync(
+            userId,
+            SubscriptionDayStatus.OutForDelivery,
+            OrderStatus.OnTheWay,
+            TripStopStatus.PickedUp,
+            activeAssignments: 1,
+            priorDriversWithHandover: 1,
+            currentDriverHasHandover: true);
+
+        var result = await CreateHandler().Handle(
+            new GetCustomerDeliveryWidgetQuery(ServiceDate, null), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Subject;
+        item.DeliveryStatus.Should().Be(CustomerDeliveryStatusCodes.TrackingUnavailable);
+        item.TripStopId.Should().Be(stop.Id);
+        item.PickedUpAtUtc.Should().BeNull();
+        item.DestinationAddress.Should().BeNull();
+    }
+
+    [Fact]
     public async Task Delivered_box_keeps_driver_identity_but_never_location_or_eta()
     {
         var userId = Guid.NewGuid();
@@ -448,5 +601,64 @@ public sealed class CustomerDeliveryWidgetQueryTests
 
         result.IsFailure.Should().BeTrue();
         result.Error.Type.Should().Be(ErrorType.Forbidden);
+    }
+
+    [Fact]
+    public async Task Widget_items_expose_the_subscription_day_details_link_even_before_a_trip()
+    {
+        var userId = Guid.NewGuid();
+        _user.UserId.Returns(userId);
+        var subscription = await SeedIndividualAsync(userId);
+        var day = await _db.SubscriptionDays.SingleAsync(d => d.SubscriptionId == subscription.Id);
+        var handler = CreateHandler();
+
+        var result = await handler.Handle(new GetCustomerDeliveryWidgetQuery(ServiceDate, null), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Subject;
+        item.DeliveryDetailsUrl.Should().Be($"/api/v1/customer/subscription-days/{day.Id}/delivery-details");
+        item.DetailsUrl.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Driver_rating_uses_the_real_batched_aggregation_rounded_like_the_driver_profile()
+    {
+        var userId = Guid.NewGuid();
+        _user.UserId.Returns(userId);
+        var subscription = await SeedIndividualAsync(userId, SubscriptionDayStatus.OutForDelivery);
+        var day = await _db.SubscriptionDays.SingleAsync(d => d.SubscriptionId == subscription.Id);
+        var order = await SeedReadyOrderAsync(day);
+
+        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "سائق مُقيَّم", FullNameEn = "Rated driver" };
+        _db.DriverProfiles.Add(driver);
+        var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-R", Status = TripStatus.InProgress, PlannedDate = ServiceDate };
+        _db.Trips.Add(trip);
+        _db.DriverAssignments.Add(new DriverAssignment { TripId = trip.Id, DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = Now });
+        _db.TripStops.Add(new TripStop
+        {
+            TripId = trip.Id,
+            SubscriptionDayId = day.Id,
+            DailyOrderId = order.Id,
+            OrderCode = "#BX-RATE",
+            CustomerMaskedId = "CUST",
+            ZoneNameAr = "z",
+            ZoneNameEn = "z",
+            MealSummaryAr = "وجبة",
+            MealSummaryEn = "Meal",
+            SlotLabel = "lunch",
+            Status = TripStopStatus.PickedUp
+        });
+        _db.DriverRatings.AddRange(
+            new DriverRating { DriverProfileId = driver.Id, Score = 4 },
+            new DriverRating { DriverProfileId = driver.Id, Score = 5 });
+        await _db.SaveChangesAsync();
+
+        var handler = CreateHandler();
+        var result = await handler.Handle(new GetCustomerDeliveryWidgetQuery(ServiceDate, null), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value!.Items.Should().ContainSingle().Subject;
+        item.Driver!.Id.Should().Be(driver.Id);
+        item.Driver.Rating.Should().Be(4.5); // Math.Round(Average, 2) — same policy as the driver profile
     }
 }

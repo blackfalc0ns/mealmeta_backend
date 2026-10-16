@@ -321,7 +321,13 @@ public sealed class CustomerDeliveryReadService : ICustomerDeliveryReadService
             return null;
         }
 
-        return forAttempt.Max(h => h.HandedOverAtUtc!.Value);
+        var currentDriverHandovers = forAttempt
+            .Where(h => h.DriverProfileId == driverProfileId)
+            .ToList();
+
+        return currentDriverHandovers.Count == 0
+            ? null
+            : currentDriverHandovers.Max(h => h.HandedOverAtUtc!.Value);
     }
 
     private sealed record AttemptStopRow(

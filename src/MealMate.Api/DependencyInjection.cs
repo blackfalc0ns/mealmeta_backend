@@ -124,6 +124,15 @@ public static class DependencyInjection
         services.AddScoped<IAuthorizationHandler, DeliveryManagerOperationalAuthorizationHandler>();
         services.AddAuthorization(options =>
         {
+            options.AddPolicy(MealMate.Api.Realtime.CustomerDeliveryHub.CustomerPolicy, policy =>
+                policy.RequireAuthenticatedUser()
+                    .RequireAssertion(ctx =>
+                    {
+                        var userType = ctx.User.FindFirst(AppClaimTypes.UserType)?.Value
+                                       ?? ctx.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+                        return userType == MealMate.Domain.Enums.UserType.Customer.ToString();
+                    }));
+
             options.AddPolicy("RestaurantStaffPolicy", policy =>
                 policy.RequireAuthenticatedUser()
                       .RequireAssertion(ctx =>

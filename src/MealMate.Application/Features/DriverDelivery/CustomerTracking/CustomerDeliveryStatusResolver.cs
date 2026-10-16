@@ -72,7 +72,7 @@ public sealed record CustomerDeliveryStatusInput(
 /// <summary>
 /// Resolved customer delivery state for one subscription day. Texts are always provided
 /// in both languages so the mobile widget can switch without a refetch; callers pick the
-/// current-language field.
+/// current-language field. Wording comes from <see cref="CustomerDeliveryStatusTexts"/>.
 /// </summary>
 public sealed record CustomerDeliveryStatusSnapshot(
     string DeliveryStatus,
@@ -90,8 +90,8 @@ public sealed record CustomerDeliveryStatusSnapshot(
     public static CustomerDeliveryStatusSnapshot Unavailable(string reason, string? inconsistency)
         => new(
             CustomerDeliveryStatusCodes.TrackingUnavailable,
-            "حالة التتبع غير واضحة",
-            "Tracking unavailable",
+            CustomerDeliveryStatusTexts.TrackingUnavailable.Ar,
+            CustomerDeliveryStatusTexts.TrackingUnavailable.En,
             IsTerminal: false,
             IsTrackable: false,
             UnavailableReasonCode: CustomerDeliveryUnavailableReasons.TrackingUnavailable,
@@ -107,6 +107,7 @@ public sealed record CustomerDeliveryStatusSnapshot(
 /// Explicit named cases only — no numeric enum ordering decides any event or completion.
 /// A terminal delivered day is never rewound by a ready or assignment request, and a
 /// failed/returned/cancelled/frozen outcome never completes the success timeline.
+/// Display texts come from the shared bilingual catalog; decision rules never depend on them.
 /// </summary>
 public static class CustomerDeliveryStatusResolver
 {
@@ -116,9 +117,9 @@ public static class CustomerDeliveryStatusResolver
         switch (input.DayStatus)
         {
             case SubscriptionDayStatus.Cancelled:
-                return Snapshot(CustomerDeliveryStatusCodes.Cancelled, "ملغى", "Cancelled", isTerminal: true);
+                return Snapshot(CustomerDeliveryStatusCodes.Cancelled, isTerminal: true);
             case SubscriptionDayStatus.Frozen:
-                return Snapshot(CustomerDeliveryStatusCodes.Frozen, "اليوم مجمّد", "Day frozen", isTerminal: true);
+                return Snapshot(CustomerDeliveryStatusCodes.Frozen, isTerminal: true);
         }
 
         // Ambiguous current attempts: refuse to select an arbitrary box or timeline.
@@ -135,8 +136,6 @@ public static class CustomerDeliveryStatusResolver
         {
             return Snapshot(
                 CustomerDeliveryStatusCodes.Delivered,
-                "تم التسليم",
-                "Delivered",
                 isTerminal: true,
                 readyAtUtc: input.ReadyAtUtc,
                 pickedUpAtUtc: input.PickedUpAtUtc,
@@ -153,8 +152,6 @@ public static class CustomerDeliveryStatusResolver
         {
             return Snapshot(
                 CustomerDeliveryStatusCodes.Failed,
-                "تعذر التسليم",
-                "Delivery failed",
                 isTerminal: true,
                 readyAtUtc: input.ReadyAtUtc,
                 pickedUpAtUtc: input.PickedUpAtUtc,
@@ -174,8 +171,6 @@ public static class CustomerDeliveryStatusResolver
                 case TripStopStatus.Delivered:
                     return Snapshot(
                         CustomerDeliveryStatusCodes.Delivered,
-                        "تم التسليم",
-                        "Delivered",
                         isTerminal: true,
                         readyAtUtc: input.ReadyAtUtc,
                         pickedUpAtUtc: input.PickedUpAtUtc,
@@ -186,8 +181,6 @@ public static class CustomerDeliveryStatusResolver
                 case TripStopStatus.Failed:
                     return Snapshot(
                         CustomerDeliveryStatusCodes.Failed,
-                        "تعذر التسليم",
-                        "Delivery failed",
                         isTerminal: true,
                         readyAtUtc: input.ReadyAtUtc,
                         pickedUpAtUtc: input.PickedUpAtUtc,
@@ -200,8 +193,6 @@ public static class CustomerDeliveryStatusResolver
                 case TripStopStatus.ReturnedToKitchen:
                     return Snapshot(
                         CustomerDeliveryStatusCodes.ReturnedToKitchen,
-                        "أُعيد للمطعم",
-                        "Returned to restaurant",
                         isTerminal: true,
                         readyAtUtc: input.ReadyAtUtc,
                         pickedUpAtUtc: input.PickedUpAtUtc,
@@ -216,8 +207,6 @@ public static class CustomerDeliveryStatusResolver
                     // handover; null when the legacy rows never recorded one — never the trip start).
                     return Snapshot(
                         CustomerDeliveryStatusCodes.OutForDelivery,
-                        "خرج للتوصيل",
-                        "Out for delivery",
                         isTerminal: false,
                         isTrackable: true,
                         readyAtUtc: input.ReadyAtUtc,
@@ -242,8 +231,6 @@ public static class CustomerDeliveryStatusResolver
         {
             return Snapshot(
                 CustomerDeliveryStatusCodes.ReadyForPickup,
-                "تم التجهيز",
-                "Ready for pickup",
                 isTerminal: false,
                 unavailableReason: CustomerDeliveryUnavailableReasons.DriverNotAssigned,
                 readyAtUtc: input.ReadyAtUtc,
@@ -256,8 +243,6 @@ public static class CustomerDeliveryStatusResolver
         {
             return Snapshot(
                 CustomerDeliveryStatusCodes.OutForDelivery,
-                "خرج للتوصيل",
-                "Out for delivery",
                 isTerminal: false,
                 readyAtUtc: input.ReadyAtUtc,
                 pickedUpAtUtc: input.PickedUpAtUtc,
@@ -269,8 +254,6 @@ public static class CustomerDeliveryStatusResolver
         {
             return Snapshot(
                 CustomerDeliveryStatusCodes.Delivered,
-                "تم التسليم",
-                "Delivered",
                 isTerminal: true,
                 readyAtUtc: input.ReadyAtUtc,
                 pickedUpAtUtc: input.PickedUpAtUtc,
@@ -284,8 +267,6 @@ public static class CustomerDeliveryStatusResolver
         {
             return Snapshot(
                 CustomerDeliveryStatusCodes.Failed,
-                "تعذر التسليم",
-                "Delivery failed",
                 isTerminal: true,
                 readyAtUtc: input.ReadyAtUtc,
                 pickedUpAtUtc: input.PickedUpAtUtc);
@@ -295,8 +276,6 @@ public static class CustomerDeliveryStatusResolver
         {
             return Snapshot(
                 CustomerDeliveryStatusCodes.ReturnedToKitchen,
-                "أُعيد للمطعم",
-                "Returned to restaurant",
                 isTerminal: true,
                 readyAtUtc: input.ReadyAtUtc,
                 pickedUpAtUtc: input.PickedUpAtUtc);
@@ -307,8 +286,6 @@ public static class CustomerDeliveryStatusResolver
             input.OrderStatus == OrderStatus.Preparing
                 ? CustomerDeliveryStatusCodes.Preparing
                 : CustomerDeliveryStatusCodes.NotStarted,
-            input.OrderStatus == OrderStatus.Preparing ? "جارٍ التجهيز" : "لم يبدأ التجهيز",
-            input.OrderStatus == OrderStatus.Preparing ? "Preparing" : "Preparation not started",
             isTerminal: false,
             readyAtUtc: null);
     }
@@ -343,8 +320,6 @@ public static class CustomerDeliveryStatusResolver
 
     private static CustomerDeliveryStatusSnapshot Snapshot(
         string status,
-        string textAr,
-        string textEn,
         bool isTerminal,
         bool isTrackable = false,
         string? unavailableReason = null,
@@ -353,10 +328,12 @@ public static class CustomerDeliveryStatusResolver
         DateTime? arrivedAtUtc = null,
         DateTime? deliveredAtUtc = null,
         string? inconsistency = null)
-        => new(
+    {
+        var text = CustomerDeliveryStatusTexts.For(status);
+        return new(
             status,
-            textAr,
-            textEn,
+            text.Ar,
+            text.En,
             isTerminal,
             isTrackable,
             unavailableReason,
@@ -365,4 +342,5 @@ public static class CustomerDeliveryStatusResolver
             pickedUpAtUtc,
             arrivedAtUtc,
             deliveredAtUtc);
+    }
 }
