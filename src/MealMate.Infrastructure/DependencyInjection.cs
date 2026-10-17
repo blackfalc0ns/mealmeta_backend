@@ -108,7 +108,11 @@ public static class DependencyInjection
         // Payzah Payment Integration Service
         services.AddHttpClient<IPaymentGatewayService, PayzahPaymentService>(client =>
         {
-            client.Timeout = TimeSpan.FromSeconds(30);
+            // Keep the gateway deadline below the mobile client's 30-second receive
+            // timeout. A stalled Payzah request must become the API's existing
+            // checkout.payment_init_failed response rather than an indistinguishable
+            // client-side Dio timeout.
+            client.Timeout = TimeSpan.FromSeconds(20);
         }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 
         services
