@@ -470,6 +470,14 @@ public static class FoodPreferenceNoneCodes
     public const string NoDislikes = "NONE";
     public const string NoDiet = "NONE";
 
+    // The family flow uses its own UI control codes for the same none choices;
+    // both vocabularies are accepted everywhere and never stored as rows.
+    public const string NoAllergiesControl = "NO_ALLERGIES";
+    public const string NoDietaryRestrictionsControl = "NO_DIETARY_RESTRICTIONS";
+
     public static bool IsNone(string? code)
-        => !string.IsNullOrWhiteSpace(code) && code.Equals("NONE", StringComparison.OrdinalIgnoreCase);
+        => !string.IsNullOrWhiteSpace(code)
+            && (code.Equals("NONE", StringComparison.OrdinalIgnoreCase)
+                || code.Equals(NoAllergiesControl, StringComparison.OrdinalIgnoreCase)
+                || code.Equals(NoDietaryRestrictionsControl, StringComparison.OrdinalIgnoreCase));
 }

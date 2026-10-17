@@ -235,6 +235,23 @@ public sealed class CustomerFoodPreferencesTests
     }
 
     [Fact]
+    public async Task Save_dietary_accepts_family_none_control_code()
+    {
+        var fixture = await SeedAsync(seedPreferences: false);
+        var now = new DateTime(2026, 8, 18, 10, 6, 0, DateTimeKind.Utc);
+        fixture.Clock.UtcNow.Returns(now);
+
+        var result = await fixture.Handler.Handle(
+            new SaveCustomerDietaryPreferencesCommand(["NO_DIETARY_RESTRICTIONS"]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var profile = await fixture.Db.CustomerProfiles.SingleAsync(x => x.UserId == fixture.CustomerId);
+        Assert.Equal(now, profile.DietaryPreferencesCompletedAtUtc);
+        Assert.Empty(result.Value.DietaryPreferenceCodes ?? []);
+    }
+
+    [Fact]
     public async Task Save_food_preferences_marks_allergies_and_dietary_completed()
     {
         var fixture = await SeedAsync(seedPreferences: false);
