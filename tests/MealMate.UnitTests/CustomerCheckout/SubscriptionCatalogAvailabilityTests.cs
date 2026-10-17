@@ -128,7 +128,7 @@ public sealed class SubscriptionCatalogAvailabilityTests
     }
 
     [Fact]
-    public async Task Programs_with_incomplete_allergies_report_allergies_required_and_cannot_select()
+    public async Task Programs_with_incomplete_allergies_remain_selectable_when_covered()
     {
         var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, allergiesCompleted: false);
 
@@ -136,9 +136,8 @@ public sealed class SubscriptionCatalogAvailabilityTests
 
         envelope.Value.HasDeliveryAddress.Should().BeTrue();
         var program = envelope.Value.Items.Single();
-        program.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AllergiesRequired);
-        program.Availability.CanSelect.Should().BeFalse();
-        program.Availability.MessageCode.Should().Be("checkout.allergies_required");
+        program.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.SelectionRequired);
+        program.Availability.CanSelect.Should().BeTrue();
     }
 
     [Theory]
@@ -161,7 +160,7 @@ public sealed class SubscriptionCatalogAvailabilityTests
     }
 
     [Fact]
-    public async Task Tiers_with_missing_profile_step_and_price_keep_prerequisite_reason()
+    public async Task Tiers_with_missing_profile_step_and_price_report_pricing_unavailable()
     {
         var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, allergiesCompleted: false);
         var sender = Substitute.For<ISender>();
@@ -177,22 +176,19 @@ public sealed class SubscriptionCatalogAvailabilityTests
 
         var tier = envelope.Value.Items.Single();
         tier.Availability.CanSelect.Should().BeFalse();
-        tier.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AllergiesRequired);
-        tier.Availability.MessageCode.Should().Be("checkout.allergies_required");
-        tier.Availability.MissingStep.Should().Be(SubscriptionCheckoutGateCodes.Allergies);
+        tier.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.PricingUnavailable);
     }
 
     [Fact]
-    public async Task Programs_with_incomplete_dietary_preferences_report_dietary_required_and_cannot_select()
+    public async Task Programs_with_incomplete_dietary_preferences_remain_selectable_when_covered()
     {
         var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, dietaryCompleted: false);
 
         var envelope = await fx.Service.GetProgramsAsync(fx.CustomerId, page: null);
 
         var program = envelope.Value.Items.Single();
-        program.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.DietaryPreferencesRequired);
-        program.Availability.CanSelect.Should().BeFalse();
-        program.Availability.MessageCode.Should().Be("checkout.dietary_preferences_required");
+        program.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.SelectionRequired);
+        program.Availability.CanSelect.Should().BeTrue();
     }
 
     [Fact]
@@ -270,29 +266,27 @@ public sealed class SubscriptionCatalogAvailabilityTests
     }
 
     [Fact]
-    public async Task Bundles_with_incomplete_allergies_report_allergies_required_and_cannot_select()
+    public async Task Bundles_with_incomplete_allergies_remain_selectable_when_covered()
     {
         var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, allergiesCompleted: false);
 
         var envelope = await fx.Service.GetBundlesAsync(fx.ProgramId, fx.CustomerId, page: null);
 
         var bundle = envelope.Value.Items.Single();
-        bundle.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AllergiesRequired);
-        bundle.Availability.CanSelect.Should().BeFalse();
-        bundle.Availability.MessageCode.Should().Be("checkout.allergies_required");
+        bundle.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.SelectionRequired);
+        bundle.Availability.CanSelect.Should().BeTrue();
     }
 
     [Fact]
-    public async Task Bundles_with_incomplete_dietary_preferences_report_dietary_required_and_cannot_select()
+    public async Task Bundles_with_incomplete_dietary_preferences_remain_selectable_when_covered()
     {
         var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, dietaryCompleted: false);
 
         var envelope = await fx.Service.GetBundlesAsync(fx.ProgramId, fx.CustomerId, page: null);
 
         var bundle = envelope.Value.Items.Single();
-        bundle.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.DietaryPreferencesRequired);
-        bundle.Availability.CanSelect.Should().BeFalse();
-        bundle.Availability.MessageCode.Should().Be("checkout.dietary_preferences_required");
+        bundle.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.SelectionRequired);
+        bundle.Availability.CanSelect.Should().BeTrue();
     }
 
     [Fact]
@@ -311,7 +305,7 @@ public sealed class SubscriptionCatalogAvailabilityTests
     }
 
     [Fact]
-    public async Task Tiers_with_incomplete_allergies_report_allergies_required_and_cannot_select()
+    public async Task Tiers_with_incomplete_allergies_remain_selectable_when_covered()
     {
         var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, classifyRestaurant: true, allergiesCompleted: false);
         var service = CreateService(fx, catalogTiers: new[] { RestaurantTier.Basic });
@@ -319,13 +313,12 @@ public sealed class SubscriptionCatalogAvailabilityTests
         var envelope = await service.GetTiersAsync(fx.ProgramId, fx.BundleId, fx.CustomerId, null, false, null, null);
 
         var tier = envelope.Value.Items.Single();
-        tier.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AllergiesRequired);
-        tier.Availability.CanSelect.Should().BeFalse();
-        tier.Availability.MessageCode.Should().Be("checkout.allergies_required");
+        tier.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.SelectionRequired);
+        tier.Availability.CanSelect.Should().BeTrue();
     }
 
     [Fact]
-    public async Task Tiers_with_incomplete_dietary_preferences_report_dietary_required_and_cannot_select()
+    public async Task Tiers_with_incomplete_dietary_preferences_remain_selectable_when_covered()
     {
         var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, classifyRestaurant: true, dietaryCompleted: false);
         var service = CreateService(fx, catalogTiers: new[] { RestaurantTier.Basic });
@@ -333,9 +326,8 @@ public sealed class SubscriptionCatalogAvailabilityTests
         var envelope = await service.GetTiersAsync(fx.ProgramId, fx.BundleId, fx.CustomerId, null, false, null, null);
 
         var tier = envelope.Value.Items.Single();
-        tier.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.DietaryPreferencesRequired);
-        tier.Availability.CanSelect.Should().BeFalse();
-        tier.Availability.MessageCode.Should().Be("checkout.dietary_preferences_required");
+        tier.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.SelectionRequired);
+        tier.Availability.CanSelect.Should().BeTrue();
     }
 
     [Fact]

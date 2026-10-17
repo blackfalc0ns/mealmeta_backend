@@ -144,9 +144,9 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         var activeAddress = prerequisites.ActiveAddress;
         var coveredSet = await CoverByRegionAsync(offeredRestaurantIds, activeAddress?.RegionId, ct);
 
-        var prepared = prerequisites.IsMet
-            ? await _preparation.ResolveAsync(customerUserId, activeAddress!.RegionId, validBundleIds, ct)
-            : new Dictionary<Guid, HashSet<Guid>>();
+        var prepared = activeAddress is null
+            ? new Dictionary<Guid, HashSet<Guid>>()
+            : await _preparation.ResolveAsync(customerUserId, activeAddress.RegionId, validBundleIds, ct);
 
         var generalCoverage = activeAddress is null
             ? null
@@ -218,9 +218,9 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
         var activeAddress = prerequisites.ActiveAddress;
         var coveredSet = await CoverByRegionAsync(offeredRestaurantIds, activeAddress?.RegionId, ct);
-        var prepared = prerequisites.IsMet
-            ? await _preparation.ResolveAsync(customerUserId, activeAddress!.RegionId, bundleIds, ct)
-            : new Dictionary<Guid, HashSet<Guid>>();
+        var prepared = activeAddress is null
+            ? new Dictionary<Guid, HashSet<Guid>>()
+            : await _preparation.ResolveAsync(customerUserId, activeAddress.RegionId, bundleIds, ct);
         var logos = await LoadRestaurantLogoUrlsAsync(approvedActiveSet, ct);
 
         var pageRequest = page ?? new PageRequest();
@@ -306,9 +306,9 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
         var classificationRestaurantIds = classificationByRestaurant.Keys.ToList();
 
         var coveredSet = await CoverByRegionAsync(classificationRestaurantIds, activeAddress?.RegionId, ct);
-        var prepared = prerequisites.IsMet
-            ? await _preparation.ResolveAsync(customerUserId, activeAddress!.RegionId, [bundleId], ct)
-            : new Dictionary<Guid, HashSet<Guid>>();
+        var prepared = activeAddress is null
+            ? new Dictionary<Guid, HashSet<Guid>>()
+            : await _preparation.ResolveAsync(customerUserId, activeAddress.RegionId, [bundleId], ct);
         var preparedIds = prepared.GetValueOrDefault(bundleId) ?? [];
 
         var fridayWorkingIds = await LoadFridayWorkingIdsAsync(classificationRestaurantIds, ct);
@@ -395,16 +395,16 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
             string? missingStep = null;
             string? actionEndpoint = null;
 
-            if (!prerequisites.IsMet)
+            if (!prerequisites.HasAddress)
             {
                 scope = CatalogScopes.Coverage;
-                status = prerequisites.Status!;
+                status = SubscriptionCatalogAvailabilityStatus.AddressRequired;
                 canSelect = false;
-                reportedCovered = prerequisites.HasAddress ? coveredCount : offeredCount;
+                reportedCovered = offeredCount;
                 eligibleCount = null;
-                messageCode = prerequisites.MessageCode;
-                missingStep = prerequisites.MissingStep;
-                actionEndpoint = prerequisites.ActionEndpoint;
+                messageCode = "checkout.address_required";
+                missingStep = SubscriptionCheckoutGateCodes.Address;
+                actionEndpoint = "POST /api/v1/customers/me/addresses";
             }
             else if (coveredCount == 0)
             {
@@ -452,7 +452,7 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
 
             // A missing sale price with the duration already chosen is its own disabled state;
             // it never fabricates a zero price.
-            if (prerequisites.IsMet && durationDays.HasValue && !price.Valid)
+            if (durationDays.HasValue && !price.Valid)
             {
                 status = SubscriptionCatalogAvailabilityStatus.PricingUnavailable;
                 canSelect = false;
@@ -513,18 +513,19 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
     internal static SubscriptionCatalogOptionAvailabilityDto ResolveCoverageAvailability(
         CustomerProfilePrerequisitesEvaluation prerequisites, int coveredCount, int offeredCount)
     {
-        if (!prerequisites.IsMet)
+        // Profile steps (allergies/dietary) are enforced at the summary/checkout
+        // readiness gate, not in the catalog: browsing and selecting stay open.
+        if (!prerequisites.HasAddress)
         {
-            var reportedCount = prerequisites.HasAddress ? coveredCount : offeredCount;
             return new SubscriptionCatalogOptionAvailabilityDto(
                 CatalogScopes.Coverage,
-                prerequisites.Status!,
+                SubscriptionCatalogAvailabilityStatus.AddressRequired,
                 CanSelect: false,
-                CoveredRestaurantCount: reportedCount,
+                CoveredRestaurantCount: offeredCount,
                 EligibleRestaurantCount: null,
-                MessageCode: prerequisites.MessageCode,
-                MissingStep: prerequisites.MissingStep,
-                ActionEndpoint: prerequisites.ActionEndpoint);
+                MessageCode: "checkout.address_required",
+                MissingStep: SubscriptionCheckoutGateCodes.Address,
+                ActionEndpoint: "POST /api/v1/customers/me/addresses");
         }
 
         if (coveredCount == 0)
@@ -549,7 +550,7 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
 
     internal static SubscriptionCatalogOptionAvailabilityDto ApplyPreparationAvailability(
         SubscriptionCatalogOptionAvailabilityDto coverage, CustomerProfilePrerequisitesEvaluation prerequisites, int preparedCount)
-        => prerequisites.IsMet && coverage.CanSelect && preparedCount == 0
+        => coverage.CanSelect && preparedCount == 0
             ? coverage with { CanSelect = false, Status = SubscriptionCatalogAvailabilityStatus.NoRestaurantsForSelection,
                 MessageCode = "subscription_flow.no_prepared_restaurants" }
             : coverage;
