@@ -722,7 +722,24 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
 
         var activeIds = await FamilyCheckoutGate.ActiveAccessMemberIdsAsync(_db, group, cancellationToken);
         var selectedIds = await FamilyCheckoutSelectionService.GetSelectedMemberIdsOrNullAsync(_db, group.Id, cancellationToken);
-        if (selectedIds is null || selectedIds.Count == 0)
+        FamilyCheckoutBatch? draft = null;
+        if (selectedIds is null)
+        {
+            // No draft batch has ever been materialized: no explicit selection
+            // exists. Apply the same default the summary/current screens display —
+            // every active, unsubscribed member with a pricable plan subscribes
+            // now until the customer explicitly defers one.
+            var defaultMembers = group.Members
+                .Where(x => activeIds.Contains(x.Id) && x.MemberSubscriptionId is null
+                    && FamilyMemberPlanRules.HasPricablePlan(x))
+                .ToList();
+            if (defaultMembers.Count == 0)
+                return Error.Conflict("family.checkout_no_selection", "family.checkout_no_selection");
+            selectedIds = defaultMembers.Select(x => x.Id).ToHashSet();
+            draft = await FamilyCheckoutSelectionService.EnsureDraftBatchAsync(
+                _db, group, managerId, defaultMembers, _clock.UtcNow, cancellationToken);
+        }
+        if (selectedIds.Count == 0)
             return Error.Conflict("family.checkout_no_selection", "family.checkout_no_selection");
         var members = group.Members.Where(x => activeIds.Contains(x.Id))
             .OrderBy(x => x.Id).ToList();
@@ -740,7 +757,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             return Error.Conflict("family.checkout_no_selection", "family.checkout_no_selection");
         if (payableMembers.Any(x => !FamilyMemberPlanRules.HasPricablePlan(x)))
             return Error.Conflict("family.member_incomplete", "family.member_incomplete");
-        var draft = await _db.FamilyCheckoutBatches.Include(x => x.Lines)
+        draft ??= await _db.FamilyCheckoutBatches.Include(x => x.Lines)
             .SingleAsync(x => x.FamilyGroupId == group.Id && x.Status == FamilyCheckoutBatchStatus.Draft, cancellationToken);
         if ((request.BatchId.HasValue && request.BatchId != draft.Id)
             || (request.BatchVersion.HasValue && request.BatchVersion != draft.Version))

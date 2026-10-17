@@ -299,12 +299,36 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
                 || x.Status == SubscriptionStatus.SuspendedForReview), cancellationToken);
     }
 
-    private async Task<FamilyCheckoutBatch> GetOrCreateDraftBatchAsync(
+    private Task<FamilyCheckoutBatch> GetOrCreateDraftBatchAsync(
         FamilyGroup group,
         Guid managerId,
         CancellationToken cancellationToken)
     {
-        var open = await _db.FamilyCheckoutBatches
+        // Without an open batch, current/summary expose unpaid active members as
+        // selected. Persist that same baseline before editing one member; otherwise
+        // creating the first line silently turns every other displayed choice off.
+        var previouslySelected = _db.FamilyMembers.AsNoTracking()
+            .Where(m => m.FamilyGroupId == group.Id && m.MemberSubscriptionId == null
+                && !_db.FamilyMemberAccesses.Any(a => a.FamilyMemberId == m.Id && a.RemovedAtUtc != null))
+            .ToList();
+        return EnsureDraftBatchAsync(_db, group, managerId, previouslySelected, _clock.UtcNow, cancellationToken);
+    }
+
+    /// <summary>
+    /// Creates (or returns) the open draft batch and materializes CheckoutSelected
+    /// lines for the given members. Baseline persistence is lazy: the first
+    /// explicit edit or checkout writes the same choices the summary/current
+    /// screens already display, so nothing is charged that was never shown.
+    /// </summary>
+    internal static async Task<FamilyCheckoutBatch> EnsureDraftBatchAsync(
+        IAppDbContext db,
+        FamilyGroup group,
+        Guid managerId,
+        IReadOnlyList<FamilyMember> selectedMembers,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var open = await db.FamilyCheckoutBatches
             .FirstOrDefaultAsync(
                 x => x.FamilyGroupId == group.Id
                     && (x.Status == FamilyCheckoutBatchStatus.Draft
@@ -323,16 +347,9 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
             // key would collide with the closed batch of a previous purchase cycle.
             IdempotencyKey = "draft-" + Guid.NewGuid().ToString("N"),
             Status = FamilyCheckoutBatchStatus.Draft,
-            CreatedAtUtc = _clock.UtcNow,
+            CreatedAtUtc = nowUtc,
         };
-        // Without an open batch, current/summary expose unpaid active members as
-        // selected. Persist that same baseline before editing one member; otherwise
-        // creating the first line silently turns every other displayed choice off.
-        var previouslySelected = await _db.FamilyMembers.AsNoTracking()
-            .Where(m => m.FamilyGroupId == group.Id && m.MemberSubscriptionId == null
-                && !_db.FamilyMemberAccesses.Any(a => a.FamilyMemberId == m.Id && a.RemovedAtUtc != null))
-            .ToListAsync(cancellationToken);
-        foreach (var member in previouslySelected)
+        foreach (var member in selectedMembers)
         {
             batch.Lines.Add(new FamilyCheckoutBatchLine
             {
@@ -345,19 +362,19 @@ public sealed class FamilyCheckoutSelectionService : IFamilyCheckoutSelectionSer
                 StartDate = member.StartDate,
                 DeliveryAddressId = member.DeliveryAddressId,
                 CheckoutSelected = true,
-                CreatedAtUtc = _clock.UtcNow,
+                CreatedAtUtc = nowUtc,
             });
         }
-        _db.FamilyCheckoutBatches.Add(batch);
+        db.FamilyCheckoutBatches.Add(batch);
         try
         {
-            await _db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateException)
         {
-            if (_db is DbContext efContext) efContext.ChangeTracker.Clear();
+            if (db is DbContext efContext) efContext.ChangeTracker.Clear();
             // A concurrent manager request created the draft batch first.
-            batch = await _db.FamilyCheckoutBatches
+            batch = await db.FamilyCheckoutBatches
                 .FirstAsync(
                     x => x.FamilyGroupId == group.Id && x.Status == FamilyCheckoutBatchStatus.Draft,
                     cancellationToken);
