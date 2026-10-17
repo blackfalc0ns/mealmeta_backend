@@ -192,6 +192,44 @@ public sealed class SubscriptionCatalogAvailabilityTests
     }
 
     [Fact]
+    public async Task Programs_envelope_surfaces_required_profile_step_for_next_navigation()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, allergiesCompleted: false);
+
+        var envelope = await fx.Service.GetProgramsAsync(fx.CustomerId, page: null);
+
+        var step = envelope.Value.RequiredProfileStep;
+        step.Should().NotBeNull("the app routes the customer to their pending profile screen before checkout");
+        step!.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.AllergiesRequired);
+        step.MissingStep.Should().Be(SubscriptionCheckoutGateCodes.Allergies);
+        step.ActionEndpoint.Should().Be("GET /api/v1/customers/me/food-preferences/allergies");
+        step.MessageCode.Should().Be("checkout.allergies_required");
+    }
+
+    [Fact]
+    public async Task Programs_envelope_has_no_required_profile_step_when_profile_is_complete()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, allergiesCompleted: true, dietaryCompleted: true);
+
+        var envelope = await fx.Service.GetProgramsAsync(fx.CustomerId, page: null);
+
+        envelope.Value.RequiredProfileStep.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Bundles_envelope_surfaces_required_profile_step_for_next_navigation()
+    {
+        var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, dietaryCompleted: false);
+
+        var envelope = await fx.Service.GetBundlesAsync(fx.ProgramId, fx.CustomerId, page: null);
+
+        var step = envelope.Value.RequiredProfileStep;
+        step.Should().NotBeNull();
+        step!.MissingStep.Should().Be(SubscriptionCheckoutGateCodes.DietaryPreferences);
+        step.ActionEndpoint.Should().Be("GET /api/v1/customers/me/food-preferences/dietary");
+    }
+
+    [Fact]
     public async Task Programs_with_explicit_empty_allergies_and_dietary_preferences_canSelect_is_true()
     {
         var fx = await SeedBasicAsync(withAddress: true, coverRegion: true, allergiesCompleted: true, dietaryCompleted: true);

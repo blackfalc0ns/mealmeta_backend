@@ -80,6 +80,16 @@ public sealed record SubscriptionCatalogOptionAvailabilityDto(
 
 public sealed record SubscriptionCatalogOptionDto<T>(T Option, SubscriptionCatalogOptionAvailabilityDto Availability);
 
+/// <summary>The next profile step (allergies or dietary preferences) the customer must
+/// complete before checkout. The catalog never blocks selection on it; screens use it when
+/// the customer navigates past the catalog toward the summary so the pending step's screen
+/// comes first. Null once the profile is complete.</summary>
+public sealed record SubscriptionProfileStepRequirementDto(
+    string Status,
+    string MessageCode,
+    string MissingStep,
+    string ActionEndpoint);
+
 /// <summary>Paged programs envelope; AddressCoverage is the general (program-independent)
 /// coverage verdict of the active address so "nothing delivers here" is distinguishable from
 /// "nothing offers this program".</summary>
@@ -87,13 +97,15 @@ public sealed record SubscriptionCatalogProgramsEnvelopeDto(
     bool HasDeliveryAddress,
     SubscriptionCatalogOptionAvailabilityDto AddressCoverage,
     CustomerPaginationMetaDto? Pagination,
-    IReadOnlyList<SubscriptionCatalogOptionDto<CustomerProgramCardDto>> Items);
+    IReadOnlyList<SubscriptionCatalogOptionDto<CustomerProgramCardDto>> Items,
+    SubscriptionProfileStepRequirementDto? RequiredProfileStep = null);
 
 public sealed record SubscriptionCatalogBundlesEnvelopeDto(
     Guid ProgramId,
     bool HasDeliveryAddress,
     CustomerPaginationMetaDto? Pagination,
-    IReadOnlyList<SubscriptionCatalogOptionDto<CustomerBundleCardDto>> Items);
+    IReadOnlyList<SubscriptionCatalogOptionDto<CustomerBundleCardDto>> Items,
+    SubscriptionProfileStepRequirementDto? RequiredProfileStep = null);
 
 public sealed record SubscriptionCatalogTiersEnvelopeDto(
     Guid ProgramId,
@@ -101,7 +113,8 @@ public sealed record SubscriptionCatalogTiersEnvelopeDto(
     bool HasDeliveryAddress,
     bool PeriodContextComplete,
     CustomerPaginationMetaDto? Pagination,
-    IReadOnlyList<SubscriptionCatalogOptionDto<CustomerTierOptionDto>> Items);
+    IReadOnlyList<SubscriptionCatalogOptionDto<CustomerTierOptionDto>> Items,
+    SubscriptionProfileStepRequirementDto? RequiredProfileStep = null);
 
 /// <summary>Mobile design choice for the classification-selection screen, picked by name and number.</summary>
 public sealed record CustomerTierThemeDto(int DesignId, string DesignName);

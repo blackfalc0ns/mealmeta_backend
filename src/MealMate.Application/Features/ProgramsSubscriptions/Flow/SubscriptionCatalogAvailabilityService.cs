@@ -183,7 +183,8 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
             activeAddress is not null,
             AddressCoverageAvailability(prerequisites, generalCoverage),
             pagination,
-            visible);
+            visible,
+            ProfileStepRequirement(prerequisites));
     }
 
     public async Task<Result<SubscriptionCatalogBundlesEnvelopeDto>> GetBundlesAsync(Guid programId, Guid customerUserId, PageRequest? page, CancellationToken ct = default)
@@ -269,7 +270,8 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
             programId,
             activeAddress is not null,
             pagination,
-            visible);
+            visible,
+            ProfileStepRequirement(prerequisites));
     }
 
     public async Task<Result<SubscriptionCatalogTiersEnvelopeDto>> GetTiersAsync(
@@ -492,8 +494,15 @@ public sealed class SubscriptionCatalogAvailabilityService : ISubscriptionCatalo
             activeAddress is not null,
             periodContextComplete,
             pagination,
-            visible);
+            visible,
+            ProfileStepRequirement(prerequisites));
     }
+
+    private static SubscriptionProfileStepRequirementDto? ProfileStepRequirement(
+        CustomerProfilePrerequisitesEvaluation prerequisites)
+        => prerequisites.HasAddress && !prerequisites.IsMet
+            ? new(prerequisites.Status!, prerequisites.MessageCode!, prerequisites.MissingStep!, prerequisites.ActionEndpoint!)
+            : null;
 
     internal static class CatalogScopes
     {
