@@ -614,20 +614,72 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         }
         catch (Exception)
         {
-            // A timeout does not prove the provider failed to create an invoice.
-            // Preserve the attempt and reservation for financial reconciliation.
+            // Product decision: an initialization failure (including a timeout)
+            // never forces a review stop. The batch is marked Failed and the
+            // group returns to Draft so the customer can retry the payment
+            // immediately, without waiting for the 15-minute expiry worker.
             if (_db is DbContext context) context.ChangeTracker.Clear();
             await _transactions.ExecuteAsync(async ct =>
             {
                 await _locks.LockFamilyGroupAsync(groupId.Value, ct);
-                var batch = await _db.FamilyCheckoutBatches.SingleAsync(x => x.Id == reservation.BatchId, ct);
+                var batch = await _db.FamilyCheckoutBatches.Include(x => x.Lines)
+                    .SingleAsync(x => x.Id == reservation.BatchId, ct);
                 var attempt = await _db.FamilyCheckoutPaymentAttempts.SingleAsync(x => x.Id == reservation.AttemptId, ct);
-                batch.Status = FamilyCheckoutBatchStatus.ReviewRequired;
-                attempt.ResultCode = "InitializationUncertain";
+                batch.Status = FamilyCheckoutBatchStatus.Failed;
+                attempt.ResultCode = "Failed";
+                attempt.Version++;
+
+                // Cancel this attempt's abandoned reservations and release their
+                // capacity holds — mirroring the hold-expiry worker — so the
+                // retry is not blocked by stale PendingPayment rows.
+                var reservedIds = batch.Lines.Where(x => x.SubscriptionId is not null)
+                    .Select(x => x.SubscriptionId!.Value).ToList();
+                var reservedSubs = await _db.Subscriptions
+                    .Where(x => reservedIds.Contains(x.Id) && x.Status == SubscriptionStatus.PendingPayment)
+                    .ToListAsync(ct);
+                foreach (var sub in reservedSubs)
+                {
+                    var holds = await _db.CapacityHolds
+                        .Where(x => x.SubscriptionId == sub.Id && x.Status == CapacityHoldStatus.PendingPayment)
+                        .ToListAsync(ct);
+                    if (holds.Count > 0)
+                        await _capacityLock.AcquireAsync(holds[0].RestaurantId,
+                            holds.Select(x => x.ServiceDate).ToList(), ct);
+                    foreach (var hold in holds)
+                    {
+                        hold.Status = CapacityHoldStatus.Released;
+                        hold.ReleasedAtUtc = _clock.UtcNow;
+                    }
+                    if (_coupons is not null)
+                        await _coupons.ReleaseCheckoutRedemptionAsync(sub.Id, ct);
+                    var oldStatus = sub.Status;
+                    sub.Status = SubscriptionStatus.Cancelled;
+                    sub.LastOperationAtUtc = _clock.UtcNow;
+                    _db.SubscriptionOperations.Add(new SubscriptionOperation
+                    {
+                        SubscriptionId = sub.Id,
+                        OperationType = "CHECKOUT_INITIALIZATION_FAILED",
+                        PreviousStatus = oldStatus,
+                        NewStatus = SubscriptionStatus.Cancelled,
+                        Reason = "Payment initialization failed; the reservation was released for immediate retry.",
+                        PerformedByUserId = Guid.Empty,
+                        PerformedByUserType = UserType.Admin,
+                        TimestampUtc = _clock.UtcNow,
+                    });
+                }
+
+                var reverted = await _db.FamilyGroups.SingleAsync(x => x.Id == groupId.Value, ct);
+                if (reverted.Status == FamilyGroupStatus.CheckoutPending)
+                {
+                    reverted.Status = FamilyGroupStatus.Draft;
+                    reverted.PaymentAnchorSubscriptionId = null;
+                    reverted.PaymentId = null;
+                    reverted.PaymentInvoiceId = null;
+                }
                 await _db.SaveChangesAsync(ct);
                 return true;
             }, CancellationToken.None);
-            return Error.Conflict("family.batch_review_required", "family.batch_review_required");
+            return Error.Conflict("payment.initialization_failed", "payment.initialization_failed");
         }
     }
 
