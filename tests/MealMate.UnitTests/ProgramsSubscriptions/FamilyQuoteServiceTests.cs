@@ -491,6 +491,28 @@ public sealed class FamilyQuoteServiceTests
     }
 
     [Fact]
+    public void ResolveSetupStatus_ManagerIsReadyWithoutBirthdate_OtherMembersStillNeedAge()
+    {
+        var planFields = (FamilyMember member) =>
+        {
+            member.DisplayName = "Member";
+            member.ProgramId = Guid.NewGuid();
+            member.BundleId = Guid.NewGuid();
+            member.SelectedTier = RestaurantTier.Platinum;
+            member.DurationDays = 26;
+            member.DeliveryAddressId = Guid.NewGuid();
+        };
+
+        var manager = new FamilyMember { Role = FamilyMemberRole.Manager, AgeYears = 0 };
+        planFields(manager);
+        FamilyMemberPlanRules.ResolveSetupStatus(manager).Should().Be(FamilyMemberSetupStatus.Ready);
+
+        var member = new FamilyMember { Role = FamilyMemberRole.Member, AgeYears = 0 };
+        planFields(member);
+        FamilyMemberPlanRules.ResolveSetupStatus(member).Should().Be(FamilyMemberSetupStatus.InProgress);
+    }
+
+    [Fact]
     public async Task Quote_ConvertedManager_NotCountedTwiceInDiscountCount()
     {
         var sender = Substitute.For<ISender>();

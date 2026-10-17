@@ -11,7 +11,9 @@ public static class FamilyMemberPlanRules
         var complete = HasPricablePlan(member)
             && member.DeliveryAddressId.HasValue
             && !string.IsNullOrWhiteSpace(member.DisplayName)
-            && member.AgeYears is >= 1 and <= 120;
+            // The manager is the signed-in account owner; a birthdate is not
+            // required to consider their seat ready for subscription.
+            && (member.Role == FamilyMemberRole.Manager || member.AgeYears is >= 1 and <= 120);
         if (complete) return FamilyMemberSetupStatus.Ready;
         return hasAnyPlan ? FamilyMemberSetupStatus.InProgress : FamilyMemberSetupStatus.NotStarted;
     }
