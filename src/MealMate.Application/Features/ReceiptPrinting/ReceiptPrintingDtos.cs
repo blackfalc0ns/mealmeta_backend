@@ -37,7 +37,16 @@ public sealed record ReceiptCustomerDto(
     string AreaAr,
     string AreaEn,
     string AddressLineAr,
-    string AddressLineEn);
+    string AddressLineEn,
+    string? Governorate = null,
+    string? Area = null,
+    string? Block = null,
+    string? Street = null,
+    string? Avenue = null,
+    string? Building = null,
+    string? Floor = null,
+    string? Unit = null,
+    string? DeliveryNotes = null);
 
 public sealed record ReceiptDeliveryDto(
     DateOnly DeliveryDate,

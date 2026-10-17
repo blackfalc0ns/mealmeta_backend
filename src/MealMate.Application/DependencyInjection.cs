@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using FluentValidation;
 using MealMate.Application.Common.Behaviors;
 using MediatR;
@@ -77,6 +77,7 @@ public static class DependencyInjection
         services.AddScoped<Features.ProgramsSubscriptions.IRestaurantDiversificationCalculator, Features.ProgramsSubscriptions.RestaurantDiversificationCalculator>();
         services.AddScoped<Features.PrepDocuments.IPrepDocumentsGenerator, Features.PrepDocuments.PrepDocumentsGenerator>();
         services.AddScoped<Features.ReceiptPrinting.IReceiptPrintingService, Features.ReceiptPrinting.ReceiptPrintingService>();
+        services.AddScoped<Features.MealLabels.IMealLabelService, Features.MealLabels.MealLabelService>();
         services.AddScoped<Features.AdminOrders.AdminOrderDocumentsQueryService>();
         services.AddScoped<Features.CustomerCalendar.ISubscriptionDayDispatchService, Features.CustomerCalendar.SubscriptionDayDispatchService>();
         services.AddScoped<Features.IdentityAccess.Customers.ICustomerDeliveryAddressService, Features.IdentityAccess.Customers.CustomerDeliveryAddressService>();
@@ -166,5 +167,6 @@ public static class DependencyInjection
         return services;
     }
 }
+
 
 

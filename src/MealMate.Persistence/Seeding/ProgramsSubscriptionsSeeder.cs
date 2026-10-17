@@ -1,4 +1,4 @@
-using MealMate.Domain.Enums;
+﻿using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +24,7 @@ public static class ProgramsSubscriptionsSeeder
         await ProgramNutritionStandardsSeeder.SeedAsync(db, logger, cancellationToken);
         await FoodSafetyCatalogSeeder.SeedAsync(db, cancellationToken);
         await ReceiptTemplatesSeeder.SeedAsync(db, logger, cancellationToken);
+        await MealBoxLabelTemplatesSeeder.SeedAsync(db, logger, cancellationToken);
     }
 
     private static async Task EnsureProgramDisplayContentAsync(AppDbContext db, ILogger logger, CancellationToken cancellationToken)
@@ -31,34 +32,34 @@ public static class ProgramsSubscriptionsSeeder
         var defaults = new Dictionary<string, (string DescriptionAr, string DescriptionEn, string[] KeywordsAr, string[] KeywordsEn)>(StringComparer.OrdinalIgnoreCase)
         {
             ["PROG_KETO"] = (
-                "برنامج منخفض الكربوهيدرات يعتمد على الدهون الصحية لمساعدتك على الالتزام بنمط الكيتو.",
+                "Ø¨Ø±Ù†Ø§Ù…Ø¬ Ù…Ù†Ø®ÙØ¶ Ø§Ù„ÙƒØ±Ø¨ÙˆÙ‡ÙŠØ¯Ø±Ø§Øª ÙŠØ¹ØªÙ…Ø¯ Ø¹Ù„Ù‰ Ø§Ù„Ø¯Ù‡ÙˆÙ† Ø§Ù„ØµØ­ÙŠØ© Ù„Ù…Ø³Ø§Ø¹Ø¯ØªÙƒ Ø¹Ù„Ù‰ Ø§Ù„Ø§Ù„ØªØ²Ø§Ù… Ø¨Ù†Ù…Ø· Ø§Ù„ÙƒÙŠØªÙˆ.",
                 "A low-carbohydrate program built around healthy fats to help you follow a keto lifestyle.",
-                ["كربوهيدرات منخفضة", "دهون صحية"],
+                ["ÙƒØ±Ø¨ÙˆÙ‡ÙŠØ¯Ø±Ø§Øª Ù…Ù†Ø®ÙØ¶Ø©", "Ø¯Ù‡ÙˆÙ† ØµØ­ÙŠØ©"],
                 ["Low carb", "Healthy fats"]),
             ["PROG_BALANCED"] = (
-                "وجبات يومية متوازنة تجمع البروتين والكربوهيدرات والدهون بنسب مناسبة لنمط حياة صحي.",
+                "ÙˆØ¬Ø¨Ø§Øª ÙŠÙˆÙ…ÙŠØ© Ù…ØªÙˆØ§Ø²Ù†Ø© ØªØ¬Ù…Ø¹ Ø§Ù„Ø¨Ø±ÙˆØªÙŠÙ† ÙˆØ§Ù„ÙƒØ±Ø¨ÙˆÙ‡ÙŠØ¯Ø±Ø§Øª ÙˆØ§Ù„Ø¯Ù‡ÙˆÙ† Ø¨Ù†Ø³Ø¨ Ù…Ù†Ø§Ø³Ø¨Ø© Ù„Ù†Ù…Ø· Ø­ÙŠØ§Ø© ØµØ­ÙŠ.",
                 "Balanced daily meals combining protein, carbohydrates and fats for a healthy lifestyle.",
-                ["تغذية متوازنة", "طاقة يومية"],
+                ["ØªØºØ°ÙŠØ© Ù…ØªÙˆØ§Ø²Ù†Ø©", "Ø·Ø§Ù‚Ø© ÙŠÙˆÙ…ÙŠØ©"],
                 ["Balanced nutrition", "Daily energy"]),
             ["PROG_ATHLETE"] = (
-                "وجبات محسوبة لدعم النشاط الرياضي والطاقة والتعافي بعد التمرين.",
+                "ÙˆØ¬Ø¨Ø§Øª Ù…Ø­Ø³ÙˆØ¨Ø© Ù„Ø¯Ø¹Ù… Ø§Ù„Ù†Ø´Ø§Ø· Ø§Ù„Ø±ÙŠØ§Ø¶ÙŠ ÙˆØ§Ù„Ø·Ø§Ù‚Ø© ÙˆØ§Ù„ØªØ¹Ø§ÙÙŠ Ø¨Ø¹Ø¯ Ø§Ù„ØªÙ…Ø±ÙŠÙ†.",
                 "Calculated meals designed to support athletic performance, energy and workout recovery.",
-                ["أداء رياضي", "دعم التعافي"],
+                ["Ø£Ø¯Ø§Ø¡ Ø±ÙŠØ§Ø¶ÙŠ", "Ø¯Ø¹Ù… Ø§Ù„ØªØ¹Ø§ÙÙŠ"],
                 ["Athletic performance", "Recovery support"]),
             ["PROG_WEIGHT_LOSS"] = (
-                "وجبات محسوبة السعرات تساعدك على خسارة الوزن تدريجيًا مع الحفاظ على تغذية متوازنة.",
+                "ÙˆØ¬Ø¨Ø§Øª Ù…Ø­Ø³ÙˆØ¨Ø© Ø§Ù„Ø³Ø¹Ø±Ø§Øª ØªØ³Ø§Ø¹Ø¯Ùƒ Ø¹Ù„Ù‰ Ø®Ø³Ø§Ø±Ø© Ø§Ù„ÙˆØ²Ù† ØªØ¯Ø±ÙŠØ¬ÙŠÙ‹Ø§ Ù…Ø¹ Ø§Ù„Ø­ÙØ§Ø¸ Ø¹Ù„Ù‰ ØªØºØ°ÙŠØ© Ù…ØªÙˆØ§Ø²Ù†Ø©.",
                 "Calorie-controlled meals that support gradual weight loss while maintaining balanced nutrition.",
-                ["سعرات محسوبة", "نتائج مستدامة"],
+                ["Ø³Ø¹Ø±Ø§Øª Ù…Ø­Ø³ÙˆØ¨Ø©", "Ù†ØªØ§Ø¦Ø¬ Ù…Ø³ØªØ¯Ø§Ù…Ø©"],
                 ["Calorie controlled", "Sustainable results"]),
             ["PROG_MUSCLE_GAIN"] = (
-                "وجبات غنية بالبروتين وموزعة لدعم بناء العضلات والتعافي وتحقيق أهداف التمرين.",
+                "ÙˆØ¬Ø¨Ø§Øª ØºÙ†ÙŠØ© Ø¨Ø§Ù„Ø¨Ø±ÙˆØªÙŠÙ† ÙˆÙ…ÙˆØ²Ø¹Ø© Ù„Ø¯Ø¹Ù… Ø¨Ù†Ø§Ø¡ Ø§Ù„Ø¹Ø¶Ù„Ø§Øª ÙˆØ§Ù„ØªØ¹Ø§ÙÙŠ ÙˆØªØ­Ù‚ÙŠÙ‚ Ø£Ù‡Ø¯Ø§Ù Ø§Ù„ØªÙ…Ø±ÙŠÙ†.",
                 "Protein-rich meals distributed to support muscle growth, recovery and training goals.",
-                ["بروتين أعلى", "بناء العضلات"],
+                ["Ø¨Ø±ÙˆØªÙŠÙ† Ø£Ø¹Ù„Ù‰", "Ø¨Ù†Ø§Ø¡ Ø§Ù„Ø¹Ø¶Ù„Ø§Øª"],
                 ["Higher protein", "Muscle growth"]),
             ["PROG_LOW_CARB"] = (
-                "خطة مرنة تقلل الكربوهيدرات مع الحفاظ على وجبات متنوعة ومتوازنة وسهلة الالتزام.",
+                "Ø®Ø·Ø© Ù…Ø±Ù†Ø© ØªÙ‚Ù„Ù„ Ø§Ù„ÙƒØ±Ø¨ÙˆÙ‡ÙŠØ¯Ø±Ø§Øª Ù…Ø¹ Ø§Ù„Ø­ÙØ§Ø¸ Ø¹Ù„Ù‰ ÙˆØ¬Ø¨Ø§Øª Ù…ØªÙ†ÙˆØ¹Ø© ÙˆÙ…ØªÙˆØ§Ø²Ù†Ø© ÙˆØ³Ù‡Ù„Ø© Ø§Ù„Ø§Ù„ØªØ²Ø§Ù….",
                 "A flexible lower-carbohydrate plan with varied, balanced meals that are easy to follow.",
-                ["كربوهيدرات أقل", "خيارات مرنة"],
+                ["ÙƒØ±Ø¨ÙˆÙ‡ÙŠØ¯Ø±Ø§Øª Ø£Ù‚Ù„", "Ø®ÙŠØ§Ø±Ø§Øª Ù…Ø±Ù†Ø©"],
                 ["Lower carb", "Flexible choices"]),
         };
 
@@ -80,23 +81,23 @@ public static class ProgramsSubscriptionsSeeder
 
     private static async Task SeedFreshCatalogAsync(AppDbContext db, CancellationToken cancellationToken)
     {
-        var keto = NewProgram("PROG_KETO", "KT", "كيتو", "Keto", 1);
-        var balanced = NewProgram("PROG_BALANCED", "LS", "نمط حياة متوازن", "Lifestyle", 2);
-        var athlete = NewProgram("PROG_ATHLETE", "AT", "الأداء الرياضي", "Athletic", 3);
-        var weightLoss = NewProgram("PROG_WEIGHT_LOSS", "WL", "خسارة الوزن", "Weight Loss", 4);
-        var muscle = NewProgram("PROG_MUSCLE_GAIN", "MG", "بناء العضلات", "Muscle Gain (Bodybuilding)", 5);
-        var lowCarb = NewProgram("PROG_LOW_CARB", "LC", "قليل الكربوهيدرات", "Low Carb", 6);
+        var keto = NewProgram("PROG_KETO", "KT", "ÙƒÙŠØªÙˆ", "Keto", 1);
+        var balanced = NewProgram("PROG_BALANCED", "LS", "Ù†Ù…Ø· Ø­ÙŠØ§Ø© Ù…ØªÙˆØ§Ø²Ù†", "Lifestyle", 2);
+        var athlete = NewProgram("PROG_ATHLETE", "AT", "Ø§Ù„Ø£Ø¯Ø§Ø¡ Ø§Ù„Ø±ÙŠØ§Ø¶ÙŠ", "Athletic", 3);
+        var weightLoss = NewProgram("PROG_WEIGHT_LOSS", "WL", "Ø®Ø³Ø§Ø±Ø© Ø§Ù„ÙˆØ²Ù†", "Weight Loss", 4);
+        var muscle = NewProgram("PROG_MUSCLE_GAIN", "MG", "Ø¨Ù†Ø§Ø¡ Ø§Ù„Ø¹Ø¶Ù„Ø§Øª", "Muscle Gain (Bodybuilding)", 5);
+        var lowCarb = NewProgram("PROG_LOW_CARB", "LC", "Ù‚Ù„ÙŠÙ„ Ø§Ù„ÙƒØ±Ø¨ÙˆÙ‡ÙŠØ¯Ø±Ø§Øª", "Low Carb", 6);
 
         db.Programs.AddRange(keto, balanced, athlete, weightLoss, muscle, lowCarb);
         await db.SaveChangesAsync(cancellationToken);
 
         db.Bundles.AddRange(
-            NewBundle(keto.Id, "BND_KETO_FULL", "باقة الكيتو الشاملة", "Full Keto Bundle", 3, 1, 1, 1, 1, 1),
-            NewBundle(balanced.Id, "BND_BALANCED_STD", "الباقة المتوازنة", "Standard Balanced Bundle", 2, 0, 1, 1, 1, 2),
-            NewBundle(athlete.Id, "BND_ATHLETE_MAX", "باقة الرياضيين القصوى", "Max Athlete Bundle", 3, 1, 1, 1, 0, 3),
-            NewBundle(weightLoss.Id, "PKG-BL1S", "ريوق + غداء + سناك", "Breakfast + Lunch + Snack", 2, 1, 1, 0, 1, 1),
-            NewBundle(weightLoss.Id, "PKG-LD2S", "غداء + عشاء + ٢ سناك", "Lunch + Dinner + 2 Snacks", 2, 0, 1, 1, 2, 2),
-            NewBundle(weightLoss.Id, "PKG-BLD2S", "ريوق + غداء + عشاء + ٢ سناك", "Breakfast + Lunch + Dinner + 2 Snacks", 3, 1, 1, 1, 2, 3));
+            NewBundle(keto.Id, "BND_KETO_FULL", "Ø¨Ø§Ù‚Ø© Ø§Ù„ÙƒÙŠØªÙˆ Ø§Ù„Ø´Ø§Ù…Ù„Ø©", "Full Keto Bundle", 3, 1, 1, 1, 1, 1),
+            NewBundle(balanced.Id, "BND_BALANCED_STD", "Ø§Ù„Ø¨Ø§Ù‚Ø© Ø§Ù„Ù…ØªÙˆØ§Ø²Ù†Ø©", "Standard Balanced Bundle", 2, 0, 1, 1, 1, 2),
+            NewBundle(athlete.Id, "BND_ATHLETE_MAX", "Ø¨Ø§Ù‚Ø© Ø§Ù„Ø±ÙŠØ§Ø¶ÙŠÙŠÙ† Ø§Ù„Ù‚ØµÙˆÙ‰", "Max Athlete Bundle", 3, 1, 1, 1, 0, 3),
+            NewBundle(weightLoss.Id, "PKG-BL1S", "Ø±ÙŠÙˆÙ‚ + ØºØ¯Ø§Ø¡ + Ø³Ù†Ø§Ùƒ", "Breakfast + Lunch + Snack", 2, 1, 1, 0, 1, 1),
+            NewBundle(weightLoss.Id, "PKG-LD2S", "ØºØ¯Ø§Ø¡ + Ø¹Ø´Ø§Ø¡ + Ù¢ Ø³Ù†Ø§Ùƒ", "Lunch + Dinner + 2 Snacks", 2, 0, 1, 1, 2, 2),
+            NewBundle(weightLoss.Id, "PKG-BLD2S", "Ø±ÙŠÙˆÙ‚ + ØºØ¯Ø§Ø¡ + Ø¹Ø´Ø§Ø¡ + Ù¢ Ø³Ù†Ø§Ùƒ", "Breakfast + Lunch + Dinner + 2 Snacks", 3, 1, 1, 1, 2, 3));
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -123,9 +124,9 @@ public static class ProgramsSubscriptionsSeeder
 
         var extras = new (string Code, string Short, string NameAr, string NameEn, int Sort)[]
         {
-            ("PROG_WEIGHT_LOSS", "WL", "خسارة الوزن", "Weight Loss", 4),
-            ("PROG_MUSCLE_GAIN", "MG", "بناء العضلات", "Muscle Gain (Bodybuilding)", 5),
-            ("PROG_LOW_CARB", "LC", "قليل الكربوهيدرات", "Low Carb", 6),
+            ("PROG_WEIGHT_LOSS", "WL", "Ø®Ø³Ø§Ø±Ø© Ø§Ù„ÙˆØ²Ù†", "Weight Loss", 4),
+            ("PROG_MUSCLE_GAIN", "MG", "Ø¨Ù†Ø§Ø¡ Ø§Ù„Ø¹Ø¶Ù„Ø§Øª", "Muscle Gain (Bodybuilding)", 5),
+            ("PROG_LOW_CARB", "LC", "Ù‚Ù„ÙŠÙ„ Ø§Ù„ÙƒØ±Ø¨ÙˆÙ‡ÙŠØ¯Ø±Ø§Øª", "Low Carb", 6),
         };
 
         foreach (var extra in extras)
@@ -155,17 +156,17 @@ public static class ProgramsSubscriptionsSeeder
 
         var variants = new (string ProgramCode, string BundleCode, string NameAr, string NameEn, int Meals, int B, int L, int D, int S, int Sort)[]
         {
-            ("PROG_KETO", "BND_KETO_LITE", "باقة كيتو خفيفة (وجبة رئيسية + سناك)", "Lite Keto Bundle (1 Meal + Snack)", 1, 0, 1, 0, 1, 2),
-            ("PROG_KETO", "BND_KETO_STANDARD", "باقة كيتو متوازنة (وجبتان + سناك)", "Standard Keto Bundle (2 Meals + Snack)", 2, 0, 1, 1, 1, 3),
-            ("PROG_BALANCED", "BND_BALANCED_LITE", "باقة متوازنة خفيفة (وجبة رئيسية + سناك)", "Lite Balanced Bundle (1 Meal + Snack)", 1, 0, 1, 0, 1, 1),
-            ("PROG_BALANCED", "BND_BALANCED_FULL", "باقة متوازنة كاملة (3 وجبات + سناك)", "Full Balanced Bundle (3 Meals + Snack)", 3, 1, 1, 1, 1, 3),
-            ("PROG_ATHLETE", "BND_ATHLETE_STANDARD", "باقة رياضية متوازنة (وجبتان + سناك)", "Standard Athlete Bundle (2 Meals + Snack)", 2, 0, 1, 1, 1, 1),
-            ("PROG_ATHLETE", "BND_ATHLETE_ELITE", "باقة رياضية مكثفة (3 وجبات + سناك)", "Elite Athlete Bundle (3 Meals + Snack)", 3, 1, 1, 1, 1, 2),
-            ("PROG_WEIGHT_LOSS", "PKG-BL1S", "ريوق + غداء + سناك", "Breakfast + Lunch + Snack", 2, 1, 1, 0, 1, 1),
-            ("PROG_WEIGHT_LOSS", "PKG-LD2S", "غداء + عشاء + ٢ سناك", "Lunch + Dinner + 2 Snacks", 2, 0, 1, 1, 2, 2),
-            ("PROG_WEIGHT_LOSS", "PKG-BLD2S", "ريوق + غداء + عشاء + ٢ سناك", "Breakfast + Lunch + Dinner + 2 Snacks", 3, 1, 1, 1, 2, 3),
-            ("PROG_MUSCLE_GAIN", "PKG-BLD2S-MG", "ريوق + غداء + عشاء + ٢ سناك", "Breakfast + Lunch + Dinner + 2 Snacks", 3, 1, 1, 1, 2, 1),
-            ("PROG_LOW_CARB", "PKG-BL1S-LC", "ريوق + غداء + سناك", "Breakfast + Lunch + Snack", 2, 1, 1, 0, 1, 1),
+            ("PROG_KETO", "BND_KETO_LITE", "Ø¨Ø§Ù‚Ø© ÙƒÙŠØªÙˆ Ø®ÙÙŠÙØ© (ÙˆØ¬Ø¨Ø© Ø±Ø¦ÙŠØ³ÙŠØ© + Ø³Ù†Ø§Ùƒ)", "Lite Keto Bundle (1 Meal + Snack)", 1, 0, 1, 0, 1, 2),
+            ("PROG_KETO", "BND_KETO_STANDARD", "Ø¨Ø§Ù‚Ø© ÙƒÙŠØªÙˆ Ù…ØªÙˆØ§Ø²Ù†Ø© (ÙˆØ¬Ø¨ØªØ§Ù† + Ø³Ù†Ø§Ùƒ)", "Standard Keto Bundle (2 Meals + Snack)", 2, 0, 1, 1, 1, 3),
+            ("PROG_BALANCED", "BND_BALANCED_LITE", "Ø¨Ø§Ù‚Ø© Ù…ØªÙˆØ§Ø²Ù†Ø© Ø®ÙÙŠÙØ© (ÙˆØ¬Ø¨Ø© Ø±Ø¦ÙŠØ³ÙŠØ© + Ø³Ù†Ø§Ùƒ)", "Lite Balanced Bundle (1 Meal + Snack)", 1, 0, 1, 0, 1, 1),
+            ("PROG_BALANCED", "BND_BALANCED_FULL", "Ø¨Ø§Ù‚Ø© Ù…ØªÙˆØ§Ø²Ù†Ø© ÙƒØ§Ù…Ù„Ø© (3 ÙˆØ¬Ø¨Ø§Øª + Ø³Ù†Ø§Ùƒ)", "Full Balanced Bundle (3 Meals + Snack)", 3, 1, 1, 1, 1, 3),
+            ("PROG_ATHLETE", "BND_ATHLETE_STANDARD", "Ø¨Ø§Ù‚Ø© Ø±ÙŠØ§Ø¶ÙŠØ© Ù…ØªÙˆØ§Ø²Ù†Ø© (ÙˆØ¬Ø¨ØªØ§Ù† + Ø³Ù†Ø§Ùƒ)", "Standard Athlete Bundle (2 Meals + Snack)", 2, 0, 1, 1, 1, 1),
+            ("PROG_ATHLETE", "BND_ATHLETE_ELITE", "Ø¨Ø§Ù‚Ø© Ø±ÙŠØ§Ø¶ÙŠØ© Ù…ÙƒØ«ÙØ© (3 ÙˆØ¬Ø¨Ø§Øª + Ø³Ù†Ø§Ùƒ)", "Elite Athlete Bundle (3 Meals + Snack)", 3, 1, 1, 1, 1, 2),
+            ("PROG_WEIGHT_LOSS", "PKG-BL1S", "Ø±ÙŠÙˆÙ‚ + ØºØ¯Ø§Ø¡ + Ø³Ù†Ø§Ùƒ", "Breakfast + Lunch + Snack", 2, 1, 1, 0, 1, 1),
+            ("PROG_WEIGHT_LOSS", "PKG-LD2S", "ØºØ¯Ø§Ø¡ + Ø¹Ø´Ø§Ø¡ + Ù¢ Ø³Ù†Ø§Ùƒ", "Lunch + Dinner + 2 Snacks", 2, 0, 1, 1, 2, 2),
+            ("PROG_WEIGHT_LOSS", "PKG-BLD2S", "Ø±ÙŠÙˆÙ‚ + ØºØ¯Ø§Ø¡ + Ø¹Ø´Ø§Ø¡ + Ù¢ Ø³Ù†Ø§Ùƒ", "Breakfast + Lunch + Dinner + 2 Snacks", 3, 1, 1, 1, 2, 3),
+            ("PROG_MUSCLE_GAIN", "PKG-BLD2S-MG", "Ø±ÙŠÙˆÙ‚ + ØºØ¯Ø§Ø¡ + Ø¹Ø´Ø§Ø¡ + Ù¢ Ø³Ù†Ø§Ùƒ", "Breakfast + Lunch + Dinner + 2 Snacks", 3, 1, 1, 1, 2, 1),
+            ("PROG_LOW_CARB", "PKG-BL1S-LC", "Ø±ÙŠÙˆÙ‚ + ØºØ¯Ø§Ø¡ + Ø³Ù†Ø§Ùƒ", "Breakfast + Lunch + Snack", 2, 1, 1, 0, 1, 1),
         };
 
         var additions = variants
@@ -251,3 +252,4 @@ public static class ProgramsSubscriptionsSeeder
         SortOrder = sort,
     };
 }
+

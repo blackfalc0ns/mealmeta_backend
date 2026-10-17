@@ -16,7 +16,7 @@ using Xunit;
 
 namespace MealMate.UnitTests.Advertising;
 
-public class AdvertisingLifecycleTests : IDisposable
+public partial class AdvertisingLifecycleTests : IDisposable
 {
     private readonly AppDbContext _context;
     private readonly ICurrentUser _currentUser;

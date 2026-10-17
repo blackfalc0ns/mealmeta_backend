@@ -1,4 +1,4 @@
-using MealMate.Domain.AdminDashboard;
+﻿using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Advertising;
 using MealMate.Domain.CollaborativeCampaigns;
@@ -152,6 +152,9 @@ public interface IAppDbContext
     DbSet<ReceiptTemplate> ReceiptTemplates { get; }
     DbSet<RestaurantReceiptSettings> RestaurantReceiptSettings { get; }
     DbSet<ReceiptPrintLog> ReceiptPrintLogs { get; }
+    DbSet<MealBoxLabelTemplate> MealBoxLabelTemplates { get; }
+    DbSet<RestaurantMealLabelSettings> RestaurantMealLabelSettings { get; }
+    DbSet<MealLabelPrintLog> MealLabelPrintLogs { get; }
     DbSet<RestaurantDailyOrder> RestaurantDailyOrders { get; }
     DbSet<OrderHandover> OrderHandovers { get; }
 
@@ -285,3 +288,4 @@ public interface IAppDbContext
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
+

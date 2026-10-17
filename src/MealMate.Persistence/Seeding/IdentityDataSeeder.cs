@@ -126,11 +126,13 @@ public static class IdentityDataSeeder
         [
             PermissionCodes.AuthSelfManage, PermissionCodes.DocumentsUpload, PermissionCodes.RestaurantRegCreate, PermissionCodes.DeliveryManagersManage,
             PermissionCodes.RestaurantMealsView, PermissionCodes.RestaurantMealsManage, PermissionCodes.RestaurantIngredientsView, PermissionCodes.RestaurantIngredientsManage,
+            PermissionCodes.CampaignsView, PermissionCodes.CampaignsManage,
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.RestaurantStaff,
         [
             PermissionCodes.AuthSelfManage,
             PermissionCodes.RestaurantMealsView, PermissionCodes.RestaurantMealsManage, PermissionCodes.RestaurantIngredientsView, PermissionCodes.RestaurantIngredientsManage,
+            PermissionCodes.CampaignsView, PermissionCodes.CampaignsManage,
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.Driver,
         [

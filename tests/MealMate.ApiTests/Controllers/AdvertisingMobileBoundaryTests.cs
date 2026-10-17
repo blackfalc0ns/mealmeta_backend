@@ -18,6 +18,40 @@ namespace MealMate.ApiTests.Controllers;
 public sealed class AdvertisingMobileBoundaryTests
 {
     [Fact]
+    public async Task RestaurantBidPage_ForwardsPagination_AndOfferResponseForwardsConsent()
+    {
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<GetMyAdBidPageQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new MyAdBidPageDto([], 0, 1, 20, 0, 0, [])));
+        sender.Send(Arg.Any<RespondToAdAuctionNextBidderOfferCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success());
+        using var services = new ServiceCollection().AddSingleton(sender).BuildServiceProvider();
+        var controller = new RestaurantAdvertisingController { ControllerContext = new ControllerContext {
+            HttpContext = new DefaultHttpContext { RequestServices = services } } };
+        Assert.IsType<OkObjectResult>(await controller.GetMyBidPage(CancellationToken.None, 3, 40));
+        await sender.Received(1).Send(Arg.Is<GetMyAdBidPageQuery>(q => q.Page == 3 && q.PageSize == 40), Arg.Any<CancellationToken>());
+        var offerId = Guid.NewGuid();
+        Assert.IsType<NoContentResult>(await controller.RespondToNextBidderOffer(offerId, new(false, "Declined by owner"), CancellationToken.None));
+        await sender.Received(1).Send(Arg.Is<RespondToAdAuctionNextBidderOfferCommand>(q =>
+            q.OfferId == offerId && !q.Accept && q.Reason == "Declined by owner"), Arg.Any<CancellationToken>());
+        var permissions = typeof(RestaurantAdvertisingController).GetMethod(nameof(RestaurantAdvertisingController.RespondToNextBidderOffer))!
+            .GetCustomAttributes(typeof(MealMate.Api.Authorization.HasPermissionAttribute), false);
+        Assert.Contains(permissions, p => ((MealMate.Api.Authorization.HasPermissionAttribute)p).Policy!.EndsWith(MealMate.Application.Common.Security.PermissionCodes.CampaignsManage));
+    }
+
+    [Theory]
+    [InlineData("Advertising.SpaceInactive")]
+    [InlineData("Advertising.ReasonTooLong")]
+    public void RestaurantAdvertisingErrors_HaveArabicAndEnglishResources(string code)
+    {
+        var manager = new System.Resources.ResourceManager("MealMate.Api.Resources.Resources.Messages", typeof(Messages).Assembly);
+        var ar = manager.GetString(code, System.Globalization.CultureInfo.GetCultureInfo("ar"));
+        var en = manager.GetString(code, System.Globalization.CultureInfo.GetCultureInfo("en"));
+        Assert.False(string.IsNullOrWhiteSpace(ar));
+        Assert.False(string.IsNullOrWhiteSpace(en));
+        Assert.NotEqual(ar, en);
+    }
+    [Fact]
     public async Task LegacyOfferDetails_UsesCustomerVisibilityAndKeepsFlatResponse()
     {
         var customerId = Guid.NewGuid();

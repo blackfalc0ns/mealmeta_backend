@@ -27,6 +27,12 @@ public sealed class RestaurantAdvertisingController : ApiControllerBase
     public async Task<IActionResult> GetMyBids(CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new GetMyAdBidsQuery(), cancellationToken));
 
+    [HttpGet("bids/page")]
+    [HasPermission(PermissionCodes.CampaignsView)]
+    public async Task<IActionResult> GetMyBidPage(CancellationToken cancellationToken,
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        => HandleResult(await Sender.Send(new GetMyAdBidPageQuery(page, pageSize), cancellationToken));
+
     /// <summary>Winner confirms a captured payment for its auction; idempotent by provider transaction.</summary>
     [HttpPost("auctions/{auctionId:guid}/payment")]
     [HasPermission(PermissionCodes.CampaignsManage)]
@@ -51,6 +57,7 @@ public sealed class RestaurantAdvertisingController : ApiControllerBase
         => HandleResult(await Sender.Send(new RestaurantStopAdPlacementCommand(placementId, request.Reason), cancellationToken));
 
     [HttpPost("next-bidder-offers/{offerId:guid}/respond")]
+    [HasPermission(PermissionCodes.CampaignsManage)]
     public async Task<IActionResult> RespondToNextBidderOffer(Guid offerId, [FromBody] NextBidderOfferResponse request, CancellationToken cancellationToken)
         => HandleResult(await Sender.Send(new RespondToAdAuctionNextBidderOfferCommand(offerId, request.Accept, request.Reason), cancellationToken));
 

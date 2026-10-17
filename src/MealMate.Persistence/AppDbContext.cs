@@ -1,4 +1,4 @@
-using System.Linq.Expressions;
+﻿using System.Linq.Expressions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.CalendarMeals;
@@ -53,7 +53,7 @@ public sealed class AppDbContext
         optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
     }
 
-    // ── Phase 0 Foundation ──────────────────────────────────────────
+    // â”€â”€ Phase 0 Foundation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<Tenant> Tenants => Set<Tenant>();
 
     public async Task<string?> GetUserPhoneAsync(Guid userId, CancellationToken cancellationToken)
@@ -82,7 +82,7 @@ public sealed class AppDbContext
     public DbSet<DocumentVerification> DocumentVerifications => Set<DocumentVerification>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
 
-    // ── M01 Identity & Access ───────────────────────────────────────
+    // â”€â”€ M01 Identity & Access â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<AccessScope> AccessScopes => Set<AccessScope>();
@@ -118,7 +118,7 @@ public sealed class AppDbContext
     public DbSet<OtpChallenge> OtpChallenges => Set<OtpChallenge>();
     public DbSet<AuthLoginChallenge> AuthLoginChallenges => Set<AuthLoginChallenge>();
 
-    // ── M02 Programs & Subscriptions ────────────────────────────────
+    // â”€â”€ M02 Programs & Subscriptions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<Program> Programs => Set<Program>();
     public DbSet<Bundle> Bundles => Set<Bundle>();
     public DbSet<PackageContentVersion> PackageContentVersions => Set<PackageContentVersion>();
@@ -145,7 +145,7 @@ public sealed class AppDbContext
     public DbSet<SubscriptionFreezeRequest> SubscriptionFreezeRequests => Set<SubscriptionFreezeRequest>();
     public DbSet<SubscriptionRenewal> SubscriptionRenewals => Set<SubscriptionRenewal>();
 
-    // ── M03 Calendar & Meals ────────────────────────────────────────
+    // â”€â”€ M03 Calendar & Meals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<SubscriptionCalendar> SubscriptionCalendars => Set<SubscriptionCalendar>();
     public DbSet<SubscriptionDay> SubscriptionDays => Set<SubscriptionDay>();
     public DbSet<DailyRestaurantSelection> DailyRestaurantSelections => Set<DailyRestaurantSelection>();
@@ -162,7 +162,7 @@ public sealed class AppDbContext
     public DbSet<FreezeLedgerEntry> FreezeLedgerEntries => Set<FreezeLedgerEntry>();
     public DbSet<DiversificationLimitSnapshot> DiversificationLimitSnapshots => Set<DiversificationLimitSnapshot>();
 
-    // ── M04 Restaurant Operations ───────────────────────────────────
+    // â”€â”€ M04 Restaurant Operations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<Menu> Menus => Set<Menu>();
     public DbSet<MenuPlan> MenuPlans => Set<MenuPlan>();
     public DbSet<MenuPlanVersion> MenuPlanVersions => Set<MenuPlanVersion>();
@@ -199,6 +199,9 @@ public sealed class AppDbContext
     public DbSet<ReceiptTemplate> ReceiptTemplates => Set<ReceiptTemplate>();
     public DbSet<RestaurantReceiptSettings> RestaurantReceiptSettings => Set<RestaurantReceiptSettings>();
     public DbSet<ReceiptPrintLog> ReceiptPrintLogs => Set<ReceiptPrintLog>();
+    public DbSet<MealBoxLabelTemplate> MealBoxLabelTemplates => Set<MealBoxLabelTemplate>();
+    public DbSet<RestaurantMealLabelSettings> RestaurantMealLabelSettings => Set<RestaurantMealLabelSettings>();
+    public DbSet<MealLabelPrintLog> MealLabelPrintLogs => Set<MealLabelPrintLog>();
     public DbSet<OrderHandover> OrderHandovers => Set<OrderHandover>();
     public DbSet<OrderHandoverRevocation> OrderHandoverRevocations => Set<OrderHandoverRevocation>();
     public DbSet<RestaurantDriverLink> RestaurantDriverLinks => Set<RestaurantDriverLink>();
@@ -211,7 +214,7 @@ public sealed class AppDbContext
     public DbSet<MealRating> MealRatings => Set<MealRating>();
     public DbSet<RestaurantContractTermination> RestaurantContractTerminations => Set<RestaurantContractTermination>();
 
-    // ── M05 Driver & Delivery ───────────────────────────────────────
+    // â”€â”€ M05 Driver & Delivery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<Trip> Trips => Set<Trip>();
     public DbSet<TripStop> TripStops => Set<TripStop>();
     public DbSet<DriverAssignment> DriverAssignments => Set<DriverAssignment>();
@@ -228,7 +231,7 @@ public sealed class AppDbContext
     public DbSet<PickupConditionPhoto> PickupConditionPhotos => Set<PickupConditionPhoto>();
     public DbSet<MealMate.Domain.Common.UploadFileRecord> UploadFileRecords => Set<MealMate.Domain.Common.UploadFileRecord>();
 
-    // ── M06 Complaints & Support ────────────────────────────────────
+    // â”€â”€ M06 Complaints & Support â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<Complaint> Complaints => Set<Complaint>();
     public DbSet<ComplaintEvidencePhoto> ComplaintEvidencePhotos => Set<ComplaintEvidencePhoto>();
     public DbSet<ComplaintClassification> ComplaintClassifications => Set<ComplaintClassification>();
@@ -240,7 +243,7 @@ public sealed class AppDbContext
     public DbSet<FreeDayCompensation> FreeDayCompensations => Set<FreeDayCompensation>();
     public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
 
-    // ── M07 Central Accounting ──────────────────────────────────────
+    // â”€â”€ M07 Central Accounting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<ChartOfAccount> ChartOfAccounts => Set<ChartOfAccount>();
     public DbSet<FinancialSetting> FinancialSettings => Set<FinancialSetting>();
     public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
@@ -258,7 +261,7 @@ public sealed class AppDbContext
     public DbSet<FinancialSettlement> FinancialSettlements => Set<FinancialSettlement>();
     public DbSet<FinancialAuditTrail> FinancialAuditTrails => Set<FinancialAuditTrail>();
 
-    // ── M08 Customer Finance ────────────────────────────────────────
+    // â”€â”€ M08 Customer Finance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<CustomerCashWallet> CustomerCashWallets => Set<CustomerCashWallet>();
     public DbSet<CustomerPromotionalWallet> CustomerPromotionalWallets => Set<CustomerPromotionalWallet>();
     public DbSet<WalletTransaction> WalletTransactions => Set<WalletTransaction>();
@@ -270,7 +273,7 @@ public sealed class AppDbContext
     public DbSet<CustomerWithdrawalRequest> CustomerWithdrawalRequests => Set<CustomerWithdrawalRequest>();
     public DbSet<CustomerBankDetails> CustomerBankDetails => Set<CustomerBankDetails>();
 
-    // ── M09 Restaurant Finance ──────────────────────────────────────
+    // â”€â”€ M09 Restaurant Finance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<MealPayable> MealPayables => Set<MealPayable>();
     public DbSet<RestaurantCommissionRecord> RestaurantCommissionRecords => Set<RestaurantCommissionRecord>();
     public DbSet<ComplaintDeductionRecord> ComplaintDeductionRecords => Set<ComplaintDeductionRecord>();
@@ -280,7 +283,7 @@ public sealed class AppDbContext
     public DbSet<TransferReceipt> TransferReceipts => Set<TransferReceipt>();
     public DbSet<RestaurantAccountStatement> RestaurantAccountStatements => Set<RestaurantAccountStatement>();
 
-    // ── M10 Influencers ─────────────────────────────────────────────
+    // â”€â”€ M10 Influencers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<InfluencerCustomerLink> InfluencerCustomerLinks => Set<InfluencerCustomerLink>();
     public DbSet<InfluencerCode> InfluencerCodes => Set<InfluencerCode>();
     public DbSet<InfluencerCommissionCalculation> InfluencerCommissionCalculations => Set<InfluencerCommissionCalculation>();
@@ -290,7 +293,7 @@ public sealed class AppDbContext
     public DbSet<InfluencerWithdrawalApproval> InfluencerWithdrawalApprovals => Set<InfluencerWithdrawalApproval>();
     public DbSet<InfluencerPayoutHistory> InfluencerPayoutHistories => Set<InfluencerPayoutHistory>();
 
-    // ── M11 Collaborative Campaigns ─────────────────────────────────
+    // â”€â”€ M11 Collaborative Campaigns â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<Campaign> Campaigns => Set<Campaign>();
     public DbSet<CampaignDiscountSplit> CampaignDiscountSplits => Set<CampaignDiscountSplit>();
     public DbSet<CampaignProgram> CampaignPrograms => Set<CampaignProgram>();
@@ -311,7 +314,7 @@ public sealed class AppDbContext
     public DbSet<CampaignReservationAllocation> CampaignReservationAllocations => Set<CampaignReservationAllocation>();
     public DbSet<CampaignPricingPolicy> CampaignPricingPolicies => Set<CampaignPricingPolicy>();
 
-    // ── Advertising ──────────────────────────────────────────────────
+    // â”€â”€ Advertising â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<AdvertisingSettings> AdvertisingSettings => Set<AdvertisingSettings>();
     public DbSet<AdCommercialPolicy> AdCommercialPolicies => Set<AdCommercialPolicy>();
     public DbSet<AdSpace> AdSpaces => Set<AdSpace>();
@@ -323,7 +326,7 @@ public sealed class AppDbContext
     public DbSet<AdFinancialLedgerEntry> AdFinancialLedgerEntries => Set<AdFinancialLedgerEntry>();
     public DbSet<AdPlacementEvent> AdPlacementEvents => Set<AdPlacementEvent>();
 
-    // ── Offers & Promotions ──────────────────────────────────────────
+    // â”€â”€ Offers & Promotions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<Offer> Offers => Set<Offer>();
     public DbSet<OfferProgram> OfferPrograms => Set<OfferProgram>();
     public DbSet<OfferBundle> OfferBundles => Set<OfferBundle>();
@@ -332,16 +335,16 @@ public sealed class AppDbContext
     public DbSet<OfferRedemption> OfferRedemptions => Set<OfferRedemption>();
     public DbSet<OfferAuditLog> OfferAuditLogs => Set<OfferAuditLog>();
 
-    // ── Transactional Outbox & Inbox ─────────────────────────────────
+    // â”€â”€ Transactional Outbox & Inbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<InboxProcessedEvent> InboxProcessedEvents => Set<InboxProcessedEvent>();
 
-    // ── M12 Admin Dashboard ─────────────────────────────────────────
+    // â”€â”€ M12 Admin Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
     public DbSet<ProfitabilityAlert> ProfitabilityAlerts => Set<ProfitabilityAlert>();
     public DbSet<AdminNotification> AdminNotifications => Set<AdminNotification>();
 
-    // ── Voice Calls ──────────────────────────────────────────────────
+    // â”€â”€ Voice Calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<CallSession> CallSessions => Set<CallSession>();
 
     public DbSet<VoiceCallDeviceSession> VoiceCallDeviceSessions => Set<VoiceCallDeviceSession>();
@@ -482,3 +485,4 @@ public sealed class AppDbContext
         }
     }
 }
+

@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Testcontainers.PostgreSql;
+using MealMate.Testing;
 using Xunit;
 
 namespace MealMate.IntegrationTests.Advertising;
@@ -20,31 +21,27 @@ namespace MealMate.IntegrationTests.Advertising;
 /// unique bid idempotency under concurrent submits, and a single deterministic
 /// winner when two workers race to close the same auction.
 /// </summary>
-public class PostgreSqlAdAuctionConcurrencyTests : IAsyncLifetime
+public partial class PostgreSqlAdAuctionConcurrencyTests : IAsyncLifetime
 {
-    private PostgreSqlContainer _container = null!;
+    private readonly PostgresTestDatabase _database = new();
     private string _connectionString = null!;
 
     public async Task InitializeAsync()
     {
-        _container = new PostgreSqlBuilder()
-            .WithImage("postgres:16-alpine")
-            .Build();
-
         try
         {
-            await _container.StartAsync();
-            _connectionString = _container.GetConnectionString();
+            await _database.StartAsync();
+            _connectionString = _database.GetConnectionString();
             using var db = CreateContext();
             await db.Database.MigrateAsync();
         }
         catch (Exception ex)
         {
-            throw new Xunit.Sdk.XunitException("Docker/Postgres container failed to start for advertising concurrency tests.", ex);
+            throw new Xunit.Sdk.XunitException("Isolated PostgreSQL database failed to start for advertising tests.", ex);
         }
     }
 
-    public async Task DisposeAsync() => await _container.DisposeAsync();
+    public async Task DisposeAsync() => await _database.DisposeAsync();
 
     private AppDbContext CreateContext()
     {

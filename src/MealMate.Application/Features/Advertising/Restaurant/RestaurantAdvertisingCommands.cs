@@ -1,4 +1,4 @@
-using MealMate.Application.Common.Abstractions;
+﻿using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Domain.Advertising;
@@ -48,29 +48,37 @@ public sealed class GetAdOpportunitiesQueryHandler : IQueryHandler<GetAdOpportun
             return Error.Forbidden("Advertising.NotRestaurantActor", "Only restaurant actors can view advertising opportunities.");
         }
 
-        var now = _clock.UtcNow;
-        var policy = await _context.AdCommercialPolicies
-            .AsNoTracking()
-            .Where(p => p.ApprovedByUserId != null)
-            .OrderByDescending(p => p.Version)
-            .FirstOrDefaultAsync(ct);
+        if (!await _context.AdvertisingSettings.AsNoTracking().AnyAsync(s => s.AuctionsEnabled, ct))
+            return Result.Success<IReadOnlyList<AdOpportunityDto>>(Array.Empty<AdOpportunityDto>());
 
+        var now = _clock.UtcNow;
         var auctions = await _context.AdAuctions
             .AsNoTracking()
             .Include(a => a.AdSpace)
             .Include(a => a.Bids.Where(b => b.RestaurantId == _currentUser.RestaurantId.Value))
-            .Where(a => a.Status == AdAuctionStatus.Open && a.BidsCloseAtUtc > now)
+            .Where(a => a.Status == AdAuctionStatus.Open && a.BidsOpenAtUtc <= now &&
+                        a.BidsCloseAtUtc > now && a.AdSpace.IsActive)
             .OrderBy(a => a.BidsCloseAtUtc)
             .ToListAsync(ct);
-
-        var dtos = auctions.Select(a => new AdOpportunityDto(
-            a.Id, a.AdSpaceId, a.AdSpace.PlacementKey, a.AdSpace.NameAr, a.AdSpace.NameEn,
-            a.AdSpace.WidthPx, a.AdSpace.HeightPx,
-            a.BidsOpenAtUtc, a.BidsCloseAtUtc, a.DisplayStartsAtUtc, a.DisplayEndsAtUtc,
-            a.CurrencyCode ?? policy?.CurrencyCode ?? string.Empty,
-            policy?.MinimumBid ?? 0m, policy?.BidStep ?? 0m,
-            a.Bids.OrderByDescending(b => b.Amount).FirstOrDefault()?.Id,
-            a.Bids.Count == 0 ? null : a.Bids.Max(b => b.Amount))).ToList();
+        var policyIds = auctions.Select(a => a.PolicyId).Distinct().ToArray();
+        var policies = await _context.AdCommercialPolicies.AsNoTracking()
+            .Where(p => policyIds.Contains(p.Id) && p.ApprovedByUserId != null && p.ApprovedAtUtc != null)
+            .ToDictionaryAsync(p => p.Id, ct);
+        var dtos = new List<AdOpportunityDto>();
+        foreach (var auction in auctions)
+        {
+            if (!policies.TryGetValue(auction.PolicyId, out var policy) ||
+                policy.Version != auction.PolicyVersion || policy.MinimumBid <= 0 || policy.BidStep <= 0 ||
+                !string.Equals(auction.CurrencyCode, policy.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                continue;
+            dtos.Add(new AdOpportunityDto(
+                auction.Id, auction.AdSpaceId, auction.AdSpace.PlacementKey, auction.AdSpace.NameAr, auction.AdSpace.NameEn,
+                auction.AdSpace.WidthPx, auction.AdSpace.HeightPx,
+                auction.BidsOpenAtUtc, auction.BidsCloseAtUtc, auction.DisplayStartsAtUtc, auction.DisplayEndsAtUtc,
+                policy.CurrencyCode, policy.MinimumBid, policy.BidStep,
+                auction.Bids.OrderByDescending(b => b.Amount).ThenBy(b => b.AcceptedAtUtc).Select(b => (Guid?)b.Id).FirstOrDefault(),
+                auction.Bids.Count == 0 ? null : auction.Bids.Max(b => b.Amount)));
+        }
 
         return Result.Success<IReadOnlyList<AdOpportunityDto>>(dtos);
     }
@@ -138,11 +146,15 @@ public sealed class PlaceAdBidCommandHandler : ICommandHandler<PlaceAdBidCommand
         }
 
         var auction = await _context.AdAuctions
+            .Include(a => a.AdSpace)
             .FirstOrDefaultAsync(a => a.Id == request.AuctionId, ct);
         if (auction is null)
         {
             return Error.NotFound("Advertising.AuctionNotFound", "Auction was not found.");
         }
+
+        if (!auction.AdSpace.IsActive)
+            return Error.Conflict("Advertising.SpaceInactive", "The advertising space is no longer active.");
 
         if (auction.Status != AdAuctionStatus.Open)
         {
@@ -234,7 +246,12 @@ public sealed record MyAdBidDto(
     DateTime AcceptedAtUtc,
     DateTime DisplayStartsAtUtc,
     DateTime DisplayEndsAtUtc,
-    Guid? PlacementId = null);
+    Guid? PlacementId = null,
+    string? PlacementStatus = null,
+    string? ReviewNotes = null,
+    DateTime? ReviewedAtUtc = null,
+    string? SpaceNameAr = null,
+    string? SpaceNameEn = null);
 
 public sealed class GetMyAdBidsQueryHandler : IQueryHandler<GetMyAdBidsQuery, IReadOnlyList<MyAdBidDto>>
 {
@@ -263,16 +280,7 @@ public sealed class GetMyAdBidsQueryHandler : IQueryHandler<GetMyAdBidsQuery, IR
             .Take(100)
             .ToListAsync(ct);
 
-        var auctionIds = bids.Select(b => b.AdAuctionId).Distinct().ToArray();
-        var placementIds = await _context.AdPlacements.AsNoTracking()
-            .Where(p => auctionIds.Contains(p.AdAuctionId) && p.RestaurantId == _currentUser.RestaurantId.Value)
-            .ToDictionaryAsync(p => p.AdAuctionId, p => p.Id, ct);
-
-        var dtos = bids.Select(b => new MyAdBidDto(
-            b.Id, b.AdAuctionId, b.AdAuction.AdSpace.PlacementKey,
-            b.AdAuction.Status.ToString(), b.Amount, b.CurrencyCode, b.IsWinning,
-            b.AcceptedAtUtc, b.AdAuction.DisplayStartsAtUtc, b.AdAuction.DisplayEndsAtUtc,
-            placementIds.TryGetValue(b.AdAuctionId, out var placementId) ? placementId : null)).ToList();
+        var dtos = await RestaurantAdBidProjection.MapAsync(_context, bids, _currentUser.RestaurantId.Value, ct);
 
         return Result.Success<IReadOnlyList<MyAdBidDto>>(dtos);
     }

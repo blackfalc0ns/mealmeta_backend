@@ -31,18 +31,63 @@ Commands on the VPS:
 - systemctl stop mealmate-deploy.timer
 - cat /opt/mealmate/deployed-commit
 
-The initial public origin is http://157.173.104.121. A domain and HTTPS remain
-necessary before moving production login/payment clients to this origin.
-Payment callbacks require the configured HTTPS public origin, and existing
+The public API origin is https://api.trymealmate.com. Nginx terminates HTTPS
+and forwards WebSocket upgrades to the API. Payment callbacks require the
+configured HTTPS public origin, and existing
 encrypted uploads must be migrated or served from their existing source.
 The old MonsterASP deployment workflow has been removed. Its PowerShell
 script remains available for manual recovery only.
 
 Startup migrations are enabled after the initial readiness check, with a
-fresh database backup before each release activation. Subscription and voice
-background workers remain disabled on this host to avoid concurrent work
-with the old host. Before final cutover, verify the new API, stop the old host
-workers, then enable the corresponding workers in runtime.env and restart
-the API. Preserve real production signing and encryption keys when clients
+fresh database backup before each release activation. The voice recovery
+worker is enabled on this host as of 2026-10-16. Subscription workers retain
+their separate cutover setting; enabling voice recovery does not enable them.
+Voice recovery uses PostgreSQL advisory coordination and conditional lifecycle
+transitions. Before migrating another worker, verify its ownership and old-host
+state separately. Preserve real production signing and encryption keys when clients
 and encrypted data are migrated. The VPS initially has its own generated
 signing key, so sessions issued by the old API are not accepted on this origin.
+
+## Voice-call runtime configuration
+
+The current mobile release targets Android. Voice-calls v2, recovery, FCM,
+and authenticated TURN are enabled. iOS needs its real APNs/PushKit credentials
+and application bundle identifiers before it can be supported.
+
+Firebase uses `/etc/mealmate-secrets/firebase-service-account.json`, owned by
+`root:mealmate` with mode `0640` inside a directory with mode `0750`.
+`Firebase__CredentialPath` and `GOOGLE_APPLICATION_CREDENTIALS` point to that
+absolute path in `/etc/mealmate/runtime.env`; `Firebase__ProjectId` matches the
+service account's project. Keep the private key outside the repository and
+release directories. Do not replace it with a development example on deploy.
+
+Coturn uses `api.trymealmate.com`, port 3478 for UDP/TCP, port 5349 for TLS,
+and UDP relay ports 49152–50151 on this host. Keep the API's Coturn shared
+secret identical to the private Coturn configuration. `Coturn__EnableTls` and
+`Coturn__TlsCertConfigured` are true after verifying the listener and certificate.
+The TLS listener uses the hostname certificate, not a certificate for the IP.
+
+`ops/vps/coturn-certificate-renewal.sh` is installed as
+`/etc/letsencrypt/renewal-hooks/deploy/mealmate-coturn` with mode `0750`.
+It copies successfully renewed API certificates into `/etc/coturn/tls` with
+`root:turnserver` ownership and mode `0640`, then restarts active Coturn.
+Do not grant the service access to all of `/etc/letsencrypt`.
+To install the hook from a checkout on the VPS:
+
+```bash
+install -m 0750 ops/vps/coturn-certificate-renewal.sh /etc/letsencrypt/renewal-hooks/deploy/mealmate-coturn
+bash -n /etc/letsencrypt/renewal-hooks/deploy/mealmate-coturn
+RENEWED_LINEAGE=/etc/letsencrypt/live/api.trymealmate.com /etc/letsencrypt/renewal-hooks/deploy/mealmate-coturn
+```
+
+Voice recovery requires `BackgroundJobs__VoiceCallsEnabled=true` and a service
+restart after a configuration change. Confirm `VoiceCallRecoveryJob started`
+and the absence of recovery-cycle errors in the service journal. An API readiness
+response alone does not validate FCM credentials, device delivery, or TURN relay.
+
+After changing voice configuration, check HTTPS readiness, service-readable
+Firebase credentials, FCM validation-only requests for the customer and driver,
+and external authenticated TURN allocations over UDP, TCP, and verified TLS.
+Then test an actual Android call in both foreground and background, including
+ringing ACK, audio in both directions, hangup, expiry, and busy-state release.
+Provider acceptance and a successful allocation do not establish audible media.

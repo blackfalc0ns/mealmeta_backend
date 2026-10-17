@@ -394,8 +394,7 @@ public sealed class ReceiptPrintingService : IReceiptPrintingService
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == dailyOrder.SubscriptionDayId, cancellationToken);
 
-        var (customerNameAr, customerNameEn, areaAr, areaEn, addressLineAr, addressLineEn) =
-            await ResolveCustomerAndAddressAsync(day, cancellationToken);
+        var customerDto = await ResolveCustomerAndAddressAsync(day, cancellationToken);
 
         var mealSelections = await _db.DailyMealSelections
             .AsNoTracking()
@@ -444,13 +443,6 @@ public sealed class ReceiptPrintingService : IReceiptPrintingService
             restaurantLogoUrl,
             restaurantInitials);
 
-        var customerDto = new ReceiptCustomerDto(
-            customerNameAr,
-            customerNameEn,
-            areaAr,
-            areaEn,
-            addressLineAr,
-            addressLineEn);
 
         var deliveryDto = new ReceiptDeliveryDto(
             dailyOrder.ServiceDate,
@@ -516,7 +508,7 @@ public sealed class ReceiptPrintingService : IReceiptPrintingService
         return result;
     }
 
-    private async Task<(string NameAr, string NameEn, string AreaAr, string AreaEn, string AddressLineAr, string AddressLineEn)>
+    private async Task<ReceiptCustomerDto>
         ResolveCustomerAndAddressAsync(SubscriptionDay? day, CancellationToken cancellationToken)
     {
         var nameAr = "عميل MealMate";
@@ -525,6 +517,15 @@ public sealed class ReceiptPrintingService : IReceiptPrintingService
         var areaEn = "Kuwait";
         var addressLineAr = "";
         var addressLineEn = "";
+        string? governorate = null;
+        string? area = null;
+        string? block = null;
+        string? street = null;
+        string? avenue = null;
+        string? building = null;
+        string? floor = null;
+        string? unit = null;
+        string? notes = null;
 
         if (day?.DeliveryAddressId is { } addrId)
         {
@@ -534,6 +535,15 @@ public sealed class ReceiptPrintingService : IReceiptPrintingService
 
             if (address is not null)
             {
+                governorate = address.Governorate;
+                area = address.Area;
+                block = address.Block;
+                street = address.Street;
+                avenue = address.Avenue;
+                building = address.Building;
+                floor = address.Floor;
+                unit = address.Unit;
+                notes = address.Notes;
                 areaAr = string.IsNullOrWhiteSpace(address.Area) ? address.Governorate ?? "الكويت" : $"{address.Area} - قطعة {address.Block}";
                 areaEn = string.IsNullOrWhiteSpace(address.Area) ? address.Governorate ?? "Kuwait" : $"{address.Area} - Block {address.Block}";
 
@@ -562,7 +572,22 @@ public sealed class ReceiptPrintingService : IReceiptPrintingService
             }
         }
 
-        return (nameAr, nameEn, areaAr, areaEn, addressLineAr, addressLineEn);
+        return new ReceiptCustomerDto(
+            nameAr,
+            nameEn,
+            areaAr,
+            areaEn,
+            addressLineAr,
+            addressLineEn,
+            governorate,
+            area,
+            block,
+            street,
+            avenue,
+            building,
+            floor,
+            unit,
+            notes);
     }
 
     private async Task<string?> ResolveRestaurantLogoUrlAsync(Guid restaurantId, CancellationToken cancellationToken)

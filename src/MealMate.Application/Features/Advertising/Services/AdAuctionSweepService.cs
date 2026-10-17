@@ -125,6 +125,24 @@ public sealed class AdAuctionSweepService(
             var offers = await context.AdAuctionNextBidderOffers
                 .Where(o => o.AdAuctionId == auction.Id)
                 .ToListAsync(ct);
+            // Persist the original unpaid winner in the offer history before clearing
+            // its winning flag. Later declines must not offer the same restaurant again.
+            if (auction.WinningBidId.HasValue && auction.WinningRestaurantId.HasValue &&
+                offers.All(o => o.RestaurantId != auction.WinningRestaurantId.Value))
+            {
+                var expiredWinner = auction.Bids.FirstOrDefault(b => b.Id == auction.WinningBidId.Value);
+                if (expiredWinner is not null)
+                {
+                    var expired = new AdAuctionNextBidderOffer
+                    {
+                        AdAuctionId = auction.Id, AdBidId = expiredWinner.Id, RestaurantId = expiredWinner.RestaurantId,
+                        Amount = expiredWinner.Amount, CurrencyCode = expiredWinner.CurrencyCode,
+                        Status = "PaymentExpired", ExpiresAtUtc = now
+                    };
+                    context.AdAuctionNextBidderOffers.Add(expired);
+                    offers.Add(expired);
+                }
+            }
             var alreadyOfferedBidIds = offers.Select(o => o.AdBidId).ToHashSet();
             var alreadyOfferedRestaurantIds = offers.Select(o => o.RestaurantId).ToHashSet();
             if (auction.WinningRestaurantId.HasValue)
@@ -154,6 +172,7 @@ public sealed class AdAuctionSweepService(
             {
                 auction.Status = AdAuctionStatus.NoFill;
             }
+            foreach (var bid in auction.Bids) bid.IsWinning = false;
             auction.WinningRestaurantId = null;
             auction.WinningBidId = null;
             auction.WinningAmount = null;
