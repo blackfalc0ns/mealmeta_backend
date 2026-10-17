@@ -39,6 +39,57 @@ namespace MealMate.ApiTests.CustomerCheckout;
 public sealed class CustomerFamilySubscriptionFlowControllerTests
 {
     [Fact]
+    public async Task IndividualBundles_StaySelectableWhenProfileStepsArePending()
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid();
+        var (program, bundle) = await SeedProgramBundleOfferAsync(db);
+        SeedPricingRules(db);
+
+        var regionId = Guid.NewGuid();
+        db.RestaurantServiceRegions.Add(new RestaurantServiceRegion
+        {
+            RestaurantId = db.RestaurantProfiles.Select(x => x.Id).First(),
+            RegionId = regionId, IsActive = true,
+        });
+        db.CustomerAddresses.Add(new CustomerAddress
+        {
+            UserId = userId, Label = "Home", AddressLine = "Kuwait City",
+            RegionId = regionId, IsDefault = true,
+        });
+
+        var menu = new Menu { RestaurantId = db.RestaurantProfiles.Select(x => x.Id).First(), ProgramId = program.Id, NameAr = "قائمة", NameEn = "Menu", IsActive = true };
+        var ingredient = new Ingredient { RestaurantId = menu.RestaurantId, Code = "ING", NameAr = "مكون", NameEn = "Ingredient", IsActive = true, OriginCountryCode = "KW" };
+        db.AddRange(menu, ingredient,
+            new ProgramNutritionStandard { ProgramId = program.Id, MealCategory = "MAIN", KcalMin = 400, KcalMax = 600,
+                ProteinGMin = 30, ProteinGMax = 50, CarbsGMin = 40, CarbsGMax = 60, FatGMin = 15, FatGMax = 25, FiberGMin = 5 });
+        var meal = new Meal { RestaurantId = menu.RestaurantId, MenuId = menu.Id, Menu = menu, ProgramId = program.Id,
+            Code = "LUNCH", NameAr = "وجبة", NameEn = "Meal", Slot = "lunch", ApprovalStatus = VerificationStatus.Approved,
+            IsAvailableForNewOrders = true, AllergensReviewed = true, DataResponsibilityConfirmed = true,
+            Calories = 500, ProteinG = 40, CarbsG = 50, NetCarbsG = 50, FatG = 20, FiberG = 8 };
+        db.AddRange(meal, new MealImage { MealId = meal.Id, Meal = meal, ImageUrl = "/meal.png", IsPrimary = true },
+            new MealIngredient { MealId = meal.Id, Meal = meal, IngredientId = ingredient.Id, Ingredient = ingredient, PortionGrams = 100 });
+        await db.SaveChangesAsync();
+
+        // No CustomerProfile flags: allergies and dietary steps are still pending.
+        var queries = CreateSharedSubscriptionFlowQueryService(db, realPricing: true);
+
+        var result = await queries.GetProgramBundlesAsync(program.Id, userId, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var dto = result.Value;
+        dto.HasAllergies.Should().BeFalse();
+        dto.HasDietaryPreferences.Should().BeFalse();
+        dto.IsProfileComplete.Should().BeFalse();
+
+        var card = dto.Bundles.Single(x => x.BundleId == bundle.Id);
+        card.Availability.CanSelect.Should().BeTrue();
+        card.Availability.Status.Should().Be(SubscriptionCatalogAvailabilityStatus.SelectionRequired);
+        card.RestaurantCount.Should().Be(1);
+        card.Restaurants.Should().NotBeEmpty();
+    }
+
+    [Fact]
     public async Task ExplicitNonePreferences_PersistCompletionWithoutStoringControlCodes()
     {
         await using var db = CreateDb();

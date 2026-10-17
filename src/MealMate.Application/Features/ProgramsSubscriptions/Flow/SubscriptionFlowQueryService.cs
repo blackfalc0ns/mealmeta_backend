@@ -177,8 +177,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             .OrderBy(x => x.SortOrder)
             .ToListAsync(ct);
         var bundleIds = bundles.Select(x => x.Id).ToList();
-        var prepared = prerequisites.IsMet
-            ? await _preparation.ResolveAsync(customerUserId, deliveryRegionId!.Value, bundleIds, ct)
+        var prepared = deliveryRegionId.HasValue
+            ? await _preparation.ResolveAsync(customerUserId, deliveryRegionId.Value, bundleIds, ct)
             : new Dictionary<Guid, HashSet<Guid>>();
 
         var selectionCounts = await _db.Subscriptions.AsNoTracking()
@@ -228,7 +228,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             var restaurants = offers.Where(o => o.BundleId == x.Id)
                 .Select(o => o.RestaurantId)
                 .Distinct()
-                .Where(id => prerequisites.IsMet && preparedIds.Contains(id))
+                .Where(id => preparedIds.Contains(id))
                 .Select(id => restaurantCards.GetValueOrDefault(id))
                 .Where(r => r is not null)
                 .Select(r => r!)
@@ -433,7 +433,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                 return Error.Validation(allowed.ErrorCode ?? "subscription_flow.duration_not_available");
         }
 
-        var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(customerUserId, familyMemberId, ct);
+        var (gateError, deliveryRegionId) = familyMemberId is null
+            ? await ValidateIndividualBrowsePrerequisitesAsync(customerUserId, ct)
+            : await ValidateCustomerProfilePrerequisitesAsync(customerUserId, familyMemberId, ct);
         if (gateError is not null) return gateError;
 
         var catalog = await _sender.Send(new GetCustomerSubscriptionPricingCatalogQuery(), ct);
@@ -696,7 +698,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             return Error.NotFound("subscription_flow.bundle_not_found");
         var targetBundleId = effectiveBundleId.Value;
 
-        var (gateError, deliveryRegionId) = await ValidateCustomerProfilePrerequisitesAsync(customerUserId, familyMemberId, ct);
+        var (gateError, deliveryRegionId) = familyMemberId is null
+            ? await ValidateIndividualBrowsePrerequisitesAsync(customerUserId, ct)
+            : await ValidateCustomerProfilePrerequisitesAsync(customerUserId, familyMemberId, ct);
         if (gateError is not null) return gateError;
 
         var classification = await _tiers.ResolveAsync(programId, targetBundleId, eligibleOnly: true, ct);
@@ -838,9 +842,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
     private async Task<Error?> ValidateRestaurantBrowseAsync(Guid bundleId, Guid restaurantId, Guid customerUserId, CancellationToken ct)
     {
-        var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
-        if (!prerequisites.IsMet) return prerequisites.GateError;
-        var prepared = await _preparation.ResolveAsync(customerUserId, prerequisites.ActiveAddress!.RegionId, [bundleId], ct);
+        var (gateError, deliveryRegionId) = await ValidateIndividualBrowsePrerequisitesAsync(customerUserId, ct);
+        if (gateError is not null) return gateError;
+        var prepared = await _preparation.ResolveAsync(customerUserId, deliveryRegionId!.Value, [bundleId], ct);
         return prepared.GetValueOrDefault(bundleId)?.Contains(restaurantId) == true
             ? null : Error.NotFound("subscription_flow.restaurant_not_found");
     }
@@ -1309,6 +1313,26 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         return (null, prerequisites.ActiveAddress?.RegionId);
     }
 
+    /// <summary>
+    /// Browse endpoints (bundles, tiers, tier restaurants, meal details) stay open
+    /// for the allergies/dietary steps: only an address is required to evaluate
+    /// coverage. Those steps are enforced at the summary/checkout readiness gate
+    /// and reported by GetPrerequisitesAsync so the app routes the customer to the
+    /// pending screen before checkout.
+    /// </summary>
+    private async Task<(Error? Error, Guid? DeliveryRegionId)> ValidateIndividualBrowsePrerequisitesAsync(
+        Guid customerUserId, CancellationToken ct)
+    {
+        if (customerUserId == Guid.Empty)
+            return (Error.Unauthorized("auth.unauthorized"), null);
+
+        var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
+        if (!prerequisites.HasAddress)
+            return (prerequisites.GateError, null);
+
+        return (null, prerequisites.ActiveAddress!.RegionId);
+    }
+
     private async Task<(Error? Error, Guid? DeliveryRegionId)> ValidateFamilyMemberClassificationPrerequisitesAsync(
         Guid managerUserId, Guid familyMemberId, CancellationToken ct)
     {
@@ -1446,11 +1470,11 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     private async Task<Result<SubscriptionFlowContext>> ResolveBrowseContextAsync(
         SubscriptionFlowContext request, Guid customerUserId, CancellationToken ct)
     {
-        var prerequisites = await _prerequisitesGate.EvaluateAsync(customerUserId, ct);
-        if (!prerequisites.IsMet) return prerequisites.GateError!;
+        var (gateError, deliveryRegionId) = await ValidateIndividualBrowsePrerequisitesAsync(customerUserId, ct);
+        if (gateError is not null) return gateError!;
         if (!_schedule.TryResolveCheckoutStart(request.StartDate, request.IncludeFriday, out var firstDeliveryDate, out var startError))
             return Error.Validation(startError ?? "checkout.start_date_invalid");
-        return request with { RegionId = prerequisites.ActiveAddress!.RegionId, StartDate = firstDeliveryDate };
+        return request with { RegionId = deliveryRegionId!.Value, StartDate = firstDeliveryDate };
     }
 
     private async Task<string?> ValidateContextAsync(SubscriptionFlowContext r, CancellationToken ct)
