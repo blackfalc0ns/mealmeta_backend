@@ -1740,8 +1740,12 @@ public sealed class RestaurantOrderService
         // Validate the transition before generating documents or changing tracked state.
         var dailyOrder = await _db.RestaurantDailyOrders
             .FirstOrDefaultAsync(r => r.SubscriptionDayId == day.Id, cancellationToken);
+        // The preparation screen includes confirmed orders. Its ready action completes
+        // both legitimate kitchen steps, without allowing other invalid transitions.
+        var startsPreparationBeforeReady = targetOrderStatus == OrderStatus.ReadyForPickup
+            && dailyOrder?.Status == OrderStatus.RestaurantConfirmed;
         if (dailyOrder != null && dailyOrder.Status != targetOrderStatus
-            && !dailyOrder.CanTransitionTo(targetOrderStatus))
+            && !dailyOrder.CanTransitionTo(targetOrderStatus) && !startsPreparationBeforeReady)
         {
             return Result.Failure<bool>(Error.Conflict("INVALID_ORDER_TRANSITION",
                 $"Cannot transition order {dailyOrder.Id} from {dailyOrder.Status} to {targetOrderStatus}."));
@@ -1799,6 +1803,9 @@ public sealed class RestaurantOrderService
         {
             if (dailyOrder.Status != targetOrderStatus)
             {
+                // Do not advance tracked state until required documents are available.
+                if (startsPreparationBeforeReady)
+                    dailyOrder.Status = OrderStatus.Preparing;
                 dailyOrder.Status = targetOrderStatus;
                 if (targetOrderStatus == OrderStatus.ReadyForPickup)
                 {

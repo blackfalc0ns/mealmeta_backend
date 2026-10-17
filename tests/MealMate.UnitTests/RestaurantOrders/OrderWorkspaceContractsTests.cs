@@ -13,6 +13,84 @@ namespace MealMate.UnitTests.RestaurantOrders;
 
 public class OrderWorkspaceContractsTests
 {
+    [Theory]
+    [InlineData(OrderStatus.RestaurantConfirmed)]
+    [InlineData(OrderStatus.Preparing)]
+    public async Task Kitchen_ready_accepts_confirmed_or_preparing_order_with_complete_documents(OrderStatus status)
+    {
+        await using var db = CreateDb();
+        var day = Day(new(2026, 10, 15), SubscriptionDayStatus.ConfirmedByRestaurant);
+        var order = new RestaurantDailyOrder
+        {
+            RestaurantId = _restaurantId, SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate, Status = status
+        };
+        db.SubscriptionDays.Add(day);
+        db.RestaurantDailyOrders.Add(order);
+        db.MealBarcodes.Add(new() { SubscriptionDayId = day.Id, BarcodeValue = "kitchen-ready-contract", IsRevoked = false });
+        db.MealInvoices.Add(new() { RestaurantId = _restaurantId, SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate, InvoiceNumber = "kitchen-ready-contract" });
+        db.MealLabels.Add(new() { SubscriptionDayId = day.Id, Kind = MealLabelKind.Box });
+        await db.SaveChangesAsync();
+
+        var result = await Service(db).UpdateDailyOrderPrepStatusAsync(new(day.Id, "ready"), default);
+
+        Assert.True(result.IsSuccess, result.IsFailure ? result.Error.Code : null);
+        Assert.Equal(OrderStatus.ReadyForPickup, order.Status);
+        Assert.Equal(SubscriptionDayStatus.Preparing, day.Status);
+        Assert.Equal(_now, order.ReadyForPickupAtUtc);
+        Assert.Single(await db.OutboxMessages.Where(x => x.EventType == "KitchenOrderReadyForPickup").ToListAsync());
+
+        var repeated = await Service(db).UpdateDailyOrderPrepStatusAsync(new(day.Id, "ready"), default);
+        Assert.True(repeated.IsSuccess);
+        Assert.Equal(_now, order.ReadyForPickupAtUtc);
+        Assert.Single(await db.OutboxMessages.Where(x => x.EventType == "KitchenOrderReadyForPickup").ToListAsync());
+    }
+
+    [Fact]
+    public async Task Kitchen_ready_failure_does_not_advance_confirmed_order_without_documents()
+    {
+        await using var db = CreateDb();
+        var day = Day(new(2026, 10, 15), SubscriptionDayStatus.ConfirmedByRestaurant);
+        var order = new RestaurantDailyOrder { RestaurantId = _restaurantId, SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate, Status = OrderStatus.RestaurantConfirmed };
+        db.SubscriptionDays.Add(day);
+        db.RestaurantDailyOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var result = await Service(db).UpdateDailyOrderPrepStatusAsync(new(day.Id, "ready"), default);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("prep_documents.generator_unavailable", result.Error.Code);
+        Assert.Equal(OrderStatus.RestaurantConfirmed, order.Status);
+        Assert.Equal(SubscriptionDayStatus.ConfirmedByRestaurant, day.Status);
+        Assert.Null(order.ReadyForPickupAtUtc);
+        Assert.Empty(await db.OutboxMessages.Where(x => x.EventType == "KitchenOrderReadyForPickup").ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(OrderStatus.AwaitingRestaurantConfirmation)]
+    [InlineData(OrderStatus.OnTheWay)]
+    [InlineData(OrderStatus.Delivered)]
+    [InlineData(OrderStatus.Cancelled)]
+    public async Task Kitchen_ready_still_rejects_non_kitchen_transitions(OrderStatus status)
+    {
+        await using var db = CreateDb();
+        var day = Day(new(2026, 10, 15), SubscriptionDayStatus.Preparing);
+        var order = new RestaurantDailyOrder { RestaurantId = _restaurantId, SubscriptionDayId = day.Id,
+            ServiceDate = day.ServiceDate, Status = status };
+        db.SubscriptionDays.Add(day);
+        db.RestaurantDailyOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var result = await Service(db).UpdateDailyOrderPrepStatusAsync(new(day.Id, "ready"), default);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_ORDER_TRANSITION", result.Error.Code);
+        Assert.Equal(status, order.Status);
+        Assert.Null(order.ReadyForPickupAtUtc);
+    }
+
     private readonly Guid _restaurantId = Guid.NewGuid();
     private readonly DateTime _now = new(2026, 10, 14, 22, 0, 0, DateTimeKind.Utc);
     private AppDbContext CreateDb() => new(new DbContextOptionsBuilder<AppDbContext>()
