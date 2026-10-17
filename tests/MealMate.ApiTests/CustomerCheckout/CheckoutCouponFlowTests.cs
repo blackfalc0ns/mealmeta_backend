@@ -139,6 +139,7 @@ public sealed class CheckoutCouponFlowTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("checkout.payment_init_failed", result.Error.Code);
+        Assert.Equal("checkout.payment_init_failed", result.Error.Description);
         Assert.Empty(await db.OfferRedemptions.ToListAsync());
         Assert.Equal(0, (await db.Offers.SingleAsync(x => x.Id == offer.Id)).CurrentUsageCount);
         Assert.Equal(SubscriptionStatus.PaymentFailed,

@@ -325,7 +325,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                 CorrelationId = request.CorrelationId, TimestampUtc = _clock.UtcNow
             });
             await _db.SaveChangesAsync(ct);
-            return new Error("checkout.payment_init_failed", ex.Message, ErrorType.Failure);
+            return new Error("checkout.payment_init_failed", "checkout.payment_init_failed", ErrorType.Failure);
         }
 
         var gatewayPaymentId = paymentReceipt?.PaymentHandle;
@@ -683,7 +683,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                 TimestampUtc = _clock.UtcNow
             });
             await _db.SaveChangesAsync(ct);
-            return new Error("checkout.payment_init_failed", ex.Message, ErrorType.Failure);
+            return new Error("checkout.payment_init_failed", "checkout.payment_init_failed", ErrorType.Failure);
         }
 
         var gatewayPaymentId = paymentReceipt?.PaymentHandle;

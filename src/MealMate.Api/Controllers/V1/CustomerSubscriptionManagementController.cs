@@ -251,7 +251,8 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
             if (result.Error.Type == ErrorType.NotFound) return NotFound(new { error = "subscription.not_found" });
             if (result.Error.Type == ErrorType.Conflict) return Conflict(new { error = result.Error.Code });
             if (result.Error.Code == "upgrade.payment_init_failed")
-                return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: result.Error.Description);
+                return Problem(statusCode: StatusCodes.Status502BadGateway,
+                    title: Messages.GetMessage("payment.initialization_failed", "Payment initialization failed."), detail: result.Error.Description);
             return BadRequest(new { error = result.Error.Code });
         }
         return StatusCode(StatusCodes.Status201Created, result.Value);

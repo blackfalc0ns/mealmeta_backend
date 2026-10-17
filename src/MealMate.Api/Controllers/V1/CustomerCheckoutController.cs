@@ -141,7 +141,8 @@ public sealed class CustomerCheckoutController : ApiControllerBase
         var error = result.Error;
 
         if (error.Code == "checkout.payment_init_failed")
-            return Problem(statusCode: StatusCodes.Status502BadGateway, title: "Payment initialization failed", detail: error.Description);
+            return Problem(statusCode: StatusCodes.Status502BadGateway,
+                title: Messages.GetMessage("payment.initialization_failed", "Payment initialization failed."), detail: error.Description);
 
         if (error.Type == ErrorType.NotFound)
             return NotFound(new { error = error.Code });

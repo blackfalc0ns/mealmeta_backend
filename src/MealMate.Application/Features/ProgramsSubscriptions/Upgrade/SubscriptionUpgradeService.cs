@@ -362,7 +362,7 @@ public sealed class SubscriptionUpgradeService : ISubscriptionUpgradeService
             {
                 upgrade.Status = VerificationStatus.Rejected;
                 await _db.SaveChangesAsync(ct);
-                return Error.Failure("upgrade.payment_init_failed", ex.Message);
+                return Error.Failure("upgrade.payment_init_failed", "upgrade.payment_init_failed");
             }
 
             var paymentUrl = paymentReceipt.PaymentUrl;
