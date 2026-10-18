@@ -1610,7 +1610,22 @@ public sealed class FamilyDraftHandlers :
             IsInitialPurchaseOrReactivation: quote.IsInitialPurchaseOrReactivation,
             Restaurants: memberSchedules.First(x => x.MemberId == selected.Id).Restaurants,
             RestaurantRepetition: memberSchedules.First(x => x.MemberId == selected.Id).RestaurantRepetition,
-            Availability: memberSchedules.First(x => x.MemberId == selected.Id).Availability);
+            Availability: memberSchedules.First(x => x.MemberId == selected.Id).Availability,
+            BlockingReasons: blockReason is null
+                ? Array.Empty<MobileBlockingReasonDto>()
+                : new[] { new MobileBlockingReasonDto(
+                    blockReason,
+                    _messages.GetArabicMessage(MessageCodes.Family.CheckoutRequirementsIncomplete),
+                    _messages.GetEnglishMessage(MessageCodes.Family.CheckoutRequirementsIncomplete),
+                    Advice: new MobileRetryAdviceDto(false, RefreshSummaryRequired: true, RefreshAvailabilityRequired: true)) },
+            Eligibility: new MobileEligibilityDto(canCheckout,
+                blockReason is null
+                    ? Array.Empty<MobileBlockingReasonDto>()
+                    : new[] { new MobileBlockingReasonDto(blockReason,
+                        _messages.GetArabicMessage(MessageCodes.Family.CheckoutRequirementsIncomplete),
+                        _messages.GetEnglishMessage(MessageCodes.Family.CheckoutRequirementsIncomplete)) }),
+            SummaryExpiresAtUtc: _clock.UtcNow.AddMinutes(5),
+            ServerNowUtc: _clock.UtcNow);
     }
 
     public Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)

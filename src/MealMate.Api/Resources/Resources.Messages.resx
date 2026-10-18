@@ -603,6 +603,7 @@
   <data name="subscription_day_not_found" xml:space="preserve"><value>Subscription day was not found.</value></data>
   <data name="subscription.cannot_resume_completed_or_active" xml:space="preserve"><value>Cannot resume an active or already completed subscription.</value></data>
   <data name="subscription.resume_state_conflict" xml:space="preserve"><value>Subscription state does not allow resuming.</value></data>
+  <data name="family.checkout_requirements_incomplete" xml:space="preserve"><value>Checkout cannot continue until the requirements are complete.</value></data>
   <data name="subscription.restaurant_pool_not_ready" xml:space="preserve"><value>Restaurant pool is not ready for fulfillment.</value></data>
   <data name="subscription.freeze_request_already_pending" xml:space="preserve"><value>A freeze request is already pending for this subscription.</value></data>
   <data name="subscription.cancellation_not_available" xml:space="preserve"><value>Cancellation is not available for this subscription.</value></data>

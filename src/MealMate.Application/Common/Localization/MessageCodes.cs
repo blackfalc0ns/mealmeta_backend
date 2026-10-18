@@ -293,6 +293,7 @@ public static class MessageCodes
         public const string NotManager = "family.not_manager";
         public const string SessionExpired = "family.session_expired";
         public const string DetachRequiresActiveLogin = "family.detach_requires_active_login";
+        public const string CheckoutRequirementsIncomplete = "family.checkout_requirements_incomplete";
     }
 
     public static class Maps

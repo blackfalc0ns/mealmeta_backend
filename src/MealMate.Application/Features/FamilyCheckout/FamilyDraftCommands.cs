@@ -441,7 +441,11 @@ public sealed record FamilyCheckoutSummaryDto(
     bool IsInitialPurchaseOrReactivation = true,
     IReadOnlyList<FamilyMemberRestaurantDto>? Restaurants = null,
     RestaurantRepetitionSummaryDto? RestaurantRepetition = null,
-    IndividualRestaurantAvailabilityDto? Availability = null);
+    IndividualRestaurantAvailabilityDto? Availability = null,
+    IReadOnlyList<MobileBlockingReasonDto>? BlockingReasons = null,
+    MobileEligibilityDto? Eligibility = null,
+    DateTime? SummaryExpiresAtUtc = null,
+    DateTime? ServerNowUtc = null);
 
 /// <summary>Per-member delivery schedule and eligible restaurants for the payment review screen.</summary>
 public sealed record FamilyMemberRestaurantDto(Guid RestaurantId, string NameAr, string NameEn,

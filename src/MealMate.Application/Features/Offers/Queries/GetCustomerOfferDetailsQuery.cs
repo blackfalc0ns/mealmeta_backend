@@ -5,7 +5,11 @@ using MealMate.Application.Features.Offers.DTOs;
 
 namespace MealMate.Application.Features.Offers.Queries;
 
-public sealed record CustomerOfferDetailsDto(OfferDto Offer, DateTime ServerNowUtc);
+public sealed record CustomerOfferDetailsDto(
+    OfferDto Offer,
+    DateTime ServerNowUtc,
+    string CurrencyCode = "KWD",
+    int MoneyScale = 3);
 
 public sealed record GetCustomerOfferDetailsQuery(
     Guid OfferId,

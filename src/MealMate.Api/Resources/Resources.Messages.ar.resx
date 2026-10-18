@@ -545,6 +545,7 @@
   <data name="subscription_day_not_found" xml:space="preserve"><value>لم يتم العثور على يوم الاشتراك.</value></data>
   <data name="subscription.cannot_resume_completed_or_active" xml:space="preserve"><value>لا يمكن استئناف اشتراك نشط أو مكتمل بالفعل.</value></data>
   <data name="subscription.resume_state_conflict" xml:space="preserve"><value>حالة الاشتراك لا تسمح بالاستئناف.</value></data>
+  <data name="family.checkout_requirements_incomplete" xml:space="preserve"><value>لا يمكن متابعة الدفع قبل استكمال المتطلبات.</value></data>
   <data name="subscription.restaurant_pool_not_ready" xml:space="preserve"><value>مجموعة المطاعم غير جاهزة لتنفيذ الطلب.</value></data>
   <data name="subscription.freeze_request_already_pending" xml:space="preserve"><value>يوجد طلب تجميد معلق بالفعل لهذا الاشتراك.</value></data>
   <data name="subscription.cancellation_not_available" xml:space="preserve"><value>الإلغاء غير متاح لهذا الاشتراك.</value></data>

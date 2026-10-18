@@ -507,7 +507,11 @@ public sealed record SubscriptionOrderSummaryDto(
     RestaurantRepetitionSummaryDto? RestaurantRepetition = null,
     CustomerPaginationMetaDto? RestaurantsPagination = null,
     SubscriptionSummaryCouponDto? Coupon = null,
-    IndividualRestaurantAvailabilityDto? Availability = null);
+    IndividualRestaurantAvailabilityDto? Availability = null,
+    IReadOnlyList<MobileBlockingReasonDto>? BlockingReasons = null,
+    MobileEligibilityDto? Eligibility = null,
+    DateTime? SummaryExpiresAtUtc = null,
+    DateTime? ServerNowUtc = null);
 
 /// <summary>Contextual availability for the individual flow: one verdict for the whole period plus
 /// the eligible browse cards. TotalCount is the eligible list size before pagination.</summary>

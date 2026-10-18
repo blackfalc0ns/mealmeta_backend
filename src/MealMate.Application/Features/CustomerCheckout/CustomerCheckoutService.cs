@@ -227,7 +227,9 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                 }
 
                 var create = await _sender.Send(new CreateSubscriptionCommand(customerUserId, request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
-                    startDate, deliveryAddress, RegionId: resolvedRegionId, CorrelationId: request.CorrelationId, IncludeFriday: request.IncludeFriday,
+                    startDate, deliveryAddress, RegionId: resolvedRegionId,
+                    CorrelationId: request.CorrelationId ?? request.IdempotencyKey,
+                    IncludeFriday: request.IncludeFriday,
                     PromoCodeId: couponEvaluation is { IsValid: true }
                         && (couponEvaluation.PromoCodeId.HasValue ? pricingResult.PromoCodeDiscountApplied > 0m : pricingResult.CampaignDiscountApplied > 0m)
                         ? couponEvaluation.PromoCodeId : null,

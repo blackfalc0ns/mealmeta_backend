@@ -46,6 +46,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     private readonly ICustomerProfilePrerequisitesGate _prerequisitesGate;
     private readonly ISubscriptionCatalogPreparationService _preparation;
     private readonly ISubscriptionCatalogAvailabilityService _catalog;
+    private readonly IDateTimeProvider _clock;
 
     public SubscriptionFlowQueryService(
         IAppDbContext db,
@@ -87,6 +88,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         _coupons = couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine());
         _prerequisitesGate = prerequisitesGate ?? new CustomerProfilePrerequisitesGate(db);
         var resolvedClock = clock ?? new CustomerProfilePrerequisitesGate.SystemDateTimeProvider();
+        _clock = resolvedClock;
         var deliveryAddresses = new CustomerDeliveryAddressService(db, resolvedClock);
         _preparation = preparation ?? new SubscriptionCatalogPreparationService(db, resolvedClock);
         _catalog = catalogAvailability ?? new SubscriptionCatalogAvailabilityService(db, resolvedClock, deliveryAddresses,
@@ -1149,7 +1151,23 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             restaurantRepetition,
             restaurantsPagination,
             coupon,
-            readiness.Value.Availability);
+            readiness.Value.Availability,
+            BlockingReasons: readiness.Value.CheckoutBlockReason is null
+                ? Array.Empty<MobileBlockingReasonDto>()
+                : new[] { new MobileBlockingReasonDto(
+                    readiness.Value.CheckoutBlockReason,
+                    readiness.Value.WarningAr,
+                    readiness.Value.WarningEn,
+                    Advice: new MobileRetryAdviceDto(false, RefreshSummaryRequired: true)) },
+            Eligibility: new MobileEligibilityDto(readiness.Value.CanCheckout,
+                readiness.Value.CheckoutBlockReason is null
+                    ? Array.Empty<MobileBlockingReasonDto>()
+                    : new[] { new MobileBlockingReasonDto(
+                        readiness.Value.CheckoutBlockReason,
+                        readiness.Value.WarningAr,
+                        readiness.Value.WarningEn) }),
+            SummaryExpiresAtUtc: _clock.UtcNow.AddMinutes(5),
+            ServerNowUtc: _clock.UtcNow);
     }
 
     public async Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default, bool allowSandboxCompletion = true)
