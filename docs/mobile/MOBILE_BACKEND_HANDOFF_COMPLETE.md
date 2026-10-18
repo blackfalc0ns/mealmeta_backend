@@ -1,0 +1,221 @@
+# MealMate Mobile Backend Handoff — Complete Contract
+
+**Version:** 3.0  
+**Audience:** Flutter/mobile and backend teams  
+**Authority:** Server responses are the source of truth. The mobile client must not infer payment success, eligibility, price, coverage, or expiry locally.
+
+## 1. Canonical flow routes
+
+| Flow | Summary | Checkout | Payment status | Resume/retry |
+|---|---|---|---|---|
+| Individual | `GET /api/v1/customer/subscription-flow/summary` | `POST /api/v1/customer/subscriptions/checkout` | `GET /api/v1/customer/subscriptions/{subscriptionId}/payment` | `GET/POST /api/v1/customer/subscriptions/{subscriptionId}/resume` |
+| Family | `GET /api/v1/customer/family-subscription-flow/summary` | `POST /api/v1/customer/family-subscription-flow/checkout` | `GET /api/v1/customer/family-subscription-flow/payment-status` | `POST /api/v1/customer/family-subscription-flow/retry-payment` |
+
+Do not use the individual summary or resume route inside the family flow.
+
+## 2. Catalog and offer discovery
+
+```http
+GET /api/v1/customer/subscription-flow/types
+GET /api/v1/customer/subscription-flow/programs
+GET /api/v1/customer/subscription-flow/programs/{programId}/bundles
+GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/durations
+GET /api/v1/customer/subscription-flow/programs/{programId}/bundles/{bundleId}/tiers
+GET /api/v1/customer/family-subscription-flow/programs
+GET /api/v1/customer/family-subscription-flow/programs/{programId}/bundles
+GET /api/v1/customer/offers/hub
+GET /api/v1/customer/offers/{offerId}/details
+```
+
+Catalog records always expose stable IDs, `nameAr`, `nameEn`, active availability, category/tier, and server-supported durations. Never identify a program, bundle, tier, or offer by display name or image.
+
+Offer details return `offer`, `serverNowUtc`, `currencyCode`, and `moneyScale`. Offer targets include subscription type, program/bundle IDs, tier, and allowed durations. `IsAvailable`, `AvailabilityReasonCode`, and `IneligibilityReasonCodes` explain a visible but unusable offer.
+
+## 3. Address, preferences, eligibility, and coverage
+
+Individual readiness uses:
+
+```http
+GET /api/v1/customers/me/addresses
+GET /api/v1/customers/me/food-preferences/allergies
+GET /api/v1/customers/me/food-preferences/dietary
+GET /api/v1/customer/subscription-flow/readiness
+GET /api/v1/customer/subscription-flow/restaurant-availability
+```
+
+Family members use an independent address and coverage scope:
+
+```http
+GET  /api/v1/customer/family-subscription-flow/members/{memberId}/addresses
+POST /api/v1/customer/family-subscription-flow/members/{memberId}/addresses
+POST /api/v1/customer/family-subscription-flow/members/{memberId}/addresses/preview-coverage
+GET  /api/v1/customer/family-subscription-flow/members/{memberId}/addresses/{addressId}/preview-coverage
+```
+
+Checkout must be blocked when the server reports `address_required`, `allergies_required`, `dietary_preferences_required`, `no_restaurants_for_address`, or `no_restaurants_for_selection`.
+
+## 4. Individual summary
+
+```http
+GET /api/v1/customer/subscription-flow/summary?programId={id}&bundleId={id}&tier={tier}&durationDays={days}&startDate={yyyy-MM-dd}&includeFriday=false&promoCode={code}
+```
+
+Important fields:
+
+```json
+{
+  "basePrice": 300.000,
+  "campaignDiscount": 20.000,
+  "promoDiscount": 10.000,
+  "subtotal": 300.000,
+  "discount": 30.000,
+  "walletCredit": 0.000,
+  "gatewayFee": 0.000,
+  "finalPrice": 270.000,
+  "currencyCode": "KWD",
+  "canCheckout": true,
+  "checkoutBlockReason": null,
+  "blockingReasons": [],
+  "eligibility": { "isEligible": true, "reasons": [] },
+  "availability": { "isAvailable": true, "reasons": [] },
+  "summaryExpiresAtUtc": "2026-10-18T12:05:00Z",
+  "serverNowUtc": "2026-10-18T12:00:00Z"
+}
+```
+
+The canonical relationship is `subtotal = basePrice` and `discount = campaignDiscount + promoDiscount`. Do not add coupon discount a second time.
+
+## 5. Family setup and summary
+
+```http
+GET /api/v1/customer/family-subscription-flow/current
+GET /api/v1/customer/family-subscription-flow/packages
+POST /api/v1/customer/family-subscription-flow/members
+PUT /api/v1/customer/family-subscription-flow/members/{memberId}
+PUT /api/v1/customer/family-subscription-flow/members/{memberId}/plan
+PUT /api/v1/customer/family-subscription-flow/members/{memberId}/checkout-selection
+GET /api/v1/customer/family-subscription-flow/summary?memberId={memberId}
+```
+
+Every family member has a `memberId`, display name, role, relationship, setup status, selected plan, duration, delivery address, eligibility, and availability. The package supplies `minMembers`, `maxMembers`, and `discountPercent`.
+
+`familyDiscountPercent` uses a fractional scale: `0.100` means 10%. `durationDays` is always selected from the server catalog; values such as `26` in examples are illustrative.
+
+Family summary includes:
+
+```json
+{
+  "familyGroupId": "<uuid>",
+  "members": [{
+    "memberId": "<uuid>",
+    "displayName": "أحمد",
+    "role": "Manager",
+    "setupStatus": "Ready",
+    "checkoutSelected": true,
+    "isReady": true,
+    "programId": "<uuid>",
+    "bundleId": "<uuid>",
+    "selectedTier": "Basic",
+    "durationDays": 26,
+    "deliveryAddressId": "<uuid>",
+    "eligibility": { "isEligible": true, "reasons": [] },
+    "availability": { "isAvailable": true, "reasons": [] }
+  }],
+  "subtotal": 300.000,
+  "discount": 30.000,
+  "walletCredit": 0.000,
+  "gatewayFee": 0.000,
+  "familyDiscountPercent": 0.100,
+  "familyDiscountAmount": 30.000,
+  "finalPrice": 270.000,
+  "currencyCode": "KWD",
+  "selectedNewSubscriberCount": 2,
+  "batchId": "<uuid>",
+  "batchVersion": 7,
+  "canCheckout": true,
+  "checkoutBlockReason": null,
+  "blockingReasons": [],
+  "summaryExpiresAtUtc": "2026-10-18T12:05:00Z",
+  "serverNowUtc": "2026-10-18T12:00:00Z"
+}
+```
+
+`checkoutBlockReason` is a backward-compatible single code equal to the first `blockingReasons[].code`; use `blockingReasons` for full UI details.
+
+## 6. Coupon contract
+
+`summary.coupon` contains:
+
+```json
+{
+  "code": "WELCOME10",
+  "status": "valid",
+  "offerId": "<uuid>",
+  "discountAmount": 10.000,
+  "messageAr": "تم تطبيق الكوبون",
+  "messageEn": "Coupon applied"
+}
+```
+
+Supported statuses: `valid`, `not_found`, `expired`, `ineligible`, `stacking_conflict`, `usage_exhausted`. Preserve the entered code after a failed evaluation; do not retry it indefinitely or calculate the discount on-device.
+
+## 7. Checkout and idempotency
+
+Individual checkout accepts `idempotencyKey` in the request body. Family checkout accepts `idempotencyKey`, `batchId`, and `batchVersion` in the request body. Use the same key for the same logical attempt and a new key after changing selection, price, or quote version.
+
+Successful individual checkout returns `subscriptionId`; successful family checkout returns `familyGroupId` and `paymentAnchorSubscriptionId`. Both return `paymentUrl`, `holdExpiresAtUtc`, `finalPrice`, and `currencyCode` where applicable. Creating a payment URL is not proof of payment.
+
+## 8. Family payment status and retry
+
+```http
+GET /api/v1/customer/family-subscription-flow/payment-status
+```
+
+Response fields:
+
+`familyGroupId`, `batchId`, `batchVersion`, `paymentAnchorSubscriptionId`, `status`, `paymentStatus`, `finalPrice`, `currencyCode`, `holdExpiresAtUtc`, `isPaid`, `isFailed`, `isExpired`, `canRetry`, `retryPaymentEndpoint`, and `pendingCheckout`.
+
+`pendingCheckout` is returned from the family current/status surfaces when a valid payment attempt exists. It is not created by payment-status. Retry uses:
+
+```http
+POST /api/v1/customer/family-subscription-flow/retry-payment
+```
+
+If no retryable attempt exists, refresh summary and start a new family checkout. Never call individual `/subscriptions/{id}/resume` for a family group.
+
+## 9. Payment statuses
+
+Official payment values are `Pending`, `Paid`, `Failed`, `Expired`, `Cancelled`, `Refunded`, and `PartiallyRefunded`. `PaidPreparingCalendar` and `ReviewRequired` are lifecycle/review states, not payment success. Unknown values must be rendered as pending/review and must not unlock the calendar.
+
+## 10. Hold expiry
+
+After `holdExpiresAtUtc`, the server returns a conflict such as `checkout.capacity_hold_expired`, with retry/refresh advice. The client must refresh summary and availability, then create a new checkout/retry attempt with a new idempotency key. It must not reuse an expired payment URL.
+
+## 11. HTTP errors
+
+| Status | Meaning | Client action |
+|---|---|---|
+| `400` | Invalid field, duration, or redirect URL | Fix the request |
+| `404` | Missing or unavailable resource | Refresh catalog/screen |
+| `409` | State, quote, hold, or idempotency conflict | Refresh summary/status according to advice |
+| `410` | Explicitly expired resource | Start a new flow |
+| `422` | Commercial eligibility/coverage rejection | Show blocking reasons; do not pay |
+| `502` | Payment gateway failure | Retry only when advice allows |
+
+Every mobile-facing error uses a stable `code`, Arabic/English messages, optional `field`, and optional `advice` with `retryable`, `refreshSummaryRequired`, and `refreshAvailabilityRequired`.
+
+## 12. IDs and polling
+
+- Individual `subscriptionId`: payment status, individual resume, and individual polling.
+- Family `familyGroupId`: family summary/current/payment-status and family retry routing.
+- Family `paymentAnchorSubscriptionId`: gateway/payment attempt correlation; it is not a replacement for `familyGroupId` and is not the ID for every member subscription.
+
+After returning from WebView, poll the server status endpoint. A redirect callback alone never proves payment.
+
+## 13. Money, dates, and localization
+
+Currency is `KWD`; monetary values use three decimal places and server-side rounding. All timestamps ending in `Utc` are ISO-8601 UTC. `serverNowUtc` is authoritative for countdowns and expiry. Use `nameAr/nameEn` according to the active locale and preserve API codes/enums unchanged.
+
+## 14. Compatibility
+
+All new fields are additive. Older clients may omit `clientContractVersion` and new idempotency fields; the server continues returning legacy fields. New clients should read both legacy price fields and the aggregate aliases during migration, preferring `subtotal`, `discount`, `walletCredit`, `gatewayFee`, and `finalPrice`.
