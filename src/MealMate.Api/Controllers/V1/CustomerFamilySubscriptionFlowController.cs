@@ -405,6 +405,14 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         return HandleResult(await _familyFlow.GetSummaryAsync(memberId, cancellationToken));
     }
 
+    [HttpGet("payment-status")]
+    [ProducesResponseType(typeof(FamilyPaymentStatusDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PaymentStatus(CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await _familyFlow.GetPaymentStatusAsync(cancellationToken));
+    }
+
     [HttpGet("payment-methods")]
     public async Task<IActionResult> PaymentMethods([FromQuery] decimal amount, CancellationToken ct)
     {
@@ -506,6 +514,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         public Task<Result<FamilyGroupScreenDto>> SetMemberPlanAsync(Guid memberId, SetFamilyMemberPlanRequest request, CancellationToken ct = default) => Service.SetMemberPlanAsync(memberId, request, ct);
         public Task<Result<FamilyGroupScreenDto>> SetMemberStartDateAsync(Guid memberId, DateOnly startDate, CancellationToken ct = default) => Service.SetMemberStartDateAsync(memberId, startDate, ct);
         public Task<Result<FamilyCheckoutSummaryDto>> GetSummaryAsync(Guid? memberId, CancellationToken ct = default) => Service.GetSummaryAsync(memberId, ct);
+        public Task<Result<FamilyPaymentStatusDto>> GetPaymentStatusAsync(CancellationToken ct = default) => Service.GetPaymentStatusAsync(ct);
         public Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default) => Service.GetPaymentMethodsAsync(amount, ct);
         public Task<Result<FamilyCheckoutStartedDto>> StartCheckoutAsync(FamilyStartCheckoutRequest request, CancellationToken ct = default) => Service.StartCheckoutAsync(request, ct);
         public Task<Result<FamilyCheckoutStartedDto>> StartRenewalCheckoutAsync(Guid renewalRequestId, FamilyRenewalCheckoutRequest request, CancellationToken ct = default) => Service.StartRenewalCheckoutAsync(renewalRequestId, request, ct);

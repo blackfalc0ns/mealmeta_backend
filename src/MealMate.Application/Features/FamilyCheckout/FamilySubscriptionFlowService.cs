@@ -264,6 +264,9 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
     public Task<Result<FamilyCheckoutSummaryDto>> GetSummaryAsync(Guid? memberId, CancellationToken ct = default)
         => _sender.Send(new GetFamilyCheckoutSummaryQuery(memberId), ct);
 
+    public Task<Result<FamilyPaymentStatusDto>> GetPaymentStatusAsync(CancellationToken ct = default)
+        => FamilyPaymentStatusReader.ReadAsync(_db, _sender, ct);
+
     public async Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default)
     {
         if (_subscriptionFlowQueries is not null)

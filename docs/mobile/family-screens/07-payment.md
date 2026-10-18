@@ -24,6 +24,10 @@
 ```http
 GET /api/v1/customer/family-subscription-flow/summary
 GET /api/v1/customer/family-subscription-flow/summary?memberId={guid}
+
+بعد بدء الدفع أو العودة من البوابة، اقرأ حالة الدفع من:
+`GET /api/v1/customer/family-subscription-flow/payment-status`.
+إعادة الدفع العائلي تستخدم `POST /api/v1/customer/family-subscription-flow/retry-payment`؛ لا تستخدم resume الفردي.
 ```
 
 `memberId` يغيّر الكارت المظلل فقط. `finalPrice` واحد للسلة.
