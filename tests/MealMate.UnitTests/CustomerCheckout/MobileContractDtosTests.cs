@@ -26,4 +26,14 @@ public sealed class MobileContractDtosTests
         dto.Advice!.RefreshSummaryRequired.Should().BeTrue();
         JsonSerializer.Serialize(dto).Should().Contain("checkout.address_required");
     }
+
+    [Fact]
+    public void Money_breakdown_maps_legacy_and_new_names_without_double_counting()
+    {
+        var dto = new MobileMoneyBreakdownDto(100m, 15m, 0m, 2m, 87m,
+            CampaignDiscount: 10m, PromoDiscount: 5m);
+
+        dto.LegacyBasePrice.Should().Be(100m);
+        dto.LegacyDiscount.Should().Be(15m);
+    }
 }

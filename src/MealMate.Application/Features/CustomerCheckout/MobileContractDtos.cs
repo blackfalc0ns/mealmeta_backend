@@ -31,4 +31,12 @@ public sealed record MobileMoneyBreakdownDto(
     decimal WalletCredit,
     decimal GatewayFee,
     decimal FinalPrice,
-    string CurrencyCode = "KWD");
+    string CurrencyCode = "KWD",
+    decimal? BasePrice = null,
+    decimal? CampaignDiscount = null,
+    decimal? PromoDiscount = null)
+{
+    /// <summary>Compatibility mapping for clients that still use the legacy names.</summary>
+    public decimal LegacyBasePrice => BasePrice ?? Subtotal;
+    public decimal LegacyDiscount => CampaignDiscount.GetValueOrDefault() + PromoDiscount.GetValueOrDefault();
+}
