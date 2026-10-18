@@ -1,6 +1,6 @@
 # MealMate Mobile Backend Handoff — Complete Contract
 
-**Version:** 3.0  
+**Version:** 3.1
 **Audience:** Flutter/mobile and backend teams  
 **Authority:** Server responses are the source of truth. The mobile client must not infer payment success, eligibility, price, coverage, or expiry locally.
 
@@ -157,7 +157,7 @@ Family summary includes:
 }
 ```
 
-Supported statuses: `valid`, `not_found`, `expired`, `ineligible`, `stacking_conflict`, `usage_exhausted`. Preserve the entered code after a failed evaluation; do not retry it indefinitely or calculate the discount on-device.
+Supported evaluation statuses: `valid`, `not_found`, `inactive`, `not_started`, `expired`, `ineligible`, `stacking_conflict`, `usage_exhausted`. Preserve the entered code after a failed evaluation; do not retry it indefinitely or calculate the discount on-device.
 
 For family summary, send the code as a query parameter:
 
@@ -165,7 +165,7 @@ For family summary, send the code as a query parameter:
 GET /api/v1/customer/family-subscription-flow/summary?memberId={memberId}&promoCode={URL_ENCODED_CODE}
 ```
 
-The final family checkout repeats the same `promoCode` so the server revalidates it against the locked quote. The family response uses the same `summary.coupon` shape.
+The final family checkout repeats the same `promoCode` so the server revalidates it against the locked quote. On a successful eligible evaluation, the family response uses the same `summary.coupon` shape. Rejected family coupons currently return an API validation error (`family.coupon_rejected`); missing evaluation context returns `family.coupon_context_unavailable`. Keep the entered code on the client and do not treat these errors as an undiscounted successful quote. A locked batch preserves its frozen price; refresh the flow before changing its coupon. If the existing family discount is retained instead of the coupon, `coupon` may be null.
 
 ## 7. Checkout and idempotency
 
@@ -188,7 +188,7 @@ Content-Type: application/json
 }
 ```
 
-`batchId`, `batchVersion`, `idempotencyKey`, and `promoCode` are optional for older clients but should be sent by current clients. `callbackUrl` and `errorUrl` must use an allowed app scheme/host. Do not send undocumented fields.
+`batchId`, `batchVersion`, `idempotencyKey`, and `promoCode` are optional for older clients but should be sent by current clients. `callbackUrl` and `errorUrl` must use an allowed app scheme/host. `paymentMethodId` defaults to 3 when omitted. `promoCode` is optional; omit it when no coupon was selected. `correlationId` (optional string) and `clientContractVersion` (optional integer) are also supported; send the invoice contract version supported by the mobile release. Do not send undocumented fields.
 
 Individual checkout accepts `idempotencyKey` in the request body. Family checkout accepts `idempotencyKey`, `batchId`, and `batchVersion` in the request body. Use the same key for the same logical attempt and a new key after changing selection, price, or quote version.
 

@@ -406,6 +406,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     }
 
     // Backward-compatible overload for existing callers/tests that do not pass promoCode.
+    [NonAction]
     public Task<IActionResult> Summary(Guid? memberId, CancellationToken cancellationToken)
         => Summary(memberId, null, cancellationToken);
 

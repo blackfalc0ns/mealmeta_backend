@@ -1409,7 +1409,7 @@ public sealed class FamilyDraftHandlers :
                 batch.FamilyDiscountAmount, batch.FinalPrice, batch.CurrencyCode, batch.FamilyDiscountAmount > 0m,
                 batch.PackageId, batch.PackageMinMembers, batch.PackageMaxMembers,
                 batch.Lines.Count(x => x.CheckoutSelected), "locked"))
-            : await _quote.QuoteAsync(group, cancellationToken, new FamilyQuoteScope(activeIds, defaultSelection, request.PromoCode));
+            : await _quote.QuoteAsync(group, cancellationToken, new FamilyQuoteScope(activeIds, defaultSelection, request.PromoCode, managerId.Value));
         if (quoteResult.IsFailure) return quoteResult.Error;
         var quote = quoteResult.Value;
         var members = group.Members.Where(x => activeIds.Contains(x.Id)).OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
@@ -1629,7 +1629,12 @@ public sealed class FamilyDraftHandlers :
                         _messages.GetArabicMessage(MessageCodes.Family.CheckoutRequirementsIncomplete),
                         _messages.GetEnglishMessage(MessageCodes.Family.CheckoutRequirementsIncomplete)) }),
             SummaryExpiresAtUtc: _clock.UtcNow.AddMinutes(5),
-            ServerNowUtc: _clock.UtcNow);
+            ServerNowUtc: _clock.UtcNow,
+            Coupon: quote.CouponEvaluation is { } evaluation
+                ? new MealMate.Application.Features.ProgramsSubscriptions.Flow.SubscriptionSummaryCouponDto(
+                    evaluation.Code ?? string.Empty, evaluation.Status, evaluation.OfferId,
+                    quote.PromoCodeDiscountAmount, evaluation.MessageAr, evaluation.MessageEn)
+                : null);
     }
 
     public Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)

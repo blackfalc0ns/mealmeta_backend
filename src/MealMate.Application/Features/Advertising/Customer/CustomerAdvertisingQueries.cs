@@ -16,7 +16,8 @@ public sealed record AdPlacementDto(
     string TargetType,
     Guid? TargetId,
     DateTime DisplayEndsAtUtc,
-    bool IsSponsored);
+    bool IsSponsored,
+    DateTime? DisplayStartsAtUtc = null);
 
 public sealed record EligibleAdPlacementsDto(IReadOnlyList<AdPlacementDto> Placements, DateTime ServerNowUtc);
 
@@ -92,7 +93,8 @@ public sealed class GetEligibleAdPlacementsQueryHandler : IQueryHandler<GetEligi
                 p.TargetType ?? string.Empty,
                 p.TargetId,
                 p.DisplayEndsAtUtc!.Value,
-                IsSponsored: true));
+                IsSponsored: true,
+                DisplayStartsAtUtc: p.DisplayStartsAtUtc));
         }
 
         // Server clock drives any countdown; device clocks are never trusted for eligibility.

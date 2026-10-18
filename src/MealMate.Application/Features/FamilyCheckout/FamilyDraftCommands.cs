@@ -449,7 +449,8 @@ public sealed record FamilyCheckoutSummaryDto(
     IReadOnlyList<MobileBlockingReasonDto>? BlockingReasons = null,
     MobileEligibilityDto? Eligibility = null,
     DateTime? SummaryExpiresAtUtc = null,
-    DateTime? ServerNowUtc = null);
+    DateTime? ServerNowUtc = null,
+    MealMate.Application.Features.ProgramsSubscriptions.Flow.SubscriptionSummaryCouponDto? Coupon = null);
 
 /// <summary>Per-member delivery schedule and eligible restaurants for the payment review screen.</summary>
 public sealed record FamilyMemberRestaurantDto(Guid RestaurantId, string NameAr, string NameEn,
