@@ -74,6 +74,55 @@ finalPrice = subtotal - discount - walletCredit + gatewayFee
 
 `GET /api/v1/customer/family-subscription-flow/summary` يعيد عدد الأفراد، `members[]`، حدود الباقة `minMembers/maxMembers`، السعر لكل عضو، `selectedNewSubscriberCount`، ونتيجة أهلية وتغطية كل عضو. يرسل الموبايل `memberId` في query عند اختيار بطاقة عضو، بينما يرسل checkout `batchId` و`batchVersion` و`idempotencyKey` من آخر summary.
 
+الـ response الكامل المختصر:
+
+```json
+{
+  "familyGroupId": "<uuid>",
+  "familyName": "عائلة أحمد",
+  "selectedMemberId": "<uuid>",
+  "members": [{
+    "memberId": "<uuid>",
+    "displayName": "أحمد",
+    "role": "Manager",
+    "setupStatus": "Ready",
+    "checkoutSelected": true,
+    "isReady": true,
+    "memberSubscriptionId": null,
+    "upcomingSubscriptionId": null,
+    "programId": "<uuid>",
+    "bundleId": "<uuid>",
+    "selectedTier": "Basic",
+    "durationDays": 26,
+    "deliveryAddressId": "<uuid>",
+    "eligibility": { "isEligible": true, "reasons": [] },
+    "availability": { "isAvailable": true, "reasons": [] }
+  }],
+  "subtotal": 300.000,
+  "familyDiscountPercent": 0.100,
+  "familyDiscountAmount": 30.000,
+  "finalPrice": 270.000,
+  "currencyCode": "KWD",
+  "selectedNewSubscriberCount": 2,
+  "batchId": "<uuid>",
+  "batchVersion": 7,
+  "canCheckout": true,
+  "checkoutBlockReason": null,
+  "blockingReasons": [],
+  "summaryExpiresAtUtc": "2026-10-18T12:05:00Z",
+  "serverNowUtc": "2026-10-18T12:00:00Z"
+}
+```
+
+`batchId` و`batchVersion` مصدرهما summary ويُرسلان في checkout. checkout يعيد `familyGroupId` و`paymentAnchorSubscriptionId` و`pendingCheckout`/بيانات الرابط عند نجاح بدء الدفع. payment-status لا ينشئ هذه القيم؛ يستخدم `subscriptionId` للفردي أو `familyGroupId` لقراءة محاولة العائلة ويعيد الحالة الحالية.
+
+### المسارات القانونية
+
+- الفلو الفردي: `/api/v1/customer/subscription-flow/summary`.
+- الفلو العائلي: `/api/v1/customer/family-subscription-flow/summary`.
+
+لا تستعمل المسار الفردي داخل شاشة العائلة، ولا ترسل معرف العائلة إلى `/subscriptions/{id}/resume`.
+
 ## العروض
 
 `GET /api/v1/customer/offers/{offerId}/details` يعيد `offer` و`serverNowUtc` و`currencyCode` و`moneyScale`. يحتوي العرض على أهداف البرنامج/الباقة والتصنيف والمدد، حالة التوفر، وcodes عدم الأهلية عند وجودها.
