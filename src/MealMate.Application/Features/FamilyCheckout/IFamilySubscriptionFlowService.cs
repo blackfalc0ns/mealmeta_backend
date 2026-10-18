@@ -39,6 +39,7 @@ public interface IFamilySubscriptionFlowService
     Task<Result<FamilyGroupScreenDto>> SetMemberPlanAsync(Guid memberId, SetFamilyMemberPlanRequest request, CancellationToken ct = default);
     Task<Result<FamilyGroupScreenDto>> SetMemberStartDateAsync(Guid memberId, DateOnly startDate, CancellationToken ct = default);
     Task<Result<FamilyCheckoutSummaryDto>> GetSummaryAsync(Guid? memberId, CancellationToken ct = default);
+    Task<Result<FamilyCheckoutSummaryDto>> GetSummaryAsync(Guid? memberId, string? promoCode, CancellationToken ct = default);
     Task<Result<FamilyPaymentStatusDto>> GetPaymentStatusAsync(CancellationToken ct = default);
     Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default);
     Task<Result<FamilyCheckoutStartedDto>> StartCheckoutAsync(FamilyStartCheckoutRequest request, CancellationToken ct = default);

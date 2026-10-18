@@ -159,7 +159,36 @@ Family summary includes:
 
 Supported statuses: `valid`, `not_found`, `expired`, `ineligible`, `stacking_conflict`, `usage_exhausted`. Preserve the entered code after a failed evaluation; do not retry it indefinitely or calculate the discount on-device.
 
+For family summary, send the code as a query parameter:
+
+```http
+GET /api/v1/customer/family-subscription-flow/summary?memberId={memberId}&promoCode={URL_ENCODED_CODE}
+```
+
+The final family checkout repeats the same `promoCode` so the server revalidates it against the locked quote. The family response uses the same `summary.coupon` shape.
+
 ## 7. Checkout and idempotency
+
+Family checkout request:
+
+```http
+POST /api/v1/customer/family-subscription-flow/checkout
+Content-Type: application/json
+```
+
+```json
+{
+  "batchId": "<uuid>",
+  "batchVersion": 7,
+  "idempotencyKey": "<stable-key>",
+  "paymentMethodId": 3,
+  "promoCode": "WELCOME10",
+  "callbackUrl": "<APP_CALLBACK_URL>",
+  "errorUrl": "<APP_ERROR_URL>"
+}
+```
+
+`batchId`, `batchVersion`, `idempotencyKey`, and `promoCode` are optional for older clients but should be sent by current clients. `callbackUrl` and `errorUrl` must use an allowed app scheme/host. Do not send undocumented fields.
 
 Individual checkout accepts `idempotencyKey` in the request body. Family checkout accepts `idempotencyKey`, `batchId`, and `batchVersion` in the request body. Use the same key for the same logical attempt and a new key after changing selection, price, or quote version.
 
@@ -170,6 +199,8 @@ Successful individual checkout returns `subscriptionId`; successful family check
 ```http
 GET /api/v1/customer/family-subscription-flow/payment-status
 ```
+
+This endpoint takes no identifier query parameters. It resolves the authenticated customer's current family group from the access token, then reads its latest initial batch. Do not send `familyGroupId`, `batchId`, or `paymentAnchorSubscriptionId` to select another attempt.
 
 Response fields:
 
@@ -187,11 +218,24 @@ If no retryable attempt exists, refresh summary and start a new family checkout.
 
 Official payment values are `Pending`, `Paid`, `Failed`, `Expired`, `Cancelled`, `Refunded`, and `PartiallyRefunded`. `PaidPreparingCalendar` and `ReviewRequired` are lifecycle/review states, not payment success. Unknown values must be rendered as pending/review and must not unlock the calendar.
 
-## 10. Hold expiry
+## 10. Advertising and analytics
+
+```http
+GET /api/v1/customer/advertising/placements?placementKey={placementKey}
+POST /api/v1/customer/advertising/events
+```
+
+Placements include `displayStartsAtUtc` and `displayEndsAtUtc`; show an ad only inside `[displayStartsAtUtc, displayEndsAtUtc)`. `eventType` is `impression` or `click`. Events are idempotent on `(placementId, eventId)`; resending the same event is ignored and never counted twice.
+
+```json
+{ "placementId": "<uuid>", "eventId": "<client-id>", "eventType": "impression" }
+```
+
+## 11. Hold expiry
 
 After `holdExpiresAtUtc`, the server returns a conflict such as `checkout.capacity_hold_expired`, with retry/refresh advice. The client must refresh summary and availability, then create a new checkout/retry attempt with a new idempotency key. It must not reuse an expired payment URL.
 
-## 11. HTTP errors
+## 12. HTTP errors
 
 | Status | Meaning | Client action |
 |---|---|---|
@@ -204,7 +248,7 @@ After `holdExpiresAtUtc`, the server returns a conflict such as `checkout.capaci
 
 Every mobile-facing error uses a stable `code`, Arabic/English messages, optional `field`, and optional `advice` with `retryable`, `refreshSummaryRequired`, and `refreshAvailabilityRequired`.
 
-## 12. IDs and polling
+## 13. IDs and polling
 
 - Individual `subscriptionId`: payment status, individual resume, and individual polling.
 - Family `familyGroupId`: family summary/current/payment-status and family retry routing.
@@ -212,10 +256,10 @@ Every mobile-facing error uses a stable `code`, Arabic/English messages, optiona
 
 After returning from WebView, poll the server status endpoint. A redirect callback alone never proves payment.
 
-## 13. Money, dates, and localization
+## 14. Money, dates, and localization
 
 Currency is `KWD`; monetary values use three decimal places and server-side rounding. All timestamps ending in `Utc` are ISO-8601 UTC. `serverNowUtc` is authoritative for countdowns and expiry. Use `nameAr/nameEn` according to the active locale and preserve API codes/enums unchanged.
 
-## 14. Compatibility
+## 15. Compatibility
 
 All new fields are additive. Older clients may omit `clientContractVersion` and new idempotency fields; the server continues returning legacy fields. New clients should read both legacy price fields and the aggregate aliases during migration, preferring `subtotal`, `discount`, `walletCredit`, `gatewayFee`, and `finalPrice`.

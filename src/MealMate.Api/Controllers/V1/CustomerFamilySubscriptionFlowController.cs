@@ -399,11 +399,15 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
 
     [HttpGet("summary")]
     [ProducesResponseType(typeof(FamilyCheckoutSummaryDto), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Summary([FromQuery] Guid? memberId, CancellationToken cancellationToken)
+    public async Task<IActionResult> Summary([FromQuery] Guid? memberId, [FromQuery] string? promoCode, CancellationToken cancellationToken)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await _familyFlow.GetSummaryAsync(memberId, cancellationToken));
+        return HandleResult(await _familyFlow.GetSummaryAsync(memberId, promoCode, cancellationToken));
     }
+
+    // Backward-compatible overload for existing callers/tests that do not pass promoCode.
+    public Task<IActionResult> Summary(Guid? memberId, CancellationToken cancellationToken)
+        => Summary(memberId, null, cancellationToken);
 
     [HttpGet("payment-status")]
     [ProducesResponseType(typeof(FamilyPaymentStatusDto), StatusCodes.Status200OK)]
@@ -514,6 +518,7 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         public Task<Result<FamilyGroupScreenDto>> SetMemberPlanAsync(Guid memberId, SetFamilyMemberPlanRequest request, CancellationToken ct = default) => Service.SetMemberPlanAsync(memberId, request, ct);
         public Task<Result<FamilyGroupScreenDto>> SetMemberStartDateAsync(Guid memberId, DateOnly startDate, CancellationToken ct = default) => Service.SetMemberStartDateAsync(memberId, startDate, ct);
         public Task<Result<FamilyCheckoutSummaryDto>> GetSummaryAsync(Guid? memberId, CancellationToken ct = default) => Service.GetSummaryAsync(memberId, ct);
+        public Task<Result<FamilyCheckoutSummaryDto>> GetSummaryAsync(Guid? memberId, string? promoCode, CancellationToken ct = default) => Service.GetSummaryAsync(memberId, promoCode, ct);
         public Task<Result<FamilyPaymentStatusDto>> GetPaymentStatusAsync(CancellationToken ct = default) => Service.GetPaymentStatusAsync(ct);
         public Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default) => Service.GetPaymentMethodsAsync(amount, ct);
         public Task<Result<FamilyCheckoutStartedDto>> StartCheckoutAsync(FamilyStartCheckoutRequest request, CancellationToken ct = default) => Service.StartCheckoutAsync(request, ct);

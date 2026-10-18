@@ -262,7 +262,10 @@ public sealed class FamilySubscriptionFlowService : IFamilySubscriptionFlowServi
         => _sender.Send(new SetFamilyMemberStartDateCommand(memberId, startDate), ct);
 
     public Task<Result<FamilyCheckoutSummaryDto>> GetSummaryAsync(Guid? memberId, CancellationToken ct = default)
-        => _sender.Send(new GetFamilyCheckoutSummaryQuery(memberId), ct);
+        => GetSummaryAsync(memberId, null, ct);
+
+    public Task<Result<FamilyCheckoutSummaryDto>> GetSummaryAsync(Guid? memberId, string? promoCode, CancellationToken ct = default)
+        => _sender.Send(new GetFamilyCheckoutSummaryQuery(memberId, promoCode), ct);
 
     public Task<Result<FamilyPaymentStatusDto>> GetPaymentStatusAsync(CancellationToken ct = default)
         => FamilyPaymentStatusReader.ReadAsync(_db, _sender, ct);

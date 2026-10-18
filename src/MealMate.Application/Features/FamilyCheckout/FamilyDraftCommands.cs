@@ -520,4 +520,4 @@ public sealed record FamilyMealOverviewRowDto(
     bool Dinner,
     int MealsPerDay);
 
-public sealed record GetFamilyCheckoutSummaryQuery(Guid? MemberId = null) : IQuery<FamilyCheckoutSummaryDto>;
+public sealed record GetFamilyCheckoutSummaryQuery(Guid? MemberId = null, string? PromoCode = null) : IQuery<FamilyCheckoutSummaryDto>;

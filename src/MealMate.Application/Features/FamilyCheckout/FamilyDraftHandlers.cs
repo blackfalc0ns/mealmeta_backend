@@ -1409,7 +1409,7 @@ public sealed class FamilyDraftHandlers :
                 batch.FamilyDiscountAmount, batch.FinalPrice, batch.CurrencyCode, batch.FamilyDiscountAmount > 0m,
                 batch.PackageId, batch.PackageMinMembers, batch.PackageMaxMembers,
                 batch.Lines.Count(x => x.CheckoutSelected), "locked"))
-            : await _quote.QuoteAsync(group, cancellationToken, new FamilyQuoteScope(activeIds, defaultSelection));
+            : await _quote.QuoteAsync(group, cancellationToken, new FamilyQuoteScope(activeIds, defaultSelection, request.PromoCode));
         if (quoteResult.IsFailure) return quoteResult.Error;
         var quote = quoteResult.Value;
         var members = group.Members.Where(x => activeIds.Contains(x.Id)).OrderBy(x => x.Role == FamilyMemberRole.Manager ? 0 : 1)
