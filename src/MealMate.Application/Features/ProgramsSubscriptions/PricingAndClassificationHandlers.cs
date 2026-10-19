@@ -675,12 +675,18 @@ public sealed class PricingAndClassificationHandlers :
             : settings.Global;
         var durationRate = profile.ResolveRate(request.DurationDays);
 
-        var grossCartAmount = PricingEngine.Calculate(new PricingEngineRequest(
+        var undiscountedPrice = PricingEngine.Calculate(new PricingEngineRequest(
             MeanReferenceDailyPrice: meanA_t,
             DurationDays: request.DurationDays,
             DurationRatesPct: new Dictionary<int, decimal> { [request.DurationDays] = durationRate },
             FridayDays: request.IncludeFriday ? Math.Max(0, request.FridayDays) : 0,
-            FridayRatePct: profile.FridayRate)).FinalCustomerPrice;
+            FridayRatePct: profile.FridayRate));
+        // Exact-offer cards, summary and checkout evaluate the advertised percentage on
+        // the package subtotal. Gateway recovery and final rounding follow the discount.
+        // Keep the older code-only preview basis for clients outside the direct-offer flow.
+        var grossCartAmount = request.OfferId.HasValue
+            ? undiscountedPrice.UnroundedCorePrice
+            : undiscountedPrice.FinalCustomerPrice;
 
         var effectiveCampaignDiscount = request.CampaignDiscountKwd;
         var effectivePromoCodeDiscount = request.PromoCodeDiscountKwd;

@@ -173,12 +173,8 @@ public sealed class CustomerCheckoutGateControllerTests
         clock.UtcNow.Returns(now);
         clock.TodayUtc.Returns(new DateOnly(2026, 9, 7));
 
-        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        var schedule = new SubscriptionScheduleService(clock);
         var startDate = new DateOnly(2026, 9, 10);
-        schedule.TryResolveCheckoutStart(startDate, false, out Arg.Any<DateOnly>(), out Arg.Any<string>())
-            .Returns(x => { x[2] = startDate; x[3] = string.Empty; return true; });
-        schedule.TryResolveCheckoutStart(Arg.Any<DateOnly>(), false, out Arg.Any<DateOnly>(), out Arg.Any<string>())
-            .Returns(x => { x[2] = startDate; x[3] = string.Empty; return true; });
 
         await using var db = new AppDbContext(
             new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
@@ -244,6 +240,9 @@ public sealed class CustomerCheckoutGateControllerTests
         Assert.Equal("checkout", preview.NextScreen);
         Assert.Equal($"/api/v1/customer/subscriptions/{subscription.Id}/resume", preview.PayEndpoint);
         Assert.Equal(preview.SuggestedStartDate, preview.CheckoutStartDate);
+        // Friday is excluded, so the expired attempt suggests Saturday rather than Friday.
+        Assert.Equal(new DateOnly(2026, 9, 12), preview.SuggestedStartDate);
+        Assert.True(schedule.TryResolveCheckoutStart(preview.CheckoutStartDate, false, out _, out _));
     }
 
     [Fact]

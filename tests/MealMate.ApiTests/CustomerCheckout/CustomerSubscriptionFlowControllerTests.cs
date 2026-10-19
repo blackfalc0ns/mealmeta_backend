@@ -397,7 +397,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
-    public async Task Tiers_ButtonToClassification_WithoutPrerequisites_ReturnsConflict()
+    public async Task Tiers_RequiresAddress_ButAllowsBrowsingBeforeProfileCompletion()
     {
         await using var db = CreateDb();
         var program = new MealMate.Domain.ProgramsSubscriptions.Program
@@ -413,27 +413,43 @@ public sealed class CustomerSubscriptionFlowControllerTests
         db.AddRange(program, bundle);
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, out _, out var currentUser);
+        var sender = Substitute.For<ISender>();
+        IReadOnlyList<CustomerSubscriptionCatalogItemDto> catalog =
+        [
+            new(program.Id, program.NameAr, program.NameEn, bundle.Id, bundle.NameAr, bundle.NameEn,
+                RestaurantTier.Basic, "أساسي", "Basic", [new(6, 24m, 4m)], "KWD")
+        ];
+        sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(catalog));
+        var controller = CreateController(db, out _, out var currentUser, sender: sender);
         // 1. Without Address -> Conflict checkout.address_required
         var resultWithoutAddress = await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None);
         AssertConflict(resultWithoutAddress, "checkout.address_required", "ADDRESS", "POST /api/v1/customers/me/addresses");
 
-        // 2. With Address but without Allergies -> Conflict checkout.allergies_required
+        // Address is required for browsing. Allergies/dietary remain checkout prerequisites.
         await SeedCustomerDeliveryCoverageAsync(db, currentUser);
         var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == currentUser.UserId!.Value);
         profile.AllergiesCompletedAtUtc = null;
         await db.SaveChangesAsync();
 
         var resultWithoutAllergies = await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None);
-        AssertConflict(resultWithoutAllergies, "checkout.allergies_required", "ALLERGIES", "GET /api/v1/customers/me/food-preferences/allergies");
+        var allergyTiers = Assert.IsAssignableFrom<IReadOnlyList<CustomerTierOptionDto>>(
+            Assert.IsType<OkObjectResult>(resultWithoutAllergies).Value);
+        Assert.Equal(RestaurantTier.Basic, Assert.Single(allergyTiers).Tier);
+        AssertConflict(await controller.Prerequisites(CancellationToken.None),
+            "checkout.allergies_required", "ALLERGIES", "GET /api/v1/customers/me/food-preferences/allergies");
 
-        // 3. With Allergies but without Dietary -> Conflict checkout.dietary_preferences_required
+        // The same selection remains browsable while dietary confirmation is outstanding.
         profile.AllergiesCompletedAtUtc = DateTime.UtcNow;
         profile.DietaryPreferencesCompletedAtUtc = null;
         await db.SaveChangesAsync();
 
         var resultWithoutDietary = await controller.Tiers(program.Id, bundle.Id, null, false, CancellationToken.None);
-        AssertConflict(resultWithoutDietary, "checkout.dietary_preferences_required", "DIETARY_PREFERENCES", "GET /api/v1/customers/me/food-preferences/dietary");
+        var dietaryTiers = Assert.IsAssignableFrom<IReadOnlyList<CustomerTierOptionDto>>(
+            Assert.IsType<OkObjectResult>(resultWithoutDietary).Value);
+        Assert.Equal(RestaurantTier.Basic, Assert.Single(dietaryTiers).Tier);
+        AssertConflict(await controller.Prerequisites(CancellationToken.None),
+            "checkout.dietary_preferences_required", "DIETARY_PREFERENCES", "GET /api/v1/customers/me/food-preferences/dietary");
     }
 
     [Fact]
@@ -1351,10 +1367,9 @@ public sealed class CustomerSubscriptionFlowControllerTests
         await db.SaveChangesAsync();
 
         var result = Assert.IsType<ConflictObjectResult>(await controller.Summary(
-            // +1 day: between 21:00-24:00 UTC the Kuwait calendar is already tomorrow, so the
-            // UTC date itself violates the "not before today (Kuwait)" rule and fails the gate.
+            // Keep the date valid so this test reaches the profile gate, not lead-time validation.
             new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26,
-                DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1)), CancellationToken.None));
+                DateOnly.FromDateTime(DateTime.UtcNow).AddDays(8)), CancellationToken.None));
         var payload = result.Value!;
         var error = payload.GetType().GetProperty("error")?.GetValue(payload)?.ToString();
         Assert.Equal(SubscriptionCheckoutGateCodes.ProfileIncomplete, error);
@@ -1438,9 +1453,9 @@ public sealed class CustomerSubscriptionFlowControllerTests
         profile.ActiveDeliveryAddressLine = address.AddressLine;
         await db.SaveChangesAsync();
 
-        // Summary validates StartDate against Kuwait calendar day, not UTC date.
+        var firstDeliveryDate = schedule.ResolveFirstDeliveryDate(schedule.GetKuwaitToday(), includeFriday: false);
         var result = Assert.IsType<OkObjectResult>(await controller.Summary(
-            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, schedule.GetKuwaitToday()), CancellationToken.None));
+            new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, firstDeliveryDate), CancellationToken.None));
         var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
         Assert.Equal(1, summary.RestaurantCount);
         Assert.Equal("العمل", summary.Address!.Label);
@@ -2169,7 +2184,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Fact]
-    public async Task Bundles_WhenPrerequisitesMissing_DisablesCardsWithSemanticReason()
+    public async Task Bundles_RequiresAddress_AndReportsProfileStepsWithoutBlockingBrowsing()
     {
         await using var db = CreateDb();
         var program = NewProgram("PRE_P1");
@@ -2204,9 +2219,13 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.True(noAllergiesDto.HasDeliveryAddress);
         Assert.False(noAllergiesDto.HasAllergies);
         var noAllergiesCard = Assert.Single(noAllergiesDto.Bundles);
-        Assert.False(noAllergiesCard.Availability!.CanSelect);
-        Assert.Equal(SubscriptionCatalogAvailabilityStatus.AllergiesRequired, noAllergiesCard.Availability.Status);
-        Assert.Equal("checkout.allergies_required", noAllergiesCard.Availability.MessageCode);
+        Assert.True(noAllergiesCard.Availability!.CanSelect);
+        Assert.Equal(SubscriptionCatalogAvailabilityStatus.SelectionRequired, noAllergiesCard.Availability.Status);
+        Assert.False(noAllergiesDto.IsProfileComplete);
+        var allergyEnvelope = Assert.IsType<SubscriptionCatalogBundlesEnvelopeDto>(
+            Assert.IsType<OkObjectResult>(await controller.CatalogBundles(program.Id, CancellationToken.None, null, null)).Value);
+        Assert.Equal("checkout.allergies_required", allergyEnvelope.RequiredProfileStep!.MessageCode);
+        Assert.Equal("ALLERGIES", allergyEnvelope.RequiredProfileStep.MissingStep);
 
         // Case 3: Allergies completed, but dietary preferences not completed
         profile.AllergiesCompletedAtUtc = DateTime.UtcNow;
@@ -2217,9 +2236,13 @@ public sealed class CustomerSubscriptionFlowControllerTests
         var noDietaryDto = Assert.IsType<CustomerProgramBundlesDto>(noDietaryResult.Value);
         Assert.False(noDietaryDto.HasDietaryPreferences);
         var noDietaryCard = Assert.Single(noDietaryDto.Bundles);
-        Assert.False(noDietaryCard.Availability!.CanSelect);
-        Assert.Equal(SubscriptionCatalogAvailabilityStatus.DietaryPreferencesRequired, noDietaryCard.Availability.Status);
-        Assert.Equal("checkout.dietary_preferences_required", noDietaryCard.Availability.MessageCode);
+        Assert.True(noDietaryCard.Availability!.CanSelect);
+        Assert.Equal(SubscriptionCatalogAvailabilityStatus.SelectionRequired, noDietaryCard.Availability.Status);
+        Assert.False(noDietaryDto.IsProfileComplete);
+        var dietaryEnvelope = Assert.IsType<SubscriptionCatalogBundlesEnvelopeDto>(
+            Assert.IsType<OkObjectResult>(await controller.CatalogBundles(program.Id, CancellationToken.None, null, null)).Value);
+        Assert.Equal("checkout.dietary_preferences_required", dietaryEnvelope.RequiredProfileStep!.MessageCode);
+        Assert.Equal("DIETARY_PREFERENCES", dietaryEnvelope.RequiredProfileStep.MissingStep);
 
         // Case 4: Complete profile
         profile.DietaryPreferencesCompletedAtUtc = DateTime.UtcNow;
@@ -2278,7 +2301,10 @@ public sealed class CustomerSubscriptionFlowControllerTests
         sender.Send(Arg.Any<GetCustomerSubscriptionPricingCatalogQuery>(), Arg.Any<CancellationToken>())
             .Returns(Result<IReadOnlyList<CustomerSubscriptionCatalogItemDto>>.Success(catalog));
 
-        var startDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(4));
+        var tierClock = Substitute.For<IDateTimeProvider>();
+        tierClock.UtcNow.Returns(DateTime.UtcNow);
+        var tierSchedule = new SubscriptionScheduleService(tierClock);
+        var startDate = tierSchedule.ResolveFirstDeliveryDate(tierSchedule.GetKuwaitToday(), false);
         var availability = Substitute.For<ISubscriptionRestaurantAvailabilityService>();
         availability.EvaluateDetailedAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), RestaurantTier.Basic,
                 Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<DateOnly?>(), Arg.Any<CancellationToken>())
@@ -2304,8 +2330,6 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.True(option.Availability.CanSelect);
         Assert.Equal(1, option.Availability.EligibleRestaurantCount);
         Assert.NotNull(option.Option.TotalPrice);
-        var tierClock = Substitute.For<IDateTimeProvider>();
-        tierClock.UtcNow.Returns(DateTime.UtcNow);
         Assert.True(new SubscriptionScheduleService(tierClock).TryResolveCheckoutStart(startDate, false, out var firstDeliveryDate, out _));
         await availability.Received(1).EvaluateDetailedAsync(
             tiersUser.UserId!.Value, program.Id, bundle.Id, RestaurantTier.Basic, 6, false, firstDeliveryDate, Arg.Any<CancellationToken>());
