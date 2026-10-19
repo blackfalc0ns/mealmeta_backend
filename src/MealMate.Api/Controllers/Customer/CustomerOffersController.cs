@@ -96,6 +96,24 @@ public sealed class CustomerOffersController : ApiControllerBase
             offerId, ResolveCustomerId(), cartAmount, durationDays, deliveryGovernorate,
             programId, bundleId, restaurantId), cancellationToken));
 
+    [Authorize]
+    [HttpGet("{offerId:guid}/purchase-options")]
+    public async Task<IActionResult> GetOfferPurchaseOptions(
+        Guid offerId,
+        [FromQuery] DateOnly? startDate = null,
+        [FromQuery] bool includeFriday = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var result = await Sender.Send(new GetCustomerOfferPurchaseOptionsQuery(
+            offerId, CurrentUser.UserId.Value, startDate, includeFriday), cancellationToken);
+        return HandleResult(result);
+    }
+
     [AllowAnonymous]
     [HttpPost("available")]
     public async Task<IActionResult> GetAvailableOffersPost(
