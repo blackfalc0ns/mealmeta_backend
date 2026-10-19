@@ -88,10 +88,13 @@
       "subscriptionId": "98765432-abcd-ef01-2345-6789abcdef01",
       "paymentUrl": "https://payzah.com/checkout/pay?session=...",
       "holdExpiresAtUtc": "2026-10-19T06:45:00Z",
-      "finalPrice": 45.000,
+      "finalPrice": 40.000,
       "paymentStatus": "Pending"
     }
     ```
+  > [!NOTE]
+  > قيمة `finalPrice` في رد الـ checkout هي المبلغ الصافي الفعلي المطلوب تحصيله عبر بوابة الدفع بعد استقطاع خصم العرض ورصيد المحفظة الترويجية تلقائيًا (60.000 إجمالي - 15.000 خصم - 5.000 محفظة = 40.000 د.ك).
+
   - **خطوات الموبايل بعد ذلك:**
     1. يفتح الموبايل الرابط `paymentUrl` داخل In-App WebView.
     2. عند إعادة التوجيه للـ `callbackUrl`، يستعلم الموبايل عن حالة الدفع عبر:  
