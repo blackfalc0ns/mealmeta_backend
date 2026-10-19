@@ -243,6 +243,8 @@ public interface IAppDbContext
     DbSet<OfferRestaurant> OfferRestaurants { get; }
     DbSet<OfferRedemption> OfferRedemptions { get; }
     DbSet<OfferAuditLog> OfferAuditLogs { get; }
+    DbSet<CustomerSavedOffer> CustomerSavedOffers { get; }
+    DbSet<CustomerOfferCalendarEntry> CustomerOfferCalendarEntries { get; }
 
     // Transactional Outbox & Inbox
     DbSet<MealMate.Domain.Common.OutboxMessage> OutboxMessages { get; }

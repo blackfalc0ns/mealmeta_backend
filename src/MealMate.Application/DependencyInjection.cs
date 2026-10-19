@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using FluentValidation;
 using MealMate.Application.Common.Behaviors;
 using MediatR;
@@ -142,6 +142,9 @@ public static class DependencyInjection
 
         // Dispatcher Smart Recommendation
         services.AddScoped<Features.DriverDelivery.Dispatcher.IDispatchRecommendationEngine, Features.DriverDelivery.Dispatcher.DispatchRecommendationEngine>();
+
+        // Customer Finance Services
+        services.AddScoped<Features.CustomerFinance.IWalletSpendingService, Features.CustomerFinance.WalletSpendingService>();
 
         return services;
     }

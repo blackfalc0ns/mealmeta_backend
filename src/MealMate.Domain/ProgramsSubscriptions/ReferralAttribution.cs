@@ -19,4 +19,15 @@ public sealed class ReferralAttribution : AuditableEntity
 
     /// <summary>ReferralCode whose policy version applied at attribution time, when known.</summary>
     public Guid? ReferralCodeId { get; set; }
+
+    /// <summary>
+    /// Reward columns, populated after the referred customer's first successful payment:
+    /// the referral policy percent in effect at attribution time, when the reward was
+    /// granted, and the qualifying subscription id when known.
+    /// </summary>
+    public decimal? RewardPercentSnapshot { get; set; }
+
+    public DateTime? RewardedAtUtc { get; set; }
+
+    public Guid? RewardSubscriptionId { get; set; }
 }

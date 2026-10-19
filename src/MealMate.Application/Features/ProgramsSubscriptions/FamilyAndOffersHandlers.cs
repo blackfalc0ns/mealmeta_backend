@@ -9,6 +9,7 @@ using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
+using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions;
 
@@ -208,21 +209,40 @@ public sealed class FamilyAndOffersHandlers :
         {
             if (!promo.IsActive)
             {
-                return new DiscountValidationResultDto(false, code, "PromoCode", 0m, "Promo code is inactive.");
+                return new DiscountValidationResultDto(false, code, "PromoCode", 0m, "Promo code is inactive.",
+                    EligibilityCode: SubscriptionCouponStatuses.Inactive,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.Inactive),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.Inactive));
             }
-            if (promo.StartsAtUtc > now || (promo.EndsAtUtc.HasValue && promo.EndsAtUtc.Value < now))
+            if (promo.StartsAtUtc > now)
             {
-                return new DiscountValidationResultDto(false, code, "PromoCode", 0m, "Promo code has expired or is not yet valid.");
+                return new DiscountValidationResultDto(false, code, "PromoCode", 0m, "Promo code is not yet valid.",
+                    EligibilityCode: SubscriptionCouponStatuses.NotStarted,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.NotStarted),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.NotStarted));
+            }
+            if (promo.EndsAtUtc.HasValue && promo.EndsAtUtc.Value < now)
+            {
+                return new DiscountValidationResultDto(false, code, "PromoCode", 0m, "Promo code has expired.",
+                    EligibilityCode: SubscriptionCouponStatuses.Expired,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.Expired),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.Expired));
             }
             if (promo.MaxUses.HasValue && promo.UsedCount >= promo.MaxUses.Value)
             {
-                return new DiscountValidationResultDto(false, code, "PromoCode", 0m, "Promo code usage limit reached.");
+                return new DiscountValidationResultDto(false, code, "PromoCode", 0m, "Promo code usage limit reached.",
+                    EligibilityCode: SubscriptionCouponStatuses.UsageExhausted,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.UsageExhausted),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.UsageExhausted));
             }
 
             if (!IsEligibleTarget(promo, request, _currentUser))
             {
                 return new DiscountValidationResultDto(false, code, "PromoCode", 0m,
-                    "Promo code is not eligible for this customer or subscription.", EligibilityCode: "target_mismatch");
+                    "Promo code is not eligible for this customer or subscription.",
+                    EligibilityCode: "target_mismatch",
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.Ineligible),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.Ineligible));
             }
 
             if (promo.DiscountPercent is not null)
@@ -239,7 +259,10 @@ public sealed class FamilyAndOffersHandlers :
                     EligibilityCode: "fixed_amount_rule");
             }
 
-            return new DiscountValidationResultDto(false, code, "PromoCode", 0m, "Promo code has no discount rule configured.");
+            return new DiscountValidationResultDto(false, code, "PromoCode", 0m, "Promo code has no discount rule configured.",
+                EligibilityCode: "no_rule",
+                FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.Ineligible),
+                FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.Ineligible));
         }
 
         // 2. Check ReferralCode
@@ -248,11 +271,34 @@ public sealed class FamilyAndOffersHandlers :
         {
             if (!referral.IsActive)
             {
-                return new DiscountValidationResultDto(false, code, "ReferralCode", 0m, "Referral code is inactive.");
+                return new DiscountValidationResultDto(false, code, "ReferralCode", 0m, "Referral code is inactive.",
+                    EligibilityCode: SubscriptionCouponStatuses.Inactive,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.Inactive, isReferralSource: true),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.Inactive, isReferralSource: true));
             }
             if (referral.MaxUses.HasValue && referral.UsedCount >= referral.MaxUses.Value)
             {
-                return new DiscountValidationResultDto(false, code, "ReferralCode", 0m, "Referral code usage limit reached.");
+                return new DiscountValidationResultDto(false, code, "ReferralCode", 0m, "Referral code usage limit reached.",
+                    EligibilityCode: SubscriptionCouponStatuses.UsageExhausted,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.UsageExhausted, isReferralSource: true),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.UsageExhausted, isReferralSource: true));
+            }
+
+            if (_currentUser.IsAuthenticated && _currentUser.UserId.HasValue && referral.OwnerUserId == _currentUser.UserId.Value)
+            {
+                return new DiscountValidationResultDto(false, code, "ReferralCode", 0m, "You cannot use your own referral code.",
+                    EligibilityCode: SubscriptionCouponStatuses.SelfReferral,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.SelfReferral, isReferralSource: true),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.SelfReferral, isReferralSource: true));
+            }
+
+            if (_currentUser.IsAuthenticated && _currentUser.UserId.HasValue &&
+                await _db.ReferralAttributions.AnyAsync(a => a.ReferredCustomerUserId == _currentUser.UserId.Value, cancellationToken))
+            {
+                return new DiscountValidationResultDto(false, code, "ReferralCode", 0m, "You have already used a referral code.",
+                    EligibilityCode: SubscriptionCouponStatuses.AlreadyAttributed,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.AlreadyAttributed, isReferralSource: true),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.AlreadyAttributed, isReferralSource: true));
             }
 
             // No implicit reward percentage: an unset policy is an honest failure, never a silent 10%.
@@ -260,7 +306,9 @@ public sealed class FamilyAndOffersHandlers :
             {
                 return new DiscountValidationResultDto(false, code, "ReferralCode", 0m,
                     "Referral reward policy is not configured for this code.",
-                    EligibilityCode: "reward_policy_unset");
+                    EligibilityCode: "reward_policy_unset",
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.RewardPolicyUnset, isReferralSource: true),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.RewardPolicyUnset, isReferralSource: true));
             }
 
             return new DiscountValidationResultDto(true, code, "ReferralCode", 0m, null,
@@ -268,7 +316,10 @@ public sealed class FamilyAndOffersHandlers :
                 EligibilityCode: "rule_only_amount_set_at_quote");
         }
 
-        return new DiscountValidationResultDto(false, code, "Unknown", 0m, $"Discount code '{code}' was not found.");
+        return new DiscountValidationResultDto(false, code, "Unknown", 0m, $"Discount code '{code}' was not found.",
+            EligibilityCode: SubscriptionCouponStatuses.NotFound,
+            FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.NotFound),
+            FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.NotFound));
     }
 
     private static bool IsEligibleTarget(PromoCode promo, ValidateDiscountCodeQuery request, ICurrentUser currentUser)

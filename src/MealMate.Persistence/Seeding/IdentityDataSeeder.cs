@@ -96,6 +96,7 @@ public static class IdentityDataSeeder
             PermissionCodes.AdminCoverageOperationsView,
             PermissionCodes.DriverRegView, PermissionCodes.DriverRegApprove, PermissionCodes.DriverRegReject,
             PermissionCodes.InfluencerView, PermissionCodes.CustomersView, PermissionCodes.CustomersSuspend,
+            PermissionCodes.CustomersWalletsManage,
             PermissionCodes.ProgramsView, PermissionCodes.ProgramsManage, PermissionCodes.ProgramsApprove,
             PermissionCodes.BundlesView, PermissionCodes.BundlesManage,
             PermissionCodes.SubscriptionsView, PermissionCodes.SubscriptionsManage, PermissionCodes.SubscriptionsPricing,

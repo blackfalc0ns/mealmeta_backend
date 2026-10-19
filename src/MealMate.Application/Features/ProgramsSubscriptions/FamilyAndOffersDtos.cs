@@ -54,7 +54,9 @@ public sealed record DiscountValidationResultDto(
     decimal CalculatedDiscountKwd,
     string? FailureReason,
     decimal? DiscountPercent = null,
-    string? EligibilityCode = null);
+    string? EligibilityCode = null,
+    string? FailureMessageAr = null,
+    string? FailureMessageEn = null);
 
 public sealed record CreatePromoCodeCommand(
     string Code,

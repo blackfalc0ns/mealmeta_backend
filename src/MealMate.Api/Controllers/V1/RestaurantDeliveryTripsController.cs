@@ -7,7 +7,7 @@ namespace MealMate.Api.Controllers.V1;
 
 [Route("api/v1/restaurants/delivery/trips")]
 [Route("api/restaurant/delivery/trips")]
-[AllowAnonymous]
+[Authorize(Policy = "RestaurantStaffPolicy")]
 public sealed class RestaurantDeliveryTripsController : ApiControllerBase
 {
     [HttpGet]

@@ -1,6 +1,7 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions.Referrals;
@@ -53,6 +54,12 @@ public sealed class GetReferralSummaryQueryHandler : IQueryHandler<GetReferralSu
             .AsNoTracking()
             .CountAsync(a => a.ReferrerUserId == userId, cancellationToken);
 
+        var rewardedCount = await _context.WalletTransactions
+            .AsNoTracking()
+            .CountAsync(t => t.CustomerUserId == userId
+                && t.ReferenceType == "ReferralReward"
+                && t.Type == WalletTransactionType.Credit, cancellationToken);
+
         var baseUrl = _configuration["PublicBaseUrl"];
         string? shareUrl = code is not null && !string.IsNullOrWhiteSpace(baseUrl)
             ? $"{baseUrl.TrimEnd('/')}/r/{code.Code}"
@@ -64,7 +71,7 @@ public sealed class GetReferralSummaryQueryHandler : IQueryHandler<GetReferralSu
             HasRewardPolicy: code?.RewardPercent is not null,
             RewardPercent: code?.RewardPercent?.Value,
             AttributedCount: attributedCount,
-            RewardedCount: 0,
+            RewardedCount: rewardedCount,
             EligibilityCode()));
     }
 

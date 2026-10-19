@@ -108,6 +108,8 @@ public sealed class GetCustomerAvailableOffersQueryHandler : IQueryHandler<GetCu
             .Select(g => new { OfferId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.OfferId, x => x.Count, cancellationToken);
 
+        var savedOfferIds = await CustomerSavedOfferMapping.LoadSavedOfferIdsAsync(_context, request.CustomerId, cancellationToken);
+
         var eligibleOffers = new List<OfferDto>();
 
         foreach (var offer in activeOffers)
@@ -127,7 +129,7 @@ public sealed class GetCustomerAvailableOffersQueryHandler : IQueryHandler<GetCu
             var eval = _eligibilityEngine.Evaluate(offer, ctx, now);
             if (eval.IsEligible)
             {
-                var dto = CreateOfferDraftCommandHandler.MapOfferDto(offer);
+                var dto = CustomerSavedOfferMapping.MapCustomerOffer(offer, savedOfferIds.Contains(offer.Id));
                 // A campaign without a synchronized offer is a read projection, not a new offer identity.
                 if (offer.CampaignId is { } campaignId && !existingCampaignIds.Contains(campaignId))
                     dto = dto with { Id = campaignId };

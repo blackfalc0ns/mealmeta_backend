@@ -1056,4 +1056,6 @@
   <data name="offers.customer.unavailable" xml:space="preserve"><value>هذا العرض غير متاح أو لا ينطبق على اختياراتك.</value></data>
   <data name="Advertising.SpaceInactive" xml:space="preserve"><value>المساحة الإعلانية لم تعد نشطة.</value></data>
   <data name="Advertising.ReasonTooLong" xml:space="preserve"><value>يجب ألا يتجاوز سبب الرد 500 حرف.</value></data>
+  <data name="offer.not_saved" xml:space="preserve"><value>هذا العرض غير محفوظ في قائمتك.</value></data>
+  <data name="offer.calendar_not_booked" xml:space="preserve"><value>هذا العرض غير مجدول على تقويمك في هذا التاريخ.</value></data>
 </root>

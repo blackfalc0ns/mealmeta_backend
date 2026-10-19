@@ -1076,10 +1076,16 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                     CustomerId: customerUserId, PromoCode: promoCode), ct);
                 if (discounted.IsFailure) return discounted.Error;
                 priceValue = discounted.Value;
-                // The pricing engine places the offer discount in the campaign slot; coupon.discountAmount
-                // repeats that applied amount so the client never sums the two fields.
+                // The pricing engine places offer/campaign discounts in the campaign slot and admin
+                // promo/referral discounts in the promo slot; coupon.discountAmount repeats the
+                // applied amount from that source so the client never sums the two fields.
+                // offerId carries the ReferralCodeId when the source is a referral code.
+                var appliedAmount = evaluation.PromoCodeId.HasValue || evaluation.IsReferral
+                    ? priceValue.PromoCodeDiscountApplied
+                    : priceValue.CampaignDiscountApplied;
                 coupon = new SubscriptionSummaryCouponDto(
-                    evaluation.Code!, evaluation.Status, evaluation.OfferId, priceValue.CampaignDiscountApplied,
+                    evaluation.Code!, evaluation.Status,
+                    evaluation.OfferId ?? evaluation.ReferralCodeId, appliedAmount,
                     evaluation.MessageAr, evaluation.MessageEn);
             }
             else

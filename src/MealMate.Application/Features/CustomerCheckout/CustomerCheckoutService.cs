@@ -14,6 +14,8 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
+using MealMate.Application.Features.CustomerFinance;
+
 namespace MealMate.Application.Features.CustomerCheckout;
 
 public sealed class CustomerCheckoutService : ICustomerCheckoutService
@@ -35,6 +37,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
     private readonly IRestaurantCapacityReader _capacityReader;
     private readonly ISubscriptionFlowCouponService _coupons;
     private readonly ISandboxCheckoutService? _sandbox;
+    private readonly IWalletSpendingService _wallets;
 
     public CustomerCheckoutService(
         IAppDbContext db,
@@ -54,7 +57,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         IRestaurantCapacityReader capacityReader,
         ISandboxCheckoutService? sandbox = null,
         ISubscriptionFlowCouponService? couponService = null,
-        IApplicationLockManager? applicationLocks = null)
+        IApplicationLockManager? applicationLocks = null,
+        IWalletSpendingService? wallets = null)
     {
         _db = db;
         _payments = payments;
@@ -73,6 +77,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         _capacityReader = capacityReader;
         _sandbox = sandbox;
         _coupons = couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock, applicationLocks);
+        _wallets = wallets ?? new WalletSpendingService(db, clock, applicationLocks);
     }
 
     public async Task<Result<IReadOnlyList<CheckoutCatalogItem>>> GetCatalogAsync(CancellationToken ct = default)
@@ -178,11 +183,14 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                 CustomerId: customerUserId, PromoCode: promoCode, CustomerSubscriptionType: "Individual"), ct);
             if (discounted.IsFailure) return discounted.Error;
             pricingResult = discounted.Value;
-            if (pricingResult.FinalCustomerPrice <= 0m)
-            {
-                return Error.Validation("checkout.coupon_full_discount_unsupported",
-                    "The coupon reduces the price to zero; no settlement path exists for a zero-amount subscription.");
-            }
+        }
+
+        // The pricing preview already folds the promotional wallet in (engine caps it under the
+        // coupon discount). A zero net price has no settlement path, coupon or wallet alike.
+        if (pricingResult.FinalCustomerPrice <= 0m)
+        {
+            return Error.Validation("checkout.coupon_full_discount_unsupported",
+                "The applied discounts (including wallet credit) reduce the price to zero; no settlement path exists.");
         }
 
         CheckoutReservationOutcome reservation;
@@ -230,15 +238,18 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                     startDate, deliveryAddress, RegionId: resolvedRegionId,
                     CorrelationId: request.CorrelationId ?? request.IdempotencyKey,
                     IncludeFriday: request.IncludeFriday,
-                    PromoCodeId: couponEvaluation is { IsValid: true }
+                    PromoCodeId: couponEvaluation is { IsValid: true, IsReferral: false }
                         && (couponEvaluation.PromoCodeId.HasValue ? pricingResult.PromoCodeDiscountApplied > 0m : pricingResult.CampaignDiscountApplied > 0m)
                         ? couponEvaluation.PromoCodeId : null,
-                    CouponOfferId: couponEvaluation is { IsValid: true }
+                    CouponOfferId: couponEvaluation is { IsValid: true, IsReferral: false }
                         && !couponEvaluation.PromoCodeId.HasValue && pricingResult.CampaignDiscountApplied > 0m
                         ? couponEvaluation.OfferId : null,
                     CouponDiscountKwd: couponEvaluation is { IsValid: true }
-                        ? couponEvaluation.PromoCodeId.HasValue ? pricingResult.PromoCodeDiscountApplied : pricingResult.CampaignDiscountApplied
+                        ? couponEvaluation.PromoCodeId.HasValue || couponEvaluation.IsReferral
+                            ? pricingResult.PromoCodeDiscountApplied
+                            : pricingResult.CampaignDiscountApplied
                         : 0m,
+                    WalletAppliedKwd: pricingResult.WalletCreditApplied,
                     CheckoutAnchorDate: chosenStartDate), transactionCt);
                 if (create.IsFailure) throw new CheckoutReservationException(create.Error.Code);
                 var expiresAt = _clock.UtcNow.AddMinutes(15);
@@ -246,13 +257,22 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                 // The coupon hold lives in the same transaction as the subscription so concurrent
                 // checkouts cannot exceed the offer's usage limits; released on failure/expiry.
                 if (couponEvaluation is { IsValid: true }
-                    && (couponEvaluation.PromoCodeId.HasValue
+                    && (couponEvaluation.PromoCodeId.HasValue || couponEvaluation.IsReferral
                         ? pricingResult.PromoCodeDiscountApplied > 0m
                         : pricingResult.CampaignDiscountApplied > 0m))
                     await _coupons.CreateCheckoutHoldAsync(
                         couponEvaluation, create.Value.Id, customerUserId,
-                        couponEvaluation.PromoCodeId.HasValue ? pricingResult.PromoCodeDiscountApplied : pricingResult.CampaignDiscountApplied,
+                        couponEvaluation.PromoCodeId.HasValue || couponEvaluation.IsReferral
+                            ? pricingResult.PromoCodeDiscountApplied
+                            : pricingResult.CampaignDiscountApplied,
                         transactionCt);
+
+                // The wallet hold is a ledger row only: the live balance is untouched until the
+                // payment is verified (converted to a debit) or fails (released).
+                if (pricingResult.WalletCreditApplied > 0m)
+                    await _wallets.CreateCheckoutHoldAsync(
+                        create.Value.Id, customerUserId, pricingResult.WalletCreditApplied,
+                        pricingResult.CurrencyCode, transactionCt);
 
                 foreach (var resolved in restaurant.MenuPlanVersionsByDate)
                     _db.CapacityHolds.Add(new CapacityHold { RestaurantId = restaurant.RestaurantId, SubscriptionId = create.Value.Id, MenuPlanVersionId = resolved.MenuPlanVersionId, ServiceDate = resolved.ServiceDate, Quantity = 1, Status = CapacityHoldStatus.PendingPayment, ExpiresAtUtc = expiresAt });
@@ -269,6 +289,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                     foreach (var prevSubId in prevSubIds)
                     {
                         await _coupons.ReleaseCheckoutRedemptionAsync(prevSubId, transactionCt);
+                        await _wallets.ReleaseCheckoutHoldAsync(prevSubId, customerUserId, transactionCt);
                     }
                 }
 
@@ -318,6 +339,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
             var failedHolds = await _db.CapacityHolds.Where(x => x.SubscriptionId == subscriptionId && x.Status == CapacityHoldStatus.PendingPayment).ToListAsync(ct);
             foreach (var hold in failedHolds) { hold.Status = CapacityHoldStatus.Released; hold.ReleasedAtUtc = _clock.UtcNow; }
             await _coupons.ReleaseCheckoutRedemptionAsync(subscriptionId, ct);
+            await _wallets.ReleaseCheckoutHoldAsync(subscriptionId, customerUserId, ct);
             _db.SubscriptionOperations.Add(new SubscriptionOperation
             {
                 SubscriptionId = subscriptionId, OperationType = "PAYMENT_INITIALIZATION_FAILED",
@@ -546,11 +568,14 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                 ExcludeSubscriptionId: subscription.Id), ct);
             if (discounted.IsFailure) return discounted.Error;
             pricingResult = discounted.Value;
-            if (pricingResult.FinalCustomerPrice <= 0m)
-            {
-                return Error.Validation("checkout.coupon_full_discount_unsupported",
-                    "The coupon reduces the price to zero; no settlement path exists for a zero-amount subscription.");
-            }
+        }
+
+        // Checkout resume re-applies the wallet credit; a fully covered balance still needs a
+        // settlement path, so a zero net price is rejected here too.
+        if (pricingResult.FinalCustomerPrice <= 0m)
+        {
+            return Error.Validation("checkout.coupon_full_discount_unsupported",
+                "The applied discounts (including wallet credit) reduce the price to zero; no settlement path exists.");
         }
 
         var regionId = subscription.RegionId ?? Guid.Empty;

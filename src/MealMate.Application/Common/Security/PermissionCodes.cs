@@ -56,6 +56,7 @@ public static class PermissionCodes
     // Customer admin ops
     public const string CustomersView = "customers.view";
     public const string CustomersSuspend = "customers.suspend";
+    public const string CustomersWalletsManage = "customers.wallets.manage";
 
     // Settings
     public const string SettingsManage = "settings.manage";
@@ -120,6 +121,7 @@ public static class PermissionCodes
         (AdminCoverageOperationsView, "View coverage operations trips and driver locations", "عرض رحلات التغطية ومواقع المندوبين", Module),
         (CustomersView, "View customers", "عرض العملاء", Module),
         (CustomersSuspend, "Suspend customers", "إيقاف العملاء", Module),
+        (CustomersWalletsManage, "Manage customer wallets", "إدارة محافظ العملاء", Module),
         (SettingsManage, "Manage system settings", "إدارة إعدادات النظام", Module),
         (ProgramsView, "View nutrition programs", "عرض البرامج الغذائية", ModulePrograms),
         (ProgramsManage, "Manage nutrition programs", "إدارة البرامج الغذائية", ModulePrograms),

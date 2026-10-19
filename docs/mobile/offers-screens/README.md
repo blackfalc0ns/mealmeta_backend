@@ -51,3 +51,17 @@ graph TD
    - كل عرض يعيد `endsAtUtc` و `remainingSpots`. استخدمهما لتشغيل عداد تنازلي نشط وعرض عدد المقاعد المتبقية لتحفيز العميل على الاشتراك.
 4. **تأكيد الاسترداد المالي**:
    - الاسترداد الفعلي للعرض لا يستهلك حصة العميل إلا بعد إتمام عملية الدفع بنجاح عبر بوابات الدفع (KNET / Apple Pay) لضمان عدم ضياع العرض على العميل في حال تعثر الدفع.
+
+---
+
+## 5. خريطة مسارات الـ Backend للشاشات (Route Reference Mapping)
+
+| الشاشة | المسار الأساسي (Endpoint) | الطريقة (Method) | الوصف |
+| :---: | :--- | :---: | :--- |
+| **12.01** | `/api/v1/customer/offers/hub`<br>`/api/v1/customer/offers/calendar`<br>`/api/v1/customer/offers/saved` | GET | تصفح العروض، تقويم العروض، وقائمة العروض المحفوظة |
+| **12.02** | `/api/v1/customer/offers/{id}`<br>`/api/v1/customer/offers/{id}/save`<br>`/api/v1/customer/offers/{id}/eligible-restaurants` | GET<br>POST<br>GET | تفاصيل العرض، حفظ/إلغاء حفظ العرض، وقائمة المطاعم المؤهلة |
+| **12.04** | `/api/v1/customer/pricing/preview`<br>`/api/v1/customer/offers/validate-discount` | POST<br>POST | معاينة الأسعار مع تطبيق العرض/الكوبون/الرصيد، والتحقق المباشر ثنائي اللغة |
+| **12.05** | `/api/v1/customer/subscriptions/{id}/checkout`<br>`/api/v1/customer/charity-donations/confirm-unified` | POST<br>POST | بدء الدفع مع تطبيق رصيد المحفظة تلقائياً وتأكيد التبرع الخيري الموحّد |
+| **12.06** | `/api/v1/customer/subscriptions/{id}/payment` | GET | **ملاحظة معمارية هامة (§F8):** شاشة 12.06 تُنفذ بالاعتماد على نفس مسار الدفع المتعدد للباقات كشاشة 12.04 (multi-bundle checkout)؛ لا يوجد نظام موازٍ منفصل باسم 'bundle activation' في الباك إند. |
+| **12.10** | `/api/v1/customer/offers/hub`<br>`/api/v1/customer/wallets`<br>`/api/v1/customer/wallets/transactions`<br>`/api/v1/customer/referrals/my-code` | GET<br>GET<br>GET<br>GET | مركز العروض الكبرى، أرصدة المحفظة النقدية والترويجية، وسجل الحركات، وكود إحالة العميل |
+

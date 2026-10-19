@@ -334,6 +334,8 @@ public sealed class AppDbContext
     public DbSet<OfferRestaurant> OfferRestaurants => Set<OfferRestaurant>();
     public DbSet<OfferRedemption> OfferRedemptions => Set<OfferRedemption>();
     public DbSet<OfferAuditLog> OfferAuditLogs => Set<OfferAuditLog>();
+    public DbSet<CustomerSavedOffer> CustomerSavedOffers => Set<CustomerSavedOffer>();
+    public DbSet<CustomerOfferCalendarEntry> CustomerOfferCalendarEntries => Set<CustomerOfferCalendarEntry>();
 
     // â”€â”€ Transactional Outbox & Inbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
@@ -452,6 +454,21 @@ public sealed class AppDbContext
         base.OnModelCreating(builder);
 
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        builder.Entity<CustomerSavedOffer>(b =>
+        {
+            b.HasIndex(x => new { x.CustomerUserId, x.OfferId }).IsUnique();
+            b.HasOne(x => x.Offer).WithMany().HasForeignKey(x => x.OfferId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<CustomerOfferCalendarEntry>(b =>
+        {
+            b.HasIndex(x => new { x.CustomerUserId, x.OfferId, x.ScheduledDate }).IsUnique();
+            b.HasOne(x => x.Offer).WithMany().HasForeignKey(x => x.OfferId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ReferralAttribution>(b =>
+        {
+            b.Property(x => x.RewardPercentSnapshot).HasColumnType("numeric(5,2)");
+        });
 
         ConfigureIdentityTableNames(builder);
         ApplySoftDeleteQueryFilters(builder);

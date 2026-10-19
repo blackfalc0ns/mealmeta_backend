@@ -136,6 +136,7 @@ public sealed class SubscriptionCommandHandlers :
             MeanReferenceDailyPrice: meanA_t,
             DurationDays: request.DurationDays,
             CampaignDiscountKwd: request.CouponDiscountKwd,
+            WalletPromoCreditKwd: request.WalletAppliedKwd,
             DurationRatesPct: new Dictionary<int, decimal> { [request.DurationDays] = rate },
             FridayDays: fridayDays,
             FridayRatePct: profile.FridayRate);
@@ -220,6 +221,7 @@ public sealed class SubscriptionCommandHandlers :
             DeliveryWindowEnd = deliveryWindowEnd,
             CouponOfferId = request.CouponOfferId,
             CouponDiscountKwd = request.CouponDiscountKwd,
+            WalletAppliedKwd = request.WalletAppliedKwd,
         });
 
         // Create immutable append-only SubscriptionSnapshot

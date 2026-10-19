@@ -55,7 +55,8 @@ public sealed record OfferDto(
     bool IsAvailable = true,
     string? AvailabilityReasonCode = null,
     IReadOnlyList<string>? IneligibilityReasonCodes = null,
-    DateTime? EligibilityCheckedAtUtc = null
+    DateTime? EligibilityCheckedAtUtc = null,
+    bool IsSaved = false
 );
 
 public sealed record OfferRedemptionResultDto(

@@ -794,6 +794,37 @@ public sealed class PricingAndClassificationHandlers :
                     }
                 }
             }
+            else
+            {
+                // Referral codes are the third source: the reward percentage occupies the promo
+                // discount slot under the same keep-the-larger-saving policy. The coupon chain
+                // (summary and checkout) owns the status verdicts — here we only price.
+                var referralCode = await _db.ReferralCodes.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.Code.ToUpper() == request.PromoCode.Trim().ToUpper(), cancellationToken);
+                if (referralCode is not null && referralCode.IsActive
+                    && referralCode.RewardPercent is not null
+                    && (!(referralCode.MaxUses is { } maxUses) || referralCode.UsedCount < maxUses))
+                {
+                    var referralDiscount = Math.Min(grossCartAmount,
+                        Math.Round(grossCartAmount * referralCode.RewardPercent.Value, 3, MidpointRounding.AwayFromZero));
+                    // Already-attributed customers lose here too: only customers without an
+                    // attribution row get the referral price.
+                    var alreadyAttributed = request.CustomerId is { } referralCustomerId
+                        && await _db.ReferralAttributions.AsNoTracking().AnyAsync(x =>
+                            x.ReferredCustomerUserId == referralCustomerId
+                            && x.RewardSubscriptionId != request.ExcludeSubscriptionId, cancellationToken);
+                    if (referralDiscount > 0m && !alreadyAttributed)
+                    {
+                        effectiveCampaignDiscount = Math.Max(0m, effectiveCampaignDiscount);
+                        effectivePromoCodeDiscount = Math.Max(0m, effectivePromoCodeDiscount);
+                        if (referralDiscount > effectiveCampaignDiscount + effectivePromoCodeDiscount)
+                        {
+                            effectiveCampaignDiscount = 0m;
+                            effectivePromoCodeDiscount = referralDiscount;
+                        }
+                    }
+                }
+            }
         }
 
         // A campaign and a coupon are alternative savings. Keep only the larger eligible
@@ -809,12 +840,25 @@ public sealed class PricingAndClassificationHandlers :
             DurationDays: request.DurationDays,
             CampaignDiscountKwd: effectiveCampaignDiscount,
             PromoCodeDiscountKwd: effectivePromoCodeDiscount,
+            WalletPromoCreditKwd: await LoadPromotionalWalletCreditAsync(request, cancellationToken),
             DurationRatesPct: new Dictionary<int, decimal> { [request.DurationDays] = durationRate },
             FridayDays: request.IncludeFriday ? Math.Max(0, request.FridayDays) : 0,
             FridayRatePct: profile.FridayRate);
 
         var result = PricingEngine.Calculate(pricingReq);
         return result;
+    }
+
+    private async Task<decimal> LoadPromotionalWalletCreditAsync(PreviewCustomerPricingQuery request, CancellationToken cancellationToken)
+    {
+        if (request.CustomerId is not { } walletCustomerId)
+            return 0m;
+        if (!string.IsNullOrEmpty(request.CustomerSubscriptionType) && request.CustomerSubscriptionType != "Individual")
+            return 0m;
+        return await _db.CustomerPromotionalWallets.AsNoTracking()
+            .Where(x => x.CustomerUserId == walletCustomerId)
+            .Select(x => (decimal?)x.Balance.Amount)
+            .FirstOrDefaultAsync(cancellationToken) ?? 0m;
     }
 
     private static CustomerSubscriptionDurationPriceDto CreateDurationPrice(int durationDays, decimal totalPriceKwd)

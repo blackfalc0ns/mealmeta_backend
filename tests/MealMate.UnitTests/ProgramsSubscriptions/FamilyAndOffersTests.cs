@@ -137,4 +137,76 @@ public class FamilyAndOffersTests
         result.Value.IsValid.Should().BeFalse();
         result.Value.FailureReason.Should().NotBeNullOrWhiteSpace();
     }
+
+    [Fact]
+    public async Task ValidateDiscountCode_ReturnsBilingualMessages_ForFailures()
+    {
+        using var db = new AppDbContext(CreateInMemoryOptions(), Substitute.For<IDomainEventDispatcher>());
+        var now = DateTime.UtcNow;
+        db.PromoCodes.Add(new PromoCode
+        {
+            Code = "INACTIVE_PROMO",
+            DiscountPercent = Percentage.FromFraction(0.1m),
+            IsActive = false,
+            StartsAtUtc = now.AddDays(-5),
+        });
+        db.PromoCodes.Add(new PromoCode
+        {
+            Code = "EXPIRED_PROMO",
+            DiscountPercent = Percentage.FromFraction(0.1m),
+            IsActive = true,
+            StartsAtUtc = now.AddDays(-10),
+            EndsAtUtc = now.AddDays(-1),
+        });
+        db.ReferralCodes.Add(new ReferralCode
+        {
+            Code = "INACTIVE_REF",
+            OwnerUserId = Guid.NewGuid(),
+            RewardPercent = Percentage.FromFraction(0.1m),
+            IsActive = false,
+        });
+        db.PromoCodes.Add(new PromoCode
+        {
+            Code = "VALID_PROMO",
+            DiscountPercent = Percentage.FromFraction(0.15m),
+            IsActive = true,
+            StartsAtUtc = now.AddDays(-1),
+            EndsAtUtc = now.AddDays(5),
+        });
+        await db.SaveChangesAsync();
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+        var handler = new FamilyAndOffersHandlers(db, Substitute.For<IAuditLogger>(), clock, Substitute.For<ICurrentUser>());
+
+        // 1. Not Found
+        var notFound = await handler.Handle(new ValidateDiscountCodeQuery("NONEXISTENT"), CancellationToken.None);
+        notFound.Value.IsValid.Should().BeFalse();
+        notFound.Value.FailureMessageAr.Should().Be("كود الخصم غير موجود");
+        notFound.Value.FailureMessageEn.Should().Be("This coupon code does not exist");
+
+        // 2. Inactive promo
+        var inactivePromo = await handler.Handle(new ValidateDiscountCodeQuery("INACTIVE_PROMO"), CancellationToken.None);
+        inactivePromo.Value.IsValid.Should().BeFalse();
+        inactivePromo.Value.FailureMessageAr.Should().Be("كود الخصم غير مُفعّل حاليًا");
+        inactivePromo.Value.FailureMessageEn.Should().Be("This coupon code is not active");
+
+        // 3. Expired promo
+        var expiredPromo = await handler.Handle(new ValidateDiscountCodeQuery("EXPIRED_PROMO"), CancellationToken.None);
+        expiredPromo.Value.IsValid.Should().BeFalse();
+        expiredPromo.Value.FailureMessageAr.Should().Be("انتهت صلاحية كود الخصم");
+        expiredPromo.Value.FailureMessageEn.Should().Be("This coupon code has expired");
+
+        // 4. Inactive referral
+        var inactiveRef = await handler.Handle(new ValidateDiscountCodeQuery("INACTIVE_REF"), CancellationToken.None);
+        inactiveRef.Value.IsValid.Should().BeFalse();
+        inactiveRef.Value.FailureMessageAr.Should().Be("كود الإحالة غير مُفعّل حاليًا");
+        inactiveRef.Value.FailureMessageEn.Should().Be("This referral code is not active");
+
+        // 5. Valid promo: Failure messages should be null
+        var validPromo = await handler.Handle(new ValidateDiscountCodeQuery("VALID_PROMO"), CancellationToken.None);
+        validPromo.Value.IsValid.Should().BeTrue();
+        validPromo.Value.FailureMessageAr.Should().BeNull();
+        validPromo.Value.FailureMessageEn.Should().BeNull();
+    }
 }

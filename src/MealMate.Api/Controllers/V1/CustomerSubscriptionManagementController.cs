@@ -78,6 +78,15 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
         return HandleResult(await amendments.GetAsync(id, _currentUser.UserId!.Value, ct));
     }
 
+    /// <summary>Unified checkout confirmation payload for a subscription (screen 12.05).</summary>
+    [HttpGet("{id:guid}/confirmation")]
+    [ProducesResponseType(typeof(SubscriptionCheckoutConfirmationDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Confirmation(Guid id, CancellationToken ct = default)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(new GetSubscriptionConfirmationQuery(id, _currentUser.UserId!.Value), ct));
+    }
+
     /// <summary>Chooser when the customer already has an individual subscription.</summary>
     [HttpGet("current/conversion-options")]
     [ProducesResponseType(typeof(SubscriptionConversionOptionsDto), StatusCodes.Status200OK)]

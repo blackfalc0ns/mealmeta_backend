@@ -128,6 +128,85 @@ public sealed class CustomerOffersController : ApiControllerBase
     }
 
     [Authorize]
+    [HttpPost("{offerId:guid}/save")]
+    public async Task<IActionResult> SaveOffer(Guid offerId, CancellationToken cancellationToken)
+    {
+        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var result = await Sender.Send(new SaveOfferCommand(offerId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [Authorize]
+    [HttpDelete("{offerId:guid}/save")]
+    public async Task<IActionResult> UnsaveOffer(Guid offerId, CancellationToken cancellationToken)
+    {
+        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var result = await Sender.Send(new UnsaveOfferCommand(offerId), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [Authorize]
+    [HttpPost("{offerId:guid}/calendar")]
+    public async Task<IActionResult> AddOfferToCalendar(
+        Guid offerId, [FromBody] AddOfferToCalendarRequest request, CancellationToken cancellationToken)
+    {
+        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var result = await Sender.Send(new AddOfferToCalendarCommand(offerId, request.ScheduledDate), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [Authorize]
+    [HttpDelete("{offerId:guid}/calendar/{date}")]
+    public async Task<IActionResult> RemoveOfferFromCalendar(Guid offerId, DateOnly date, CancellationToken cancellationToken)
+    {
+        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var result = await Sender.Send(new RemoveOfferFromCalendarCommand(offerId, date), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [Authorize]
+    [HttpGet("calendar")]
+    public async Task<IActionResult> GetOfferCalendar(CancellationToken cancellationToken)
+    {
+        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var result = await Sender.Send(new ListOfferCalendarQuery(), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [Authorize]
+    [HttpGet("saved")]
+    public async Task<IActionResult> GetSavedOffers(CancellationToken cancellationToken)
+    {
+        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var result = await Sender.Send(new GetSavedOffersQuery(), cancellationToken);
+        return HandleResult(result);
+    }
+
+    [Authorize]
     [HttpPost("redeem")]
     public async Task<IActionResult> Redeem([FromBody] RedeemOfferCommand command, CancellationToken cancellationToken)
     {
@@ -160,6 +239,19 @@ public sealed class CustomerOffersController : ApiControllerBase
         }
 
         var result = await Sender.Send(query, cancellationToken);
+        return HandleResult(result);
+    }
+
+    [Authorize]
+    [HttpGet("{offerId:guid}/eligible-restaurants")]
+    public async Task<IActionResult> GetEligibleRestaurants(Guid offerId, CancellationToken cancellationToken)
+    {
+        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var result = await Sender.Send(new GetOfferEligibleRestaurantsQuery(offerId), cancellationToken);
         return HandleResult(result);
     }
 

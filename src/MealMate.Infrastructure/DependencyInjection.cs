@@ -105,6 +105,11 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "MealMate/1.0");
         });
 
+        // Restaurant trip-detail route and timeline builders (Screen 05.02):
+        // provider-backed street geometry, persisted evidence events only.
+        services.AddScoped<MealMate.Application.Features.DriverDelivery.Trips.ITripRouteBuilder, MealMate.Application.Features.DriverDelivery.Trips.TripRouteBuilder>();
+        services.AddScoped<MealMate.Application.Features.DriverDelivery.Trips.ITripTimelineBuilder, MealMate.Application.Features.DriverDelivery.Trips.TripTimelineBuilder>();
+
         // Payzah Payment Integration Service
         services.AddHttpClient<IPaymentGatewayService, PayzahPaymentService>(client =>
         {

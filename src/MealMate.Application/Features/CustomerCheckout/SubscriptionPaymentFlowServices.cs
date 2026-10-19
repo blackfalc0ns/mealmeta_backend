@@ -3,6 +3,8 @@ using MealMate.Application.Features.FamilyCheckout;
 using MealMate.Application.Features.Offers.Services;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Flow;
+using MealMate.Application.Features.ProgramsSubscriptions.Referrals;
+using MealMate.Application.Features.CustomerFinance;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -66,6 +68,8 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
     private readonly IDateTimeProvider _clock;
     private readonly ICustomerPushNotifier _customerPush;
     private readonly ISubscriptionFlowCouponService _coupons;
+    private readonly IReferralRewardService? _referralRewards;
+    private readonly IWalletSpendingService _wallets;
     private readonly IApplicationLockManager? _locks;
 
     public SubscriptionPaymentProcessor(
@@ -78,10 +82,14 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         IDateTimeProvider clock,
         ICustomerPushNotifier? customerPush = null,
         ISubscriptionFlowCouponService? couponService = null,
-        IApplicationLockManager? locks = null)
-        => (_db, _payments, _transactions, _capacityLock, _schedule, _fulfillment, _clock, _customerPush, _coupons, _locks)
+        IApplicationLockManager? locks = null,
+        IReferralRewardService? referralRewards = null,
+        IWalletSpendingService? wallets = null)
+        => (_db, _payments, _transactions, _capacityLock, _schedule, _fulfillment, _clock, _customerPush, _coupons, _referralRewards, _wallets, _locks)
             = (db, payments, transactions, capacityLock, schedule, fulfillment, clock, customerPush ?? NullCustomerPushNotifier.Instance,
-                couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock, locks), locks);
+                couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock, locks),
+                referralRewards ?? new CustomerReferralRewardsService(db, clock, locks),
+                wallets ?? new WalletSpendingService(db, clock, locks), locks);
 
     public async Task<PaymentProcessingResult> VerifyAndProcessAsync(
         Guid subscriptionId,
@@ -467,6 +475,7 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
                 if (target.Status != SubscriptionStatus.PendingPayment)
                     continue;
                 await _coupons.ReleaseCheckoutRedemptionAsync(target.Id, ct);
+                await _wallets.ReleaseCheckoutHoldAsync(target.Id, target.CustomerUserId, ct);
 
                 var oldStatus = target.Status;
                 target.Status = SubscriptionStatus.PaymentFailed;
@@ -754,6 +763,12 @@ public sealed class SubscriptionPaymentProcessor : ISubscriptionPaymentProcessor
         var oldStatus = subscription.Status;
         subscription.Status = SubscriptionStatus.Paid;
         await _coupons.CommitCheckoutRedemptionAsync(subscription.Id, transactionCt);
+        // The wallet hold becomes a real balance reduction only when the payment is verified;
+        // the conversion is idempotent (a Debit row is never converted twice).
+        await _wallets.ConvertHoldToDebitAsync(subscription.Id, subscription.CustomerUserId, transactionCt);
+        // The referrer's reward is credited when the referred customer's subscription is paid;
+        // attribution rows are the source of truth and the call is idempotent (retries included).
+        await _referralRewards!.CompleteForPaidSubscriptionAsync(subscription, transactionCt);
         // Family siblings share one Payzah payment. Subscriptions.PaymentId is unique,
         // so only the receipt-owning row (the payment anchor) stores the gateway id.
         if (writeReceipt)

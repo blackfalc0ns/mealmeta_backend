@@ -9896,6 +9896,101 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("ClassificationRuns", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.CustomerOfferCalendarEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OfferId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("ScheduledDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Source")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OfferId");
+
+                    b.HasIndex("CustomerUserId", "OfferId", "ScheduledDate")
+                        .IsUnique();
+
+                    b.ToTable("CustomerOfferCalendarEntries");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.CustomerSavedOffer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OfferId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OfferId");
+
+                    b.HasIndex("CustomerUserId", "OfferId")
+                        .IsUnique();
+
+                    b.ToTable("CustomerSavedOffers");
+                });
+
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.DiscountsAndReferralLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -11295,6 +11390,15 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<Guid>("ReferrerUserId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal?>("RewardPercentSnapshot")
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<Guid?>("RewardSubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RewardedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -18979,6 +19083,28 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("Bundle");
 
                     b.Navigation("Program");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.CustomerOfferCalendarEntry", b =>
+                {
+                    b.HasOne("MealMate.Domain.Offers.Offer", "Offer")
+                        .WithMany()
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Offer");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.CustomerSavedOffer", b =>
+                {
+                    b.HasOne("MealMate.Domain.Offers.Offer", "Offer")
+                        .WithMany()
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Offer");
                 });
 
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.DiscountsAndReferralLog", b =>

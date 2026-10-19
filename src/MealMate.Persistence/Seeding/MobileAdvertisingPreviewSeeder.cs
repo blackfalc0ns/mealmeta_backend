@@ -358,6 +358,7 @@ public static class MobileAdvertisingPreviewSeeder
             existing.Type = offer.Type;
             existing.DiscountType = offer.DiscountType;
             existing.FundingMode = offer.FundingMode;
+            existing.AllowPromoCodeStacking = offer.AllowPromoCodeStacking;
             existing.DiscountRate = offer.DiscountRate;
             existing.DiscountAmount = offer.DiscountAmount;
             existing.StartsAtUtc = offer.StartsAtUtc;
@@ -497,6 +498,7 @@ public static class MobileAdvertisingPreviewSeeder
             Type = OfferType.StandardDiscount,
             DiscountType = discountType,
             FundingMode = OfferFundingMode.PlatformFull,
+            AllowPromoCodeStacking = true,
             DiscountRate = rate,
             DiscountAmount = amount,
             StartsAtUtc = now.AddMinutes(-1),
