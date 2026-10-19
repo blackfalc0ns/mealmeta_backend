@@ -35,7 +35,7 @@ public sealed class CheckoutCouponFlowTests
     // Checkout rejects start dates before today (validation reads the real clock, not the
     // mocked one), so the fixture anchors "now" to the current day and starts tomorrow.
     private static readonly DateTime FixedNow = new(DateTime.UtcNow.Year, DateTime.UtcNow.Month, DateTime.UtcNow.Day, 9, 0, 0, DateTimeKind.Utc);
-    private static readonly DateOnly FixedStart = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(1));
+    private static readonly DateOnly FixedStart = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(5));
 
     [Fact]
     public async Task StartCheckout_RejectedCoupon_FailsBeforeSubscriptionOrPayment()
@@ -99,6 +99,41 @@ public sealed class CheckoutCouponFlowTests
         Assert.Equal(customerId, redemption.CustomerId);
         Assert.Equal(10m, redemption.DiscountAppliedAmount.Amount);
         Assert.Equal(1, (await db.Offers.SingleAsync(x => x.Id == offer.Id)).CurrentUsageCount);
+    }
+
+    [Fact]
+    public async Task StartCheckout_WithDirectOfferId_DiscountsPriceAndRecordsOfferHold()
+    {
+        await using var db = CreateDb();
+        var offer = SeedOffer(db, code: null!, discountKwd: 10m);
+        offer.PromoCode = null;
+        var catalog = SeedCheckoutCatalog(db);
+        await db.SaveChangesAsync();
+        var customerId = Guid.NewGuid();
+
+        var (checkout, payments, sender, _) = CreateCheckout(db, catalog, promoDiscountKwd: 10m);
+        var request = new StartCheckoutRequest(
+            catalog.ProgramId, catalog.BundleId, RestaurantTier.Basic, 26,
+            "https://localhost/checkout/callback", "https://localhost/checkout/error",
+            FixedStart, OfferId: offer.Id);
+
+        var result = await checkout.StartCheckoutAsync(request, customerId);
+
+        Assert.True(result.IsSuccess);
+        var expectedDiscountedPrice = ExpectedCheckoutPrice(catalog, couponDiscountKwd: 10m);
+        Assert.Equal(expectedDiscountedPrice, result.Value.FinalPrice);
+
+        var command = sender.ReceivedCalls()
+            .Select(c => c.GetArguments()[0])
+            .OfType<CreateSubscriptionCommand>()
+            .Single();
+        Assert.Equal(offer.Id, command.CouponOfferId);
+        Assert.Equal(10m, command.CouponDiscountKwd);
+
+        var redemption = Assert.Single(await db.OfferRedemptions.ToListAsync());
+        Assert.Equal(offer.Id, redemption.OfferId);
+        Assert.Equal(result.Value.SubscriptionId, redemption.SubscriptionId);
+        Assert.Equal(customerId, redemption.CustomerId);
     }
 
     [Fact]
@@ -359,7 +394,7 @@ public sealed class CheckoutCouponFlowTests
             .Returns(call =>
             {
                 var query = call.ArgAt<PreviewCustomerPricingQuery>(0);
-                var hasPromo = !string.IsNullOrWhiteSpace(query.PromoCode);
+                var hasPromo = !string.IsNullOrWhiteSpace(query.PromoCode) || query.OfferId.HasValue;
                 return Result.Success(PricingEngine.Calculate(new PricingEngineRequest(
                     9m, query.DurationDays,
                     CampaignDiscountKwd: hasPromo ? promoDiscountKwd : 0m,

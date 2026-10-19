@@ -10,6 +10,8 @@ using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.Offers;
+using MealMate.Domain.Offers.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -47,6 +49,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     private readonly ISubscriptionCatalogPreparationService _preparation;
     private readonly ISubscriptionCatalogAvailabilityService _catalog;
     private readonly IDateTimeProvider _clock;
+    private readonly IOfferEligibilityEngine _offerEngine;
 
     public SubscriptionFlowQueryService(
         IAppDbContext db,
@@ -68,7 +71,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         ICustomerProfilePrerequisitesGate? prerequisitesGate = null,
         ISubscriptionCatalogPreparationService? preparation = null,
         ISubscriptionCatalogAvailabilityService? catalogAvailability = null,
-        IDateTimeProvider? clock = null)
+        IDateTimeProvider? clock = null,
+        IOfferEligibilityEngine? offerEngine = null)
     {
         _db = db;
         _eligibility = eligibility;
@@ -85,7 +89,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         _sender = sender;
         _configuration = configuration;
         _environment = environment;
-        _coupons = couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine());
+        _offerEngine = offerEngine ?? new OfferEligibilityEngine();
+        _coupons = couponService ?? new SubscriptionFlowCouponService(db, _offerEngine);
         _prerequisitesGate = prerequisitesGate ?? new CustomerProfilePrerequisitesGate(db);
         var resolvedClock = clock ?? new CustomerProfilePrerequisitesGate.SystemDateTimeProvider();
         _clock = resolvedClock;
@@ -1037,6 +1042,31 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         if (!_schedule.TryResolveCheckoutStart(request.StartDate, request.IncludeFriday, out var startDate, out var startError))
             return Error.Validation(startError ?? "checkout.start_date_invalid");
 
+        Offer? selectedOffer = null;
+        if (request.OfferId.HasValue)
+        {
+            selectedOffer = await _db.Offers
+                .AsNoTracking()
+                .Include(o => o.EligiblePrograms)
+                .Include(o => o.EligibleBundles)
+                .Include(o => o.PackageTargets)
+                .Include(o => o.EligibleRestaurants)
+                .FirstOrDefaultAsync(o => o.Id == request.OfferId.Value, ct);
+
+            if (selectedOffer is null || selectedOffer.Status != OfferStatus.Active || selectedOffer.StartsAtUtc > _clock.UtcNow || selectedOffer.EndsAtUtc < _clock.UtcNow)
+            {
+                return Error.NotFound("offers.customer.unavailable", "Offer is not available or has expired.");
+            }
+
+            var isFamilyOnly = selectedOffer.PackageTargets.Count > 0
+                && selectedOffer.PackageTargets.All(t => string.Equals(t.SubscriptionType, "Family", StringComparison.OrdinalIgnoreCase));
+
+            if (isFamilyOnly)
+            {
+                return Error.Validation("offers.customer.family_only", "This offer is only valid for family subscriptions.");
+            }
+        }
+
         var readiness = await _readiness.EvaluateAsync(customerUserId, request.ProgramId, request.BundleId,
             request.Tier, request.DurationDays, request.IncludeFriday, ct, request.StartDate);
         if (readiness.IsFailure) return readiness.Error;
@@ -1045,6 +1075,34 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         {
             return new Error(SubscriptionCheckoutGateCodes.ProfileIncomplete, null, ErrorType.Conflict,
                 [new { error = SubscriptionCheckoutGateCodes.ProfileIncomplete, readiness = readiness.Value }]);
+        }
+
+        if (selectedOffer is not null)
+        {
+            var priorSubsCount = await _db.Subscriptions.CountAsync(s => s.CustomerUserId == customerUserId, ct);
+            var customerRedemptions = await _db.OfferRedemptions.CountAsync(r => r.OfferId == selectedOffer.Id && r.CustomerId == customerUserId, ct);
+
+            var offerContext = new OfferEligibilityContext(
+                CustomerId: customerUserId,
+                PriorSubscriptionCount: priorSubsCount,
+                CustomerOfferRedemptionCount: customerRedemptions,
+                CartAmount: 0m,
+                DurationDays: request.DurationDays,
+                DeliveryGovernorate: readiness.Value.Address?.Governorate,
+                ProgramId: request.ProgramId,
+                BundleId: request.BundleId,
+                RestaurantId: null,
+                HasPromoCode: false,
+                Tier: request.Tier,
+                SubscriptionType: "Individual",
+                Purpose: OfferEvaluationPurpose.Checkout);
+
+            var offerEval = _offerEngine.Evaluate(selectedOffer, offerContext, _clock.UtcNow);
+            if (!offerEval.IsEligible)
+            {
+                return Error.Failure("checkout.selection_not_eligible",
+                    offerEval.IneligibilityReasons.FirstOrDefault() ?? "The selected package is not eligible for this offer.");
+            }
         }
 
         var chosenStartDate = request.StartDate!.Value;
@@ -1056,8 +1114,10 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var bundle = await _db.Bundles.AsNoTracking().SingleAsync(x => x.Id == request.BundleId, ct);
         var dates = _schedule.GetServiceDates(startDate, request.DurationDays, request.IncludeFriday);
         var fridayDays = _schedule.CountFridays(dates);
-        var price = await _sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
-            IncludeFriday: request.IncludeFriday, FridayDays: fridayDays), ct);
+        var price = await _sender.Send(new PreviewCustomerPricingQuery(
+            request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
+            IncludeFriday: request.IncludeFriday, FridayDays: fridayDays,
+            CustomerId: customerUserId, OfferId: request.OfferId, CustomerSubscriptionType: "Individual"), ct);
         if (price.IsFailure) return price.Error;
 
         // Coupon evaluation is read-only: no usage increment, no redemption row, no hidden hold.
@@ -1067,34 +1127,49 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var promoCode = request.PromoCode?.Trim();
         if (!string.IsNullOrWhiteSpace(promoCode))
         {
-            var evaluation = await _coupons.EvaluateAsync(
-                promoCode, customerUserId, request.ProgramId, request.BundleId, request.DurationDays,
-                priceValue.FinalCustomerPrice, ct, tier: request.Tier);
-            if (evaluation.IsValid)
+            if (selectedOffer is not null && !selectedOffer.AllowPromoCodeStacking)
             {
-                var discounted = await _sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
-                    IncludeFriday: request.IncludeFriday, FridayDays: fridayDays,
-                    CustomerId: customerUserId, PromoCode: promoCode), ct);
-                if (discounted.IsFailure) return discounted.Error;
-                priceValue = discounted.Value;
-                // The pricing engine places offer/campaign discounts in the campaign slot and admin
-                // promo/referral discounts in the promo slot; coupon.discountAmount repeats the
-                // applied amount from that source so the client never sums the two fields.
-                // offerId carries the ReferralCodeId when the source is a referral code.
-                var appliedAmount = evaluation.PromoCodeId.HasValue || evaluation.IsReferral
-                    ? priceValue.PromoCodeDiscountApplied
-                    : priceValue.CampaignDiscountApplied;
                 coupon = new SubscriptionSummaryCouponDto(
-                    evaluation.Code!, evaluation.Status,
-                    evaluation.OfferId ?? evaluation.ReferralCodeId, appliedAmount,
-                    evaluation.MessageAr, evaluation.MessageEn);
+                    promoCode,
+                    SubscriptionCouponStatuses.StackingConflict,
+                    selectedOffer.Id,
+                    0m,
+                    "لا يمكن الجمع بين كود الخصم والعرض الحالي",
+                    "This coupon code cannot be combined with the current offer");
             }
             else
             {
-                // A rejected coupon is not an error: the summary shows the undiscounted price with the reason.
-                coupon = new SubscriptionSummaryCouponDto(
-                    evaluation.Code!, evaluation.Status, evaluation.OfferId, 0m,
-                    evaluation.MessageAr, evaluation.MessageEn);
+                var evaluation = await _coupons.EvaluateAsync(
+                    promoCode, customerUserId, request.ProgramId, request.BundleId, request.DurationDays,
+                    priceValue.FinalCustomerPrice, ct, tier: request.Tier);
+                if (evaluation.IsValid)
+                {
+                    var discounted = await _sender.Send(new PreviewCustomerPricingQuery(
+                        request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
+                        IncludeFriday: request.IncludeFriday, FridayDays: fridayDays,
+                        CustomerId: customerUserId, OfferId: request.OfferId, PromoCode: promoCode,
+                        CustomerSubscriptionType: "Individual"), ct);
+                    if (discounted.IsFailure) return discounted.Error;
+                    priceValue = discounted.Value;
+                    // The pricing engine places offer/campaign discounts in the campaign slot and admin
+                    // promo/referral discounts in the promo slot; coupon.discountAmount repeats the
+                    // applied amount from that source so the client never sums the two fields.
+                    // offerId carries the ReferralCodeId when the source is a referral code.
+                    var appliedAmount = evaluation.PromoCodeId.HasValue || evaluation.IsReferral
+                        ? priceValue.PromoCodeDiscountApplied
+                        : priceValue.CampaignDiscountApplied;
+                    coupon = new SubscriptionSummaryCouponDto(
+                        evaluation.Code!, evaluation.Status,
+                        evaluation.OfferId ?? evaluation.ReferralCodeId, appliedAmount,
+                        evaluation.MessageAr, evaluation.MessageEn);
+                }
+                else
+                {
+                    // A rejected coupon is not an error: the summary shows the undiscounted price with the reason.
+                    coupon = new SubscriptionSummaryCouponDto(
+                        evaluation.Code!, evaluation.Status, evaluation.OfferId, 0m,
+                        evaluation.MessageAr, evaluation.MessageEn);
+                }
             }
         }
 

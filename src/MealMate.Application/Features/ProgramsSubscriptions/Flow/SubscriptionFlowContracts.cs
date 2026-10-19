@@ -248,7 +248,8 @@ public sealed record SubscriptionSummaryRequest(
     bool IncludeFriday = false,
     int? RestaurantsPage = null,
     int? RestaurantsPageSize = null,
-    string? PromoCode = null);
+    string? PromoCode = null,
+    Guid? OfferId = null);
 
 public sealed record SubscriptionFlowContext(
     Guid ProgramId,
