@@ -173,6 +173,24 @@ public sealed class OfferCheckoutQuoteServiceTests
     }
 
     [Fact]
+    public async Task ValidateQuoteAtCheckout_Fails_WhenAddressContentsChangeUnderSameAddressId()
+    {
+        var create = new OfferCheckoutQuoteService(_db, _clock, _config);
+        var request = SampleQuoteRequest() with { AddressSnapshot = "{\"AddressLine\":\"Old address\"}" };
+        var created = await create.CreateQuoteAsync(request);
+        var service = new OfferCheckoutQuoteService(_db, _clock, _config);
+
+        var result = await service.ValidateQuoteAtCheckoutAsync(
+            created.Value.Id, request.CustomerId,
+            ToCheckoutRequest(created.Value), ToPricingResult(created.Value), request.AddressId,
+            currentAddressSnapshot: "{\"AddressLine\":\"Updated address\"}");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("checkout.quote_changed", result.Error.Code);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+    }
+
+    [Fact]
     public async Task ValidateQuoteAtCheckout_Fails_WhenPriceDrifted()
     {
         var service = new OfferCheckoutQuoteService(_db, _clock, _config);

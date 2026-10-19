@@ -1,6 +1,7 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.CustomerCheckout;
 using MealMate.Application.Features.IdentityAccess.Customers;
@@ -12,6 +13,7 @@ using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Offers;
 using MealMate.Domain.Offers.Enums;
+using MediatR;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.Offers.Queries;
@@ -34,6 +36,8 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
     private readonly ICustomerDeliveryAddressService _deliveryAddresses;
     private readonly ICustomerIndividualSubscriptionGate? _individualGate;
     private readonly ISubscriptionRestaurantAvailabilityService? _availability;
+    private readonly ISender? _sender;
+    private readonly ILocalizedMessageProvider _messages;
 
     public GetCustomerOfferPurchaseOptionsQueryHandler(
         IAppDbContext db,
@@ -43,7 +47,9 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
         IAllowedSubscriptionDurationService allowedDurations,
         ICustomerDeliveryAddressService deliveryAddresses,
         ICustomerIndividualSubscriptionGate? individualGate = null,
-        ISubscriptionRestaurantAvailabilityService? availability = null)
+        ISubscriptionRestaurantAvailabilityService? availability = null,
+        ISender? sender = null,
+        ILocalizedMessageProvider? messages = null)
     {
         _db = db;
         _eligibilityEngine = eligibilityEngine;
@@ -53,6 +59,8 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
         _deliveryAddresses = deliveryAddresses;
         _individualGate = individualGate;
         _availability = availability;
+        _sender = sender;
+        _messages = messages ?? NullLocalizedMessageProvider.Instance;
     }
 
     public async Task<Result<CustomerOfferPurchaseOptionsResponseDto>> Handle(
@@ -95,12 +103,11 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
 
         if (isFamilyOnly)
         {
-            var (prereqs, blockers) = await EvaluatePrerequisitesAsync(request.CustomerId, cancellationToken);
-            var familyBlocker = new MobileBlockingReasonDto(
-                "offers.family_only",
-                "هذا العرض متاح للاشتراكات العائلية فقط.",
-                "This offer is available for family subscriptions only.",
-                Advice: new MobileRetryAdviceDto(false));
+            var (prereqs, blockers, _) = await EvaluatePrerequisitesAsync(request.CustomerId, cancellationToken);
+            var familyBlocker = OfferPurchaseOptionsLocalization.Reason(
+                _messages,
+                MessageCodes.OfferPurchaseOptions.FamilyOnly,
+                advice: new MobileRetryAdviceDto(false));
 
             var combinedBlockers = new List<MobileBlockingReasonDto>(blockers) { familyBlocker };
 
@@ -114,9 +121,11 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
                 FamilyFlowDestination: $"/family-subscription?offerId={offer.Id}");
         }
 
-        var (prerequisites, generalBlockers) = await EvaluatePrerequisitesAsync(request.CustomerId, cancellationToken);
+        var (prerequisites, generalBlockers, activeAddress) = await EvaluatePrerequisitesAsync(request.CustomerId, cancellationToken);
 
-        if (!_schedule.TryResolveCheckoutStart(request.StartDate, request.IncludeFriday, out var resolvedStartDate, out var startError))
+        var chosenStartDate = request.StartDate
+            ?? _schedule.ResolveFirstDeliveryDate(_schedule.GetKuwaitToday(), request.IncludeFriday);
+        if (!_schedule.TryResolveCheckoutStart(chosenStartDate, request.IncludeFriday, out var resolvedStartDate, out var startError))
         {
             return Error.Validation(startError ?? "checkout.start_date_invalid");
         }
@@ -125,10 +134,20 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
         var activePresets = settings.Durations
             .Where(d => !d.IsCustom && d.IsActive)
             .Select(d => d.Days)
+            .Distinct()
+            .OrderBy(d => d)
             .ToList();
-        if (activePresets.Count == 0)
+
+        var durationDecisions = new Dictionary<int, AllowedDurationDecision>();
+        async Task<bool> IsDurationAllowedAsync(int durationDays)
         {
-            activePresets = [6, 12, 26];
+            if (!durationDecisions.TryGetValue(durationDays, out var decision))
+            {
+                decision = await _allowedDurations.EvaluateAsync(durationDays, request.IncludeFriday, cancellationToken);
+                durationDecisions[durationDays] = decision;
+            }
+
+            return decision.IsAllowed;
         }
 
         // Candidate tuples: (ProgramId, BundleId, Tier, DurationDays)
@@ -150,6 +169,7 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
                 {
                     if (offer.MinSubscriptionDays.HasValue && d < offer.MinSubscriptionDays.Value) continue;
                     if (offer.MaxSubscriptionDays.HasValue && d > offer.MaxSubscriptionDays.Value) continue;
+                    if (!await IsDurationAllowedAsync(d)) continue;
 
                     candidates.Add((target.ProgramId, target.BundleId, target.Tier, d));
                 }
@@ -157,50 +177,42 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
         }
         else
         {
-            // Unrestricted or legacy scoped offer: discover from active catalog
-            var programQuery = _db.Programs.AsNoTracking()
-                .Where(p => p.IsActive && p.Status == ProgramStatus.Active);
-            if (offer.EligiblePrograms.Count > 0)
+            // Discover only package/tier combinations actually published by the customer catalog.
+            IReadOnlyList<CustomerSubscriptionCatalogItemDto> catalog = [];
+            if (_sender is not null)
             {
-                var programIds = offer.EligiblePrograms.Select(p => p.ProgramId).ToList();
-                programQuery = programQuery.Where(p => programIds.Contains(p.Id));
+                var catalogResult = await _sender.Send(new GetCustomerSubscriptionPricingCatalogQuery(), cancellationToken);
+                if (catalogResult.IsFailure) return catalogResult.Error;
+                catalog = catalogResult.Value;
             }
-            var candidateProgramIds = await programQuery.Select(p => p.Id).ToListAsync(cancellationToken);
-
-            var bundleQuery = _db.Bundles.AsNoTracking()
-                .Where(b => candidateProgramIds.Contains(b.ProgramId) && b.IsActive && b.Status == ProgramStatus.Active);
-            if (offer.EligibleBundles.Count > 0)
-            {
-                var bundleIds = offer.EligibleBundles.Select(b => b.BundleId).ToList();
-                bundleQuery = bundleQuery.Where(b => bundleIds.Contains(b.Id));
-            }
-            var catalogBundles = await bundleQuery.Select(b => new { b.ProgramId, b.Id }).ToListAsync(cancellationToken);
-
-            var tiers = new[] { RestaurantTier.Basic, RestaurantTier.Platinum, RestaurantTier.Elite };
+            var eligibleProgramIds = offer.EligiblePrograms.Select(p => p.ProgramId).ToHashSet();
+            var eligibleBundleIds = offer.EligibleBundles.Select(b => b.BundleId).ToHashSet();
             var durations = activePresets
                 .Where(d => (!offer.MinSubscriptionDays.HasValue || d >= offer.MinSubscriptionDays.Value)
                     && (!offer.MaxSubscriptionDays.HasValue || d <= offer.MaxSubscriptionDays.Value))
                 .ToList();
 
-            foreach (var cb in catalogBundles)
+            foreach (var item in catalog)
             {
-                foreach (var t in tiers)
+                if (eligibleProgramIds.Count > 0 && !eligibleProgramIds.Contains(item.ProgramId)) continue;
+                if (eligibleBundleIds.Count > 0 && !eligibleBundleIds.Contains(item.BundleId)) continue;
+
+                foreach (var d in durations)
                 {
-                    foreach (var d in durations)
-                    {
-                        candidates.Add((cb.ProgramId, cb.Id, t, d));
-                    }
+                    if (!await IsDurationAllowedAsync(d)) continue;
+                    candidates.Add((item.ProgramId, item.BundleId, item.Tier, d));
                 }
             }
         }
 
+        candidates = candidates.Distinct().ToList();
+
         if (candidates.Count == 0)
         {
-            var noEligiblePackagesBlocker = new MobileBlockingReasonDto(
-                "offers.no_eligible_packages",
-                "لا توجد باقات متاحة متوافقة مع هذا العرض حالياً.",
-                "No eligible packages are currently available for this offer.",
-                Advice: new MobileRetryAdviceDto(false));
+            var noEligiblePackagesBlocker = OfferPurchaseOptionsLocalization.Reason(
+                _messages,
+                MessageCodes.OfferPurchaseOptions.NoEligiblePackages,
+                advice: new MobileRetryAdviceDto(false));
             var emptyBlockers = new List<MobileBlockingReasonDto>(generalBlockers) { noEligiblePackagesBlocker };
 
             return new CustomerOfferPurchaseOptionsResponseDto(
@@ -223,39 +235,26 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
             .Where(b => distinctBundleIds.Contains(b.Id) && b.IsActive && b.Status == ProgramStatus.Active)
             .ToDictionaryAsync(b => b.Id, cancellationToken);
 
-        var activePricings = await _db.RestaurantBundlePricings.AsNoTracking()
-            .Where(x => distinctBundleIds.Contains(x.BundleId)
-                && x.EffectiveFromUtc <= now
-                && (x.EffectiveToUtc == null || x.EffectiveToUtc > now)
-                && (x.LockStatus == PriceLockStatus.Locked
-                    || x.LockStatus == PriceLockStatus.Approved
-                    || x.LockStatus == PriceLockStatus.ApprovedWithEffectiveDate))
-            .ToListAsync(cancellationToken);
-
-        var hasPricingRuleVersion = await _db.PricingRuleVersions.AsNoTracking()
-            .AnyAsync(x => x.IsActive, cancellationToken);
-
-        var activeAddress = await _deliveryAddresses.ResolveActiveDeliveryAddressAsync(request.CustomerId, cancellationToken);
-
-        List<Guid> coveredRestaurantIds = [];
-        List<(Guid RestaurantId, Guid ProgramId, Guid BundleId)> offeringRows = [];
-
-        if (activeAddress is not null)
+        candidates = candidates.Where(candidate =>
         {
-            coveredRestaurantIds = await _db.RestaurantServiceRegions.AsNoTracking()
-                .Where(x => x.RegionId == activeAddress.RegionId && x.IsActive)
-                .Select(x => x.RestaurantId)
-                .Distinct()
-                .ToListAsync(cancellationToken);
+            if (!programs.ContainsKey(candidate.ProgramId)) return false;
+            if (!bundles.TryGetValue(candidate.BundleId, out var bundle)) return false;
+            if (bundle.ProgramId != candidate.ProgramId) return false;
+            var slotTotal = bundle.BreakfastCount + bundle.LunchCount + bundle.DinnerCount + bundle.SnackCount;
+            return slotTotal > 0
+                && bundle.BreakfastCount >= 0
+                && bundle.LunchCount >= 0
+                && bundle.DinnerCount >= 0
+                && bundle.SnackCount >= 0;
+        }).ToList();
 
-            var rawOfferings = await _db.RestaurantProgramBundleOffers.AsNoTracking()
-                .Where(x => distinctBundleIds.Contains(x.BundleId) && x.IsActive)
-                .Select(x => new { x.RestaurantId, x.ProgramId, x.BundleId })
-                .ToListAsync(cancellationToken);
-
-            offeringRows = rawOfferings
-                .Select(x => (x.RestaurantId, x.ProgramId, x.BundleId))
-                .ToList();
+        if (candidates.Count == 0)
+        {
+            generalBlockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                _messages, MessageCodes.OfferPurchaseOptions.NoEligiblePackages,
+                advice: new MobileRetryAdviceDto(false)));
+            return new CustomerOfferPurchaseOptionsResponseDto(
+                offer.Id, "Individual", now, prerequisites, generalBlockers, Array.Empty<OfferPurchaseOptionDto>());
         }
 
         var tierLabels = settings.TierLabels;
@@ -266,130 +265,148 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
             if (!programs.TryGetValue(programId, out var program)) continue;
             if (!bundles.TryGetValue(bundleId, out var bundle)) continue;
 
-            var (tierNameAr, tierNameEn) = TierDisplayName(tierLabels, tier);
-            var mealsPerDay = bundle.MealsPerDay > 0
-                ? bundle.MealsPerDay
-                : Math.Max(1, bundle.BreakfastCount + bundle.LunchCount + bundle.DinnerCount + bundle.SnackCount);
-
+            var mealsPerDay = bundle.BreakfastCount + bundle.LunchCount + bundle.DinnerCount + bundle.SnackCount;
             var imageUrl = CatalogImageStorage.ToContentUrl(bundle.ImageStorageKey);
-
             var dates = _schedule.GetServiceDates(resolvedStartDate, durationDays, request.IncludeFriday);
+            if (dates.Count == 0)
+            {
+                return Error.Validation("checkout.start_date_invalid");
+            }
+
             var totalServiceDays = dates.Count;
-            var endDate = dates.Last();
+            var endDate = dates[^1];
             var fridayDays = _schedule.CountFridays(dates);
-
             var optionBlockers = new List<MobileBlockingReasonDto>(generalBlockers);
+            IndividualRestaurantAvailabilityReport? availability = null;
+            Guid? offerEligibleRestaurantId = null;
 
-            // Coverage check
-            var isAddressCovered = activeAddress is not null
-                && coveredRestaurantIds.Count > 0
-                && offeringRows.Any(o => coveredRestaurantIds.Contains(o.RestaurantId)
-                    && o.ProgramId == programId
-                    && o.BundleId == bundleId);
-
-            if (activeAddress is not null && !isAddressCovered)
+            if (!prerequisites.HasDeliveryAddress)
             {
-                optionBlockers.Add(new MobileBlockingReasonDto(
-                    SubscriptionCheckoutGateCodes.NoRestaurantsForAddress,
-                    "لا توجد مطاعم توصل إلى عنوانك المحدد لهذه الباقة.",
-                    "No restaurants deliver to your address for this package.",
-                    Advice: new MobileRetryAdviceDto(false)));
+                // The address prerequisite already explains this blocker.
             }
-
-            // Pricing check
-            var bundlePrices = activePricings
-                .Where(x => x.ProgramId == programId && x.BundleId == bundleId)
-                .Select(x => x.ReferencePrice26.Amount)
-                .ToList();
-
-            var isPricingAvailable = hasPricingRuleVersion && bundlePrices.Count > 0;
-            if (!isPricingAvailable)
+            else if (_availability is null)
             {
-                optionBlockers.Add(new MobileBlockingReasonDto(
-                    "pricing.unavailable",
-                    "التسعير غير متوفر لهذه الباقة حالياً.",
-                    "Pricing is currently unavailable for this package.",
-                    Advice: new MobileRetryAdviceDto(false)));
+                optionBlockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                    _messages,
+                    MessageCodes.OfferPurchaseOptions.AvailabilityUnavailable,
+                    advice: new MobileRetryAdviceDto(false, RefreshAvailabilityRequired: true)));
             }
-
-            // If prerequisites incomplete, address uncovered, or pricing unavailable: return null prices
-            if (!prerequisites.IsComplete || !isAddressCovered || !isPricingAvailable)
+            else
             {
-                optionsList.Add(new OfferPurchaseOptionDto(
-                    program.Id,
-                    program.NameAr,
-                    program.NameEn,
-                    bundle.Id,
-                    bundle.NameAr,
-                    bundle.NameEn,
-                    imageUrl,
+                availability = await _availability.EvaluateDetailedAsync(
+                    request.CustomerId,
+                    programId,
+                    bundleId,
                     tier,
-                    tierNameAr,
-                    tierNameEn,
                     durationDays,
-                    resolvedStartDate,
-                    endDate,
                     request.IncludeFriday,
-                    totalServiceDays,
-                    mealsPerDay,
-                    BasePrice: null,
-                    CampaignDiscount: null,
-                    PromoDiscount: null,
-                    WalletCredit: null,
-                    GatewayFee: null,
-                    FinalPrice: null,
-                    CurrencyCode: "KWD",
-                    CanCheckout: false,
-                    BlockingReasons: optionBlockers,
-                    Discount: null
-                ));
-                continue;
+                    resolvedStartDate,
+                    cancellationToken);
+
+                var offerRestaurantIds = offer.EligibleRestaurants
+                    .Select(x => x.RestaurantId)
+                    .ToHashSet();
+                var eligibleRestaurants = offerRestaurantIds.Count == 0
+                    ? availability.EligibleRestaurants
+                    : availability.EligibleRestaurants.Where(x => offerRestaurantIds.Contains(x.RestaurantId)).ToList();
+                offerEligibleRestaurantId = eligibleRestaurants.FirstOrDefault()?.RestaurantId;
+
+                if (eligibleRestaurants.Count == 0)
+                {
+                    var reasonCode = offerRestaurantIds.Count > 0
+                        ? MessageCodes.OfferPurchaseOptions.PeriodUnavailable
+                        : availability.Availability.Status == IndividualRestaurantAvailabilityStatus.NoRestaurantsForAddress
+                            ? SubscriptionCheckoutGateCodes.NoRestaurantsForAddress
+                            : availability.Availability.Status == IndividualRestaurantAvailabilityStatus.NoRestaurantsForSelection
+                                ? SubscriptionCheckoutGateCodes.NoRestaurantsForSelection
+                                : MessageCodes.OfferPurchaseOptions.PeriodUnavailable;
+                    optionBlockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                        _messages,
+                        reasonCode,
+                        advice: new MobileRetryAdviceDto(false, RefreshAvailabilityRequired: true)));
+                }
+                else if (availability.Availability.Status != IndividualRestaurantAvailabilityStatus.Available)
+                {
+                    optionBlockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                        _messages,
+                        MessageCodes.OfferPurchaseOptions.PeriodUnavailable,
+                        advice: new MobileRetryAdviceDto(false, RefreshAvailabilityRequired: true)));
+                }
             }
 
-            // Authoritative server pricing
-            var meanDailyPrice = SubscriptionPackagePricingCalculator.ResolveAverageDailyPrice(bundlePrices, tier);
-            var profile = settings.Mode == "per_bundle" && settings.PerBundle.TryGetValue(bundle.Id, out var cp)
-                ? cp
-                : settings.Global;
-            var durationRate = profile.ResolveRate(durationDays);
-
-            var pricingReq = new PricingEngineRequest(
-                MeanReferenceDailyPrice: meanDailyPrice,
-                DurationDays: durationDays,
-                DurationRatesPct: new Dictionary<int, decimal> { [durationDays] = durationRate },
-                FridayDays: request.IncludeFriday ? fridayDays : 0,
-                FridayRatePct: profile.FridayRate);
-
-            var grossResult = PricingEngine.Calculate(pricingReq);
-
-            var offerEligibilityCtx = new OfferEligibilityContext(
-                request.CustomerId,
-                priorSubsCount,
-                userRedemptions,
-                CartAmount: grossResult.UnroundedCorePrice,
-                DurationDays: durationDays,
-                DeliveryGovernorate: activeAddress?.Governorate,
-                ProgramId: program.Id,
-                BundleId: bundle.Id,
-                Tier: tier,
-                SubscriptionType: "Individual",
-                Purpose: OfferEvaluationPurpose.Checkout);
-
-            var offerEval = _eligibilityEngine.Evaluate(offer, offerEligibilityCtx, now);
-            var campaignDiscount = offerEval.IsEligible ? offerEval.CalculatedDiscountAmount : 0m;
-
-            var pricedResult = PricingEngine.Calculate(pricingReq with { CampaignDiscountKwd = campaignDiscount });
-
-            if (!offerEval.IsEligible)
+            PricingEngineResult? pricing = null;
+            if (optionBlockers.Count == 0 && prerequisites.IsComplete)
             {
-                optionBlockers.Add(new MobileBlockingReasonDto(
-                    "checkout.selection_not_eligible",
-                    "الباقة المحددة غير متوافقة مع هذا العرض.",
-                    "The selected package is not eligible for this offer.",
-                    Advice: new MobileRetryAdviceDto(false)));
+                if (_sender is null)
+                {
+                    optionBlockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                        _messages, "subscription_flow.pricing_unavailable",
+                        advice: new MobileRetryAdviceDto(false)));
+                }
+                else
+                {
+                    var pricingResult = await _sender.Send(new PreviewCustomerPricingQuery(
+                        programId,
+                        bundleId,
+                        tier,
+                        durationDays,
+                        IncludeFriday: request.IncludeFriday,
+                        FridayDays: fridayDays,
+                        OfferId: offer.Id,
+                        CustomerId: request.CustomerId,
+                        CustomerSubscriptionType: "Individual"), cancellationToken);
+
+                    if (pricingResult.IsSuccess)
+                    {
+                        pricing = pricingResult.Value;
+                        var offerEligibility = _eligibilityEngine.Evaluate(
+                            offer,
+                            new OfferEligibilityContext(
+                                request.CustomerId,
+                                priorSubsCount,
+                                userRedemptions,
+                                CartAmount: pricing.UnroundedCorePrice,
+                                DurationDays: durationDays,
+                                DeliveryGovernorate: activeAddress?.Governorate,
+                                ProgramId: programId,
+                                BundleId: bundleId,
+                                RestaurantId: offerEligibleRestaurantId,
+                                Tier: tier,
+                                SubscriptionType: "Individual",
+                                Purpose: OfferEvaluationPurpose.Checkout),
+                            now);
+
+                        if (!offerEligibility.IsEligible
+                            || pricing.CampaignDiscountApplied != offerEligibility.CalculatedDiscountAmount)
+                        {
+                            pricing = null;
+                            optionBlockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                                _messages,
+                                "checkout.selection_not_eligible",
+                                advice: new MobileRetryAdviceDto(false, RefreshAvailabilityRequired: true)));
+                        }
+                        else if (pricing.FinalCustomerPrice <= 0m)
+                        {
+                            pricing = null;
+                            optionBlockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                                _messages,
+                                MessageCodes.Checkout.CouponFullDiscountUnsupported,
+                                advice: new MobileRetryAdviceDto(false)));
+                        }
+                    }
+                    else
+                    {
+                        optionBlockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                            _messages,
+                            "subscription_flow.pricing_unavailable",
+                            advice: new MobileRetryAdviceDto(false)));
+                    }
+                }
             }
 
-            var canCheckout = optionBlockers.Count == 0;
+            var canCheckout = pricing is not null && optionBlockers.Count == 0
+                && availability?.Availability.Status == IndividualRestaurantAvailabilityStatus.Available;
+            var (tierNameAr, tierNameEn) = TierDisplayName(tierLabels, tier);
 
             optionsList.Add(new OfferPurchaseOptionDto(
                 program.Id,
@@ -408,27 +425,24 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
                 request.IncludeFriday,
                 totalServiceDays,
                 mealsPerDay,
-                BasePrice: pricedResult.UnroundedCorePrice,
-                CampaignDiscount: pricedResult.CampaignDiscountApplied,
-                PromoDiscount: 0m,
-                WalletCredit: pricedResult.WalletCreditApplied,
-                GatewayFee: pricedResult.GatewayCostRecoveryAmount,
-                FinalPrice: pricedResult.FinalCustomerPrice,
-                CurrencyCode: pricedResult.CurrencyCode,
+                BasePrice: pricing?.UnroundedCorePrice,
+                CampaignDiscount: pricing?.CampaignDiscountApplied,
+                PromoDiscount: pricing?.PromoCodeDiscountApplied,
+                WalletCredit: pricing?.WalletCreditApplied,
+                GatewayFee: pricing?.GatewayCostRecoveryAmount,
+                FinalPrice: pricing?.FinalCustomerPrice,
+                CurrencyCode: pricing?.CurrencyCode ?? "KWD",
                 CanCheckout: canCheckout,
                 BlockingReasons: optionBlockers,
-                Discount: pricedResult.CampaignDiscountApplied
-            ));
+                Discount: pricing is null ? null : pricing.CampaignDiscountApplied + pricing.PromoCodeDiscountApplied));
         }
 
         if (optionsList.Count == 0)
         {
-            var noEligiblePackagesBlocker = new MobileBlockingReasonDto(
-                "offers.no_eligible_packages",
-                "لا توجد باقات متاحة متوافقة مع هذا العرض حالياً.",
-                "No eligible packages are currently available for this offer.",
-                Advice: new MobileRetryAdviceDto(false));
-            generalBlockers.Add(noEligiblePackagesBlocker);
+            generalBlockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                _messages,
+                MessageCodes.OfferPurchaseOptions.NoEligiblePackages,
+                advice: new MobileRetryAdviceDto(false)));
         }
 
         return new CustomerOfferPurchaseOptionsResponseDto(
@@ -440,7 +454,7 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
             optionsList);
     }
 
-    private async Task<(CustomerSubscriptionPrerequisitesDto Dto, List<MobileBlockingReasonDto> Blockers)> EvaluatePrerequisitesAsync(
+    private async Task<(CustomerSubscriptionPrerequisitesDto Dto, List<MobileBlockingReasonDto> Blockers, CustomerActiveDeliveryAddress? ActiveAddress)> EvaluatePrerequisitesAsync(
         Guid customerUserId, CancellationToken ct)
     {
         var profile = await _db.CustomerProfiles.AsNoTracking()
@@ -464,53 +478,57 @@ public sealed class GetCustomerOfferPurchaseOptionsQueryHandler
         var blockers = new List<MobileBlockingReasonDto>();
         if (!hasAddress)
         {
-            blockers.Add(new MobileBlockingReasonDto(
+            blockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                _messages,
                 "checkout.address_required",
-                "يرجى إضافة عنوان توصيل للمتابعة.",
-                "Please add a delivery address to continue.",
                 "address",
                 new MobileRetryAdviceDto(false, RefreshSummaryRequired: true)));
         }
         if (!hasAllergies)
         {
-            blockers.Add(new MobileBlockingReasonDto(
+            blockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                _messages,
                 "checkout.allergies_required",
-                "يرجى تأكيد الحساسية للمتابعة.",
-                "Please confirm allergies to continue.",
                 "allergies",
                 new MobileRetryAdviceDto(false, RefreshSummaryRequired: true)));
         }
         if (!hasDietary)
         {
-            blockers.Add(new MobileBlockingReasonDto(
+            blockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                _messages,
                 "checkout.dietary_preferences_required",
-                "يرجى تحديد التفضيلات الغذائية للمتابعة.",
-                "Please specify dietary preferences to continue.",
                 "dietary_preferences",
                 new MobileRetryAdviceDto(false, RefreshSummaryRequired: true)));
         }
 
-        if (_individualGate is not null)
+        if (_individualGate is null)
         {
-            var hasBlocking = await _individualGate.HasBlockingAsync(customerUserId, ct);
+            blockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                _messages,
+                MessageCodes.OfferPurchaseOptions.ReadinessUnavailable,
+                advice: new MobileRetryAdviceDto(true, RefreshSummaryRequired: true)));
+        }
+        else
+        {
+            var hasBlocking = await _individualGate.HasBlockingAsync(customerUserId, ct)
+                || await _individualGate.HasBlockingFamilyGroupAsync(customerUserId, ct);
             if (hasBlocking)
             {
-                blockers.Add(new MobileBlockingReasonDto(
+                blockers.Add(OfferPurchaseOptionsLocalization.Reason(
+                    _messages,
                     SubscriptionCheckoutGateCodes.ExistingSubscription,
-                    "لديك اشتراك نشط بالفعل.",
-                    "You already have an active subscription.",
-                    Advice: new MobileRetryAdviceDto(false)));
+                    advice: new MobileRetryAdviceDto(false)));
             }
         }
 
-        return (prerequisites, blockers);
+        return (prerequisites, blockers, activeAddress);
     }
 
     private static (string NameAr, string NameEn) TierDisplayName(TierLabelsSettings? labels, RestaurantTier tier) => tier switch
     {
-        RestaurantTier.Basic => (labels?.BasicAr ?? "أساسي", labels?.BasicEn ?? "Basic"),
-        RestaurantTier.Platinum => (labels?.PlatinumAr ?? "بلاتينيوم", labels?.PlatinumEn ?? "Platinum"),
-        RestaurantTier.Elite => (labels?.EliteAr ?? "إيليت", labels?.EliteEn ?? "Elite"),
+        RestaurantTier.Basic => (labels?.BasicAr ?? tier.ToString(), labels?.BasicEn ?? tier.ToString()),
+        RestaurantTier.Platinum => (labels?.PlatinumAr ?? tier.ToString(), labels?.PlatinumEn ?? tier.ToString()),
+        RestaurantTier.Elite => (labels?.EliteAr ?? tier.ToString(), labels?.EliteEn ?? tier.ToString()),
         _ => (tier.ToString(), tier.ToString())
     };
 }

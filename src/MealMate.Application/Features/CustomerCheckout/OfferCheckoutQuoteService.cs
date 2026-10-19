@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
@@ -30,7 +31,8 @@ public sealed record OfferCheckoutQuoteCreationRequest(
     decimal GatewayFee,
     decimal FinalPrice,
     string CurrencyCode,
-    Guid? AddressId);
+    Guid? AddressId,
+    string? AddressSnapshot = null);
 
 public interface IOfferCheckoutQuoteService
 {
@@ -44,7 +46,8 @@ public interface IOfferCheckoutQuoteService
         StartCheckoutRequest checkoutRequest,
         PricingEngineResult pricingResult,
         Guid? currentAddressId,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        string? currentAddressSnapshot = null);
 
     Task MarkQuoteAsUsedAsync(
         Guid quoteId,
@@ -56,6 +59,17 @@ public sealed class OfferCheckoutQuoteService : IOfferCheckoutQuoteService
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
     private readonly IConfiguration? _configuration;
+
+    public static string? ComputeAddressSnapshot(SubscriptionSummaryAddressDto? address)
+        => address is null ? null : JsonSerializer.Serialize(new
+        {
+            address.Id,
+            address.AddressLine,
+            address.Governorate,
+            address.Area,
+            address.Block,
+            address.RegionId
+        });
 
     public OfferCheckoutQuoteService(
         IAppDbContext db,
@@ -85,7 +99,7 @@ public sealed class OfferCheckoutQuoteService : IOfferCheckoutQuoteService
             request.Tier, request.DurationDays, request.StartDate, request.IncludeFriday,
             request.PromoCode, request.BasePrice, request.CampaignDiscount,
             request.PromoDiscount, request.WalletCredit, request.GatewayFee,
-            request.FinalPrice, request.AddressId);
+            request.FinalPrice, request.AddressId, request.AddressSnapshot);
 
         var quote = new OfferCheckoutQuote(Guid.NewGuid())
         {
@@ -127,7 +141,8 @@ public sealed class OfferCheckoutQuoteService : IOfferCheckoutQuoteService
         StartCheckoutRequest checkoutRequest,
         PricingEngineResult pricingResult,
         Guid? currentAddressId,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? currentAddressSnapshot = null)
     {
         var quote = await _db.OfferCheckoutQuotes.FirstOrDefaultAsync(x => x.Id == quoteId, ct);
         if (quote is null)
@@ -144,7 +159,7 @@ public sealed class OfferCheckoutQuoteService : IOfferCheckoutQuoteService
             return Error.Gone("checkout.quote_expired");
 
         // Selection agreement
-        if (checkoutRequest.OfferId.HasValue && quote.OfferId != checkoutRequest.OfferId.Value)
+        if (checkoutRequest.OfferId != quote.OfferId)
             return Error.Conflict("checkout.quote_changed");
 
         if (quote.ProgramId != checkoutRequest.ProgramId
@@ -173,6 +188,16 @@ public sealed class OfferCheckoutQuoteService : IOfferCheckoutQuoteService
             return Error.Conflict("checkout.quote_changed");
         }
 
+        var currentSnapshotHash = ComputeSnapshotHash(
+            quote.CustomerId, quote.OfferId, quote.ProgramId, quote.BundleId,
+            quote.Tier, quote.DurationDays, quote.StartDate, quote.IncludeFriday,
+            quote.PromoCode, quote.BasePrice, quote.CampaignDiscount,
+            quote.PromoDiscount, quote.WalletCredit, quote.GatewayFee,
+            quote.FinalPrice, quote.AddressId, currentAddressSnapshot);
+        if (quote.PayloadSnapshotHash is not null
+            && !string.Equals(quote.PayloadSnapshotHash, currentSnapshotHash, StringComparison.Ordinal))
+            return Error.Conflict("checkout.quote_changed");
+
         return Result.Success(quote);
     }
 
@@ -200,10 +225,10 @@ public sealed class OfferCheckoutQuoteService : IOfferCheckoutQuoteService
         RestaurantTier tier, int durationDays, DateOnly startDate, bool includeFriday,
         string? promoCode, decimal basePrice, decimal campaignDiscount,
         decimal promoDiscount, decimal walletCredit, decimal gatewayFee,
-        decimal finalPrice, Guid? addressId)
+        decimal finalPrice, Guid? addressId, string? addressSnapshot)
     {
         var raw = FormattableString.Invariant(
-            $"{customerId}|{offerId}|{programId}|{bundleId}|{tier}|{durationDays}|{startDate:O}|{includeFriday}|{NormalizePromoCode(promoCode)}|{basePrice:F3}|{campaignDiscount:F3}|{promoDiscount:F3}|{walletCredit:F3}|{gatewayFee:F3}|{finalPrice:F3}|{addressId}");
+            $"{customerId}|{offerId}|{programId}|{bundleId}|{tier}|{durationDays}|{startDate:O}|{includeFriday}|{NormalizePromoCode(promoCode)}|{basePrice:F3}|{campaignDiscount:F3}|{promoDiscount:F3}|{walletCredit:F3}|{gatewayFee:F3}|{finalPrice:F3}|{addressId}|{addressSnapshot?.Trim()}");
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }

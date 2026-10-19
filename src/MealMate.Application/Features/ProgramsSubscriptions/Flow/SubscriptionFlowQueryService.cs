@@ -1046,6 +1046,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             return Error.Validation(startError ?? "checkout.start_date_invalid");
 
         Offer? selectedOffer = null;
+        var priorSubscriptionCount = 0;
+        var customerOfferRedemptionCount = 0;
         if (request.OfferId.HasValue)
         {
             selectedOffer = await _db.Offers
@@ -1082,13 +1084,14 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
 
         if (selectedOffer is not null)
         {
-            var priorSubsCount = await _db.Subscriptions.CountAsync(s => s.CustomerUserId == customerUserId, ct);
-            var customerRedemptions = await _db.OfferRedemptions.CountAsync(r => r.OfferId == selectedOffer.Id && r.CustomerId == customerUserId, ct);
+            priorSubscriptionCount = await _db.Subscriptions.CountAsync(s => s.CustomerUserId == customerUserId, ct);
+            customerOfferRedemptionCount = await _db.OfferRedemptions.CountAsync(
+                r => r.OfferId == selectedOffer.Id && r.CustomerId == customerUserId, ct);
 
             var offerContext = new OfferEligibilityContext(
                 CustomerId: customerUserId,
-                PriorSubscriptionCount: priorSubsCount,
-                CustomerOfferRedemptionCount: customerRedemptions,
+                PriorSubscriptionCount: priorSubscriptionCount,
+                CustomerOfferRedemptionCount: customerOfferRedemptionCount,
                 CartAmount: 0m,
                 DurationDays: request.DurationDays,
                 DeliveryGovernorate: readiness.Value.Address?.Governorate,
@@ -1122,6 +1125,48 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             IncludeFriday: request.IncludeFriday, FridayDays: fridayDays,
             CustomerId: customerUserId, OfferId: request.OfferId, CustomerSubscriptionType: "Individual"), ct);
         if (price.IsFailure) return price.Error;
+
+        if (selectedOffer is not null)
+        {
+            var pricedOfferContext = new OfferEligibilityContext(
+                CustomerId: customerUserId,
+                PriorSubscriptionCount: priorSubscriptionCount,
+                CustomerOfferRedemptionCount: customerOfferRedemptionCount,
+                CartAmount: price.Value.UnroundedCorePrice,
+                DurationDays: request.DurationDays,
+                DeliveryGovernorate: readiness.Value.Address?.Governorate,
+                ProgramId: request.ProgramId,
+                BundleId: request.BundleId,
+                Tier: request.Tier,
+                SubscriptionType: "Individual",
+                Purpose: OfferEvaluationPurpose.Checkout);
+            var pricedOfferEvaluation = _offerEngine.Evaluate(selectedOffer, pricedOfferContext, _clock.UtcNow);
+            if (!pricedOfferEvaluation.IsEligible)
+            {
+                return Error.Failure("checkout.selection_not_eligible",
+                    pricedOfferEvaluation.IneligibilityReasons.FirstOrDefault()
+                    ?? "The selected package is not eligible for this offer.");
+            }
+
+            if (selectedOffer.EligibleRestaurants.Count > 0)
+            {
+                var scopedRestaurantIds = selectedOffer.EligibleRestaurants.Select(r => r.RestaurantId).ToHashSet();
+                var scopedRestaurants = readiness.Value.Restaurants
+                    .Where(r => scopedRestaurantIds.Contains(r.RestaurantId))
+                    .ToList();
+                if (scopedRestaurants.Count == 0)
+                {
+                    return Error.Failure("checkout.selection_not_eligible",
+                        "No restaurant in this delivery area is eligible for the selected offer.");
+                }
+
+                readiness = Result.Success(readiness.Value with
+                {
+                    Restaurants = scopedRestaurants,
+                    DeliveringRestaurantCount = scopedRestaurants.Count
+                });
+            }
+        }
 
         // Coupon evaluation is read-only: no usage increment, no redemption row, no hidden hold.
         // Checkout re-validates and re-prices; this display is never a guarantee of the later price.
@@ -1224,9 +1269,38 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var labels = await LoadTierLabelsAsync(ct);
         var (tierNameAr, tierNameEn) = TierDisplayName(request.Tier, labels);
 
+        var effectiveCanCheckout = readiness.Value.CanCheckout;
+        var effectiveCheckoutBlockReason = readiness.Value.CheckoutBlockReason;
+        var summaryBlockingReasons = new List<MobileBlockingReasonDto>();
+        if (readiness.Value.CheckoutBlockReason is not null)
+        {
+            summaryBlockingReasons.Add(new MobileBlockingReasonDto(
+                readiness.Value.CheckoutBlockReason,
+                readiness.Value.WarningAr,
+                readiness.Value.WarningEn,
+                Advice: new MobileRetryAdviceDto(false, RefreshSummaryRequired: true)));
+        }
+
+        if (request.OfferId.HasValue && coupon is not null && coupon.Status != SubscriptionCouponStatuses.Valid)
+        {
+            effectiveCanCheckout = false;
+            effectiveCheckoutBlockReason ??= "checkout.coupon_rejected";
+            summaryBlockingReasons.Add(new MobileBlockingReasonDto(
+                "checkout.coupon_rejected",
+                coupon.MessageAr,
+                coupon.MessageEn,
+                Advice: new MobileRetryAdviceDto(false, RefreshSummaryRequired: true)));
+        }
+
+        if (request.OfferId.HasValue && priceValue.FinalCustomerPrice <= 0m)
+        {
+            return Error.Validation("checkout.coupon_full_discount_unsupported",
+                "The applied discounts (including wallet credit) reduce the price to zero; no settlement path exists.");
+        }
+
         Guid? quoteId = null;
-        var summaryExpiresAt = _clock.UtcNow.AddMinutes(5);
-        if (request.OfferId.HasValue)
+        DateTime? summaryExpiresAt = request.OfferId.HasValue ? null : _clock.UtcNow.AddMinutes(5);
+        if (request.OfferId.HasValue && effectiveCanCheckout)
         {
             var quoteResult = await _quoteService.CreateQuoteAsync(new OfferCheckoutQuoteCreationRequest(
                 customerUserId,
@@ -1248,13 +1322,12 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                 priceValue.GatewayCostRecoveryAmount,
                 priceValue.FinalCustomerPrice,
                 priceValue.CurrencyCode,
-                readiness.Value.Address?.Id), ct);
+                readiness.Value.Address?.Id,
+                AddressSnapshot: OfferCheckoutQuoteService.ComputeAddressSnapshot(readiness.Value.Address)), ct);
 
-            if (quoteResult.IsSuccess)
-            {
-                quoteId = quoteResult.Value.Id;
-                summaryExpiresAt = quoteResult.Value.ExpiresAtUtc;
-            }
+            if (quoteResult.IsFailure) return quoteResult.Error;
+            quoteId = quoteResult.Value.Id;
+            summaryExpiresAt = quoteResult.Value.ExpiresAtUtc;
         }
 
         return new SubscriptionOrderSummaryDto(
@@ -1265,25 +1338,13 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             priceValue.WalletCreditApplied, priceValue.GatewayCostRecoveryAmount, priceValue.FinalCustomerPrice, priceValue.CurrencyCode,
             true, "POST /api/v1/customer/subscriptions/checkout", request.IncludeFriday, fridayDays, dates.Count,
             BuildIncludes(summarySlots, restaurantCount, dates.Count, mealVariety),
-            readiness.Value.Address, restaurants, readiness.Value.CanCheckout, readiness.Value.CheckoutBlockReason, chosenStartDate,
+            readiness.Value.Address, restaurants, effectiveCanCheckout, effectiveCheckoutBlockReason, chosenStartDate,
             restaurantRepetition,
             restaurantsPagination,
             coupon,
             readiness.Value.Availability,
-            BlockingReasons: readiness.Value.CheckoutBlockReason is null
-                ? Array.Empty<MobileBlockingReasonDto>()
-                : new[] { new MobileBlockingReasonDto(
-                    readiness.Value.CheckoutBlockReason,
-                    readiness.Value.WarningAr,
-                    readiness.Value.WarningEn,
-                    Advice: new MobileRetryAdviceDto(false, RefreshSummaryRequired: true)) },
-            Eligibility: new MobileEligibilityDto(readiness.Value.CanCheckout,
-                readiness.Value.CheckoutBlockReason is null
-                    ? Array.Empty<MobileBlockingReasonDto>()
-                    : new[] { new MobileBlockingReasonDto(
-                        readiness.Value.CheckoutBlockReason,
-                        readiness.Value.WarningAr,
-                        readiness.Value.WarningEn) }),
+            BlockingReasons: summaryBlockingReasons,
+            Eligibility: new MobileEligibilityDto(effectiveCanCheckout, summaryBlockingReasons),
             SummaryExpiresAtUtc: summaryExpiresAt,
             ServerNowUtc: _clock.UtcNow,
             QuoteId: quoteId);

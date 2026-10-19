@@ -39,6 +39,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
     private readonly ISandboxCheckoutService? _sandbox;
     private readonly IWalletSpendingService _wallets;
     private readonly IOfferCheckoutQuoteService _quotes;
+    private readonly CheckoutIdempotencyService _checkoutIdempotency;
 
     public CustomerCheckoutService(
         IAppDbContext db,
@@ -60,7 +61,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         ISubscriptionFlowCouponService? couponService = null,
         IApplicationLockManager? applicationLocks = null,
         IWalletSpendingService? wallets = null,
-        IOfferCheckoutQuoteService? quotes = null)
+        IOfferCheckoutQuoteService? quotes = null,
+        CheckoutIdempotencyService? checkoutIdempotency = null)
     {
         _db = db;
         _payments = payments;
@@ -81,6 +83,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         _coupons = couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock, applicationLocks);
         _wallets = wallets ?? new WalletSpendingService(db, clock, applicationLocks);
         _quotes = quotes ?? new OfferCheckoutQuoteService(db, clock, configuration);
+        _checkoutIdempotency = checkoutIdempotency ?? new CheckoutIdempotencyService(db, clock);
     }
 
     public async Task<Result<IReadOnlyList<CheckoutCatalogItem>>> GetCatalogAsync(CancellationToken ct = default)
@@ -116,6 +119,18 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
     public async Task<Result<CheckoutStartedDto>> StartCheckoutAsync(
         StartCheckoutRequest request, Guid customerUserId, CancellationToken ct = default)
     {
+        if (request.QuoteId.HasValue)
+        {
+            if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
+                return Error.Validation("checkout.idempotency_key_required");
+            if (request.IdempotencyKey.Length > 200)
+                return Error.Validation("checkout.idempotency_key_invalid");
+
+            var attempt = await _checkoutIdempotency.InspectAsync(customerUserId, request, ct);
+            if (attempt.State != CheckoutAttemptState.New)
+                return ExistingAttemptResult(attempt);
+        }
+
         if (!IsAllowedRedirectUrl(request.CallbackUrl) || !IsAllowedRedirectUrl(request.ErrorUrl))
             return Error.Validation("checkout.redirect_url_not_allowed");
 
@@ -205,7 +220,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                 request,
                 pricingResult,
                 gate.Value.Address?.Id,
-                ct);
+                ct,
+                OfferCheckoutQuoteService.ComputeAddressSnapshot(gate.Value.Address));
             if (quoteValidation.IsFailure)
                 return quoteValidation.Error;
         }
@@ -215,11 +231,47 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         {
             reservation = await _transactionExecutor.ExecuteAsync(async transactionCt =>
             {
+                if (request.QuoteId.HasValue)
+                    await _checkoutIdempotency.ClaimAsync(customerUserId, request, transactionCt);
+
                 var checkedAt = _clock.UtcNow;
                 var allRows = await _eligibility.EvaluateAsync(new RestaurantEligibilityRequest(request.ProgramId, request.BundleId, request.Tier, regionId, startDate, request.DurationDays, request.IncludeFriday, customerUserId), transactionCt);
                 var eligible = allRows.Where(x => x.IsEligible).OrderBy(x => x.NameEn).ThenBy(x => x.RestaurantId).ToList();
+                if (request.QuoteId.HasValue && request.OfferId.HasValue)
+                {
+                    var offer = await _db.Offers.AsNoTracking()
+                        .Include(x => x.EligiblePrograms)
+                        .Include(x => x.EligibleBundles)
+                        .Include(x => x.PackageTargets)
+                        .Include(x => x.EligibleRestaurants)
+                        .FirstOrDefaultAsync(x => x.Id == request.OfferId.Value, transactionCt);
+                    if (offer is null) throw new CheckoutReservationException("checkout.selection_not_eligible");
+                    if (offer.EligibleRestaurants.Count > 0)
+                    {
+                        var scopedRestaurantIds = offer.EligibleRestaurants.Select(x => x.RestaurantId).ToHashSet();
+                        eligible = eligible.Where(x => scopedRestaurantIds.Contains(x.RestaurantId)).ToList();
+                    }
+                    var policy = new OfferEligibilityEngine().Evaluate(offer, new OfferEligibilityContext(
+                        customerUserId,
+                        await _db.Subscriptions.CountAsync(x => x.CustomerUserId == customerUserId, transactionCt),
+                        await _db.OfferRedemptions.CountAsync(x => x.CustomerId == customerUserId && x.OfferId == offer.Id, transactionCt),
+                        CartAmount: pricingResult.UnroundedCorePrice,
+                        DurationDays: request.DurationDays,
+                        DeliveryGovernorate: gate.Value.Address?.Governorate,
+                        ProgramId: request.ProgramId,
+                        BundleId: request.BundleId,
+                        RestaurantId: eligible.FirstOrDefault()?.RestaurantId,
+                        HasPromoCode: !string.IsNullOrWhiteSpace(promoCode),
+                        Tier: request.Tier,
+                        SubscriptionType: "Individual",
+                        IsOfferPromoCode: !string.IsNullOrWhiteSpace(offer.PromoCode)
+                            && string.Equals(offer.PromoCode, promoCode, StringComparison.OrdinalIgnoreCase)), _clock.UtcNow);
+                    if (!policy.IsEligible)
+                        throw new CheckoutReservationException("checkout.selection_not_eligible");
+                }
                 var restaurant = eligible.FirstOrDefault();
-                if (restaurant is null) throw new CheckoutReservationException("restaurant.not_eligible");
+                if (restaurant is null) throw new CheckoutReservationException(
+                    request.QuoteId.HasValue ? "checkout.selection_not_eligible" : "restaurant.not_eligible");
                 var resolvedRegionId = regionId;
                 if (resolvedRegionId == Guid.Empty)
                 {
@@ -269,6 +321,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                     WalletAppliedKwd: pricingResult.WalletCreditApplied,
                     CheckoutAnchorDate: chosenStartDate), transactionCt);
                 if (create.IsFailure) throw new CheckoutReservationException(create.Error.Code);
+                if (request.QuoteId.HasValue)
+                    await _checkoutIdempotency.BindSubscriptionAsync(customerUserId, request, create.Value.Id, transactionCt);
                 var expiresAt = _clock.UtcNow.AddMinutes(15);
 
                 // The coupon hold lives in the same transaction as the subscription so concurrent
@@ -329,8 +383,14 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         }
         catch (CheckoutReservationException ex)
         {
-            return new Error(ex.Code, "Checkout could not be completed. Review your selections and try again.", ErrorType.Validation,
-                [new { error = ex.Code, message = "Checkout could not be completed. Review your selections and try again." }]);
+            return ReservationError(ex.Code);
+        }
+        catch (CheckoutIdempotencyClaimException ex)
+        {
+            var attempt = await _checkoutIdempotency.InspectAsync(customerUserId, request, ct);
+            if (attempt.State != CheckoutAttemptState.New)
+                return ExistingAttemptResult(attempt);
+            return Error.Failure("checkout.idempotency_claim_failed", ex.Message);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -339,8 +399,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         }
 
         if (reservation.ErrorCode is not null)
-            return new Error(reservation.ErrorCode, "Checkout could not be completed. Review your selections and try again.", ErrorType.Validation,
-                [new { error = reservation.ErrorCode, message = "Checkout could not be completed. Review your selections and try again." }]);
+            return ReservationError(reservation.ErrorCode);
 
         var createSub = reservation.Subscription!;
         var selectedRestaurant = reservation.Restaurant!;
@@ -361,6 +420,13 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         }
         catch (Exception ex)
         {
+            if (request.QuoteId.HasValue)
+            {
+                // Provider creation can succeed even when the response is lost. Keep the
+                // durable attempt and reservation for reconciliation; never create a second invoice.
+                return InProgressResult(subscriptionId);
+            }
+
             var failedSubscription = await _db.Subscriptions.FirstAsync(x => x.Id == subscriptionId, ct);
             failedSubscription.Status = SubscriptionStatus.PaymentFailed;
             failedSubscription.LastOperationAtUtc = _clock.UtcNow;
@@ -389,11 +455,50 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         }
 
         var priceSnapshotId = await _db.SubscriptionSnapshots.AsNoTracking().Where(x => x.SubscriptionId == subscriptionId).OrderBy(x => x.CapturedAtUtc).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
-        return new CheckoutStartedDto(subscriptionId, paymentUrl, expiresAtUtc, selectedRestaurant.MenuPlanVersionsByDate[0].MenuPlanVersionId,
+        var response = new CheckoutStartedDto(subscriptionId, paymentUrl, expiresAtUtc, selectedRestaurant.MenuPlanVersionsByDate[0].MenuPlanVersionId,
             createSub.PaidAmount, priceSnapshotId, checkedAtUtc, selectedRestaurant.MenuPlanVersionsByDate, reservation.PoolSnapshotId,
             reservation.RestaurantCount, "PendingPayment", "PendingPayment", request.IncludeFriday, fridayDays, serviceDates.Count,
             selectedRestaurant.RestaurantId, reservation.RegionId, startDate, deliveryAddress, chosenStartDate);
+        if (request.QuoteId.HasValue)
+        {
+            try
+            {
+                await _checkoutIdempotency.CompleteAsync(customerUserId, request, response, ct);
+            }
+            catch (DbUpdateException)
+            {
+                return InProgressResult(subscriptionId);
+            }
+        }
+        return response;
     }
+
+    private static Result<CheckoutStartedDto> ExistingAttemptResult(CheckoutAttemptInspection attempt)
+        => attempt.State switch
+        {
+            CheckoutAttemptState.Replay when attempt.Response is not null => attempt.Response,
+            CheckoutAttemptState.Conflict => Error.Conflict("checkout.idempotency_conflict"),
+            CheckoutAttemptState.QuoteConsumed => Error.Conflict("checkout.quote_changed",
+                attempt.SubscriptionId.HasValue ? $"/api/v1/customer/subscriptions/{attempt.SubscriptionId.Value:D}/payment" : null),
+            CheckoutAttemptState.Unavailable => Error.NotFound("offers.customer.unavailable"),
+            _ => InProgressResult(attempt.SubscriptionId)
+        };
+
+    private static Result<CheckoutStartedDto> InProgressResult(Guid? subscriptionId)
+        => new Error("checkout.in_progress", null, ErrorType.Conflict,
+            [new
+            {
+                error = "checkout.in_progress",
+                subscriptionId,
+                paymentStatusUrl = subscriptionId.HasValue
+                    ? $"/api/v1/customer/subscriptions/{subscriptionId.Value:D}/payment"
+                    : null
+            }]);
+
+    private static Error ReservationError(string code)
+        => new(code, "Checkout could not be completed. Review your selections and try again.",
+            code == "checkout.selection_not_eligible" ? ErrorType.Failure : ErrorType.Validation,
+            [new { error = code, message = "Checkout could not be completed. Review your selections and try again." }]);
 
     public async Task<Result<SubscriptionPaymentStatusDto>> GetPaymentStatusAsync(Guid id, Guid customerUserId, CancellationToken ct = default)
     {
@@ -512,6 +617,30 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         if (subscription is null) return Error.NotFound("subscription.not_found");
         if (subscription.FamilyGroupId is not null)
             return Error.Conflict("family.actual_checkout_required");
+
+        var quoteAttempt = await _checkoutIdempotency.FindForSubscriptionAsync(customerUserId, id, ct);
+        if (quoteAttempt is { State: CheckoutAttemptState.Replay, Response: not null })
+        {
+            if (subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active)
+                return Error.Conflict("subscription.cannot_resume_completed_or_active");
+
+            var hasLiveHold = await _db.CapacityHolds.AsNoTracking().AnyAsync(x =>
+                x.SubscriptionId == id && x.Status == CapacityHoldStatus.PendingPayment && x.ExpiresAtUtc > _clock.UtcNow, ct);
+            if (subscription.Status == SubscriptionStatus.PendingPayment
+                && hasLiveHold && quoteAttempt.Response.HoldExpiresAtUtc > _clock.UtcNow)
+                return quoteAttempt.Response;
+
+            return Error.Conflict("checkout.quote_changed");
+        }
+        if (quoteAttempt is { State: CheckoutAttemptState.InProgress })
+        {
+            subscription = await SyncPendingPaymentAsync(subscription, ct);
+            if (subscription.Status == SubscriptionStatus.PendingPayment)
+                return InProgressResult(id);
+            if (subscription.Status is SubscriptionStatus.Paid or SubscriptionStatus.Scheduled or SubscriptionStatus.Active)
+                return Error.Conflict("subscription.cannot_resume_completed_or_active");
+            return Error.Conflict("checkout.quote_changed");
+        }
 
         if (subscription.Status is not (SubscriptionStatus.Draft or SubscriptionStatus.PendingPayment or SubscriptionStatus.PaymentFailed or SubscriptionStatus.Expired))
             return Error.Conflict("subscription.cannot_resume_completed_or_active");
@@ -855,6 +984,27 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
             && await _sandbox.HasStartedAsync(subscription.Id, cancellationToken)) return subscription;
         var key = subscription.PaymentId;
         var keyType = "PaymentId";
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            var quoteAttempt = await _db.IdempotencyRecords.AsNoTracking()
+                .AnyAsync(x => x.UserId == subscription.CustomerUserId
+                    && x.Scope == $"CustomerCheckout:Individual:{subscription.CustomerUserId:N}"
+                    && x.ResourceUri == subscription.Id.ToString("D"), cancellationToken);
+            if (quoteAttempt)
+            {
+                // Payzah's status API accepts a stored TrackId/PaymentHandle, not the
+                // CustomerReference. The gateway attempt is written before the outbound call.
+                var providerAttempt = await _db.PaymentGatewayAttempts.AsNoTracking()
+                    .Where(x => x.Provider == "Payzah" && x.CustomerReference == subscription.Id.ToString("D"))
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (providerAttempt is null) return subscription;
+                key = string.IsNullOrWhiteSpace(providerAttempt.PaymentId)
+                    ? providerAttempt.TrackId
+                    : $"pz-{providerAttempt.TrackId}";
+                keyType = string.IsNullOrWhiteSpace(providerAttempt.PaymentId) ? "TrackId" : "PaymentId";
+            }
+        }
         if (string.IsNullOrWhiteSpace(key) && subscription.FamilyGroupId is Guid familyPaymentGroupId)
         {
             var groupPaymentId = await _db.FamilyGroups.AsNoTracking()

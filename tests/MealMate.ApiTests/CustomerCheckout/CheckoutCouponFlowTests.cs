@@ -7,6 +7,7 @@ using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.AdminDashboard;
+using MealMate.Domain.Entities;
 using MealMate.Domain.Enums;
 using MealMate.Domain.Foundation;
 using MealMate.Domain.IdentityAccess;
@@ -134,6 +135,178 @@ public sealed class CheckoutCouponFlowTests
         Assert.Equal(offer.Id, redemption.OfferId);
         Assert.Equal(result.Value.SubscriptionId, redemption.SubscriptionId);
         Assert.Equal(customerId, redemption.CustomerId);
+    }
+
+    [Fact]
+    public async Task StartCheckout_CompletedQuoteAttempt_ReplaysBeforeReadinessAndExpiryChecks()
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var catalog = SeedCheckoutCatalog(db);
+        var request = new StartCheckoutRequest(catalog.ProgramId, catalog.BundleId, RestaurantTier.Basic, 26,
+            "https://localhost/checkout/callback", "https://localhost/checkout/error", FixedStart,
+            IdempotencyKey: "stable-attempt", OfferId: Guid.NewGuid(), QuoteId: Guid.NewGuid());
+        var original = new CheckoutStartedDto(Guid.NewGuid(), "https://localhost/original-payment", FixedNow.AddMinutes(15),
+            Guid.NewGuid(), 123.456m, PaymentStatus: "PendingPayment");
+        db.IdempotencyRecords.Add(new IdempotencyRecord
+        {
+            Scope = $"CustomerCheckout:Individual:{customerId:N}", Key = request.IdempotencyKey!,
+            RequestHash = CheckoutIdempotencyService.ComputeFingerprint(customerId, request),
+            ResponseBody = System.Text.Json.JsonSerializer.Serialize(original),
+            ResourceUri = original.SubscriptionId.ToString("D"), HttpStatusCode = 200, UserId = customerId,
+            CreatedAtUtc = FixedNow, ExpiresAtUtc = DateTime.MaxValue,
+        });
+        await db.SaveChangesAsync();
+        var readiness = Substitute.For<ISubscriptionCheckoutReadinessService>();
+        readiness.EvaluateAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<RestaurantTier>(),
+                Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CancellationToken>(), Arg.Any<DateOnly?>())
+            .Throws(new InvalidOperationException("replay must bypass current readiness checks"));
+        var (checkout, payments, _, _) = CreateCheckout(db, catalog, readinessOverride: readiness);
+
+        var result = await checkout.StartCheckoutAsync(request, customerId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(original, result.Value);
+        await readiness.DidNotReceive().EvaluateAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<RestaurantTier>(),
+            Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CancellationToken>(), Arg.Any<DateOnly?>());
+        await payments.DidNotReceive().ExecutePaymentAsync(
+            Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StartCheckout_AmbiguousProviderFailure_PreservesAttemptAndRetryDoesNotCreateAnotherInvoice()
+    {
+        await using var db = CreateDb();
+        var offer = SeedOffer(db, code: null!, discountKwd: 10m);
+        offer.PromoCode = null;
+        var catalog = SeedCheckoutCatalog(db);
+        var customerId = Guid.NewGuid();
+        var addressId = Guid.NewGuid();
+        var regionId = Guid.NewGuid();
+        await db.SaveChangesAsync();
+        var (checkout, payments, _, clock) = CreateCheckout(db, catalog, addressId: addressId, regionId: regionId);
+        payments.ExecutePaymentAsync(Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Throws(new HttpRequestException("response lost after provider accepted invoice"));
+
+        var quoteService = new OfferCheckoutQuoteService(db, clock);
+        var dates = new SubscriptionScheduleService(clock).GetServiceDates(FixedStart, 26, false);
+        var quote = await quoteService.CreateQuoteAsync(new OfferCheckoutQuoteCreationRequest(
+            customerId, offer.Id, catalog.ProgramId, catalog.BundleId, RestaurantTier.Basic, 26,
+            FixedStart, dates[^1], false, 0, dates.Count, null,
+            BasePrice: 234m, CampaignDiscount: 10m, PromoDiscount: 0m, WalletCredit: 0m,
+            GatewayFee: 0m, FinalPrice: 224m, CurrencyCode: "KWD", AddressId: addressId,
+            AddressSnapshot: OfferCheckoutQuoteService.ComputeAddressSnapshot(
+                new SubscriptionSummaryAddressDto(addressId, "المنزل", "السالمية", null, null, null, regionId))));
+        Assert.True(quote.IsSuccess);
+        var providerAttempt = new PaymentGatewayAttempt
+        {
+            TrackId = "provider-track-ambiguous", PaymentId = "provider-payment-ambiguous",
+            CustomerReference = "", ExpectedAmount = 224m, ExpectedCurrency = "KWD", IsSandbox = true,
+        };
+        db.PaymentGatewayAttempts.Add(providerAttempt);
+        var request = new StartCheckoutRequest(catalog.ProgramId, catalog.BundleId, RestaurantTier.Basic, 26,
+            "https://localhost/checkout/callback", "https://localhost/checkout/error", FixedStart,
+            IdempotencyKey: "stable-ambiguous-attempt", OfferId: offer.Id, QuoteId: quote.Value.Id);
+
+        var first = await checkout.StartCheckoutAsync(request, customerId);
+        var second = await checkout.StartCheckoutAsync(request, customerId);
+
+        Assert.True(first.IsFailure);
+        Assert.Equal("checkout.in_progress", first.Error.Code);
+        Assert.True(second.IsFailure);
+        Assert.Equal("checkout.in_progress", second.Error.Code);
+        Assert.Equal(1, await db.Subscriptions.CountAsync(x => x.CustomerUserId == customerId));
+        var attempt = await db.IdempotencyRecords.SingleAsync(x => x.Scope == $"CustomerCheckout:Individual:{customerId:N}");
+        var reservedSubscriptionId = Guid.Parse(attempt.ResourceUri!);
+        Assert.Equal(attempt.ResourceUri, (await db.IdempotencyRecords.SingleAsync(x => x.Scope == "CustomerCheckout:Quote")).ResourceUri);
+        Assert.Equal(reservedSubscriptionId, await db.Subscriptions.Where(x => x.CustomerUserId == customerId).Select(x => x.Id).SingleAsync());
+        Assert.Equal(202, attempt.HttpStatusCode);
+        await payments.Received(1).ExecutePaymentAsync(
+            Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<string>(), reservedSubscriptionId.ToString(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+
+        providerAttempt.CustomerReference = reservedSubscriptionId.ToString("D");
+        await db.SaveChangesAsync();
+        var resume = await checkout.ResumeCheckoutAsync(reservedSubscriptionId, null, customerId);
+        Assert.True(resume.IsFailure);
+        Assert.Equal("checkout.in_progress", resume.Error.Code);
+        await payments.Received(1).GetPaymentStatusAsync("pz-provider-track-ambiguous", "PaymentId", Arg.Any<CancellationToken>());
+        await payments.Received(1).ExecutePaymentAsync(
+            Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("expired")]
+    [InlineData("minimum")]
+    public async Task StartCheckout_RevalidatesOfferPolicyEvenWhenPreviewAmountStillMatchesQuote(string policyChange)
+    {
+        await using var db = CreateDb();
+        var offer = SeedOffer(db, code: null!, discountKwd: 10m);
+        offer.PromoCode = null;
+        var catalog = SeedCheckoutCatalog(db);
+        var customerId = Guid.NewGuid();
+        var address = new SubscriptionSummaryAddressDto(Guid.NewGuid(), "المنزل", "السالمية", null, null, null, Guid.NewGuid());
+        await db.SaveChangesAsync();
+        var (checkout, payments, _, clock) = CreateCheckout(db, catalog, addressId: address.Id, regionId: address.RegionId);
+        var dates = new SubscriptionScheduleService(clock).GetServiceDates(FixedStart, 26, false);
+        var quote = await new OfferCheckoutQuoteService(db, clock).CreateQuoteAsync(new OfferCheckoutQuoteCreationRequest(
+            customerId, offer.Id, catalog.ProgramId, catalog.BundleId, RestaurantTier.Basic, 26,
+            FixedStart, dates[^1], false, 0, dates.Count, null,
+            234m, 10m, 0m, 0m, 0m, 224m, "KWD", address.Id,
+            OfferCheckoutQuoteService.ComputeAddressSnapshot(address)));
+        if (policyChange == "expired") offer.EndsAtUtc = FixedNow.AddSeconds(-1);
+        else offer.MinOrderAmount = new Money(1000m, "KWD");
+        await db.SaveChangesAsync();
+
+        var request = new StartCheckoutRequest(catalog.ProgramId, catalog.BundleId, RestaurantTier.Basic, 26,
+            "https://localhost/checkout/callback", "https://localhost/checkout/error", FixedStart,
+            IdempotencyKey: "policy-drift", OfferId: offer.Id, QuoteId: quote.Value.Id);
+        var result = await checkout.StartCheckoutAsync(request, customerId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("checkout.selection_not_eligible", result.Error.Code);
+        Assert.Empty(await db.Subscriptions.ToListAsync());
+        await payments.DidNotReceive().ExecutePaymentAsync(
+            Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ResumeCheckout_CompletedQuoteAttemptWithExpiredHoldDoesNotReplayOldPaymentUrl()
+    {
+        await using var db = CreateDb();
+        var catalog = SeedCheckoutCatalog(db);
+        var customerId = Guid.NewGuid();
+        var subscription = new Subscription
+        {
+            CustomerUserId = customerId, ProgramId = catalog.ProgramId, BundleId = catalog.BundleId,
+            SelectedTier = RestaurantTier.Basic, DurationDays = 26, Status = SubscriptionStatus.PendingPayment,
+            StartDate = FixedStart, EndDate = FixedStart.AddDays(25), PaidAmount = new Money(224m, "KWD"),
+            RegionId = Guid.NewGuid(),
+        };
+        db.Subscriptions.Add(subscription);
+        var oldResponse = new CheckoutStartedDto(subscription.Id, "https://localhost/expired-payment", FixedNow.AddMinutes(-1),
+            Guid.NewGuid(), 224m, PaymentStatus: "PendingPayment");
+        db.IdempotencyRecords.Add(new IdempotencyRecord
+        {
+            Scope = $"CustomerCheckout:Individual:{customerId:N}", Key = "old-attempt",
+            RequestHash = new string('a', 64), ResponseBody = System.Text.Json.JsonSerializer.Serialize(oldResponse),
+            ResourceUri = subscription.Id.ToString("D"), HttpStatusCode = 200, UserId = customerId,
+            CreatedAtUtc = FixedNow.AddHours(-1), ExpiresAtUtc = DateTime.MaxValue,
+        });
+        await db.SaveChangesAsync();
+        var (checkout, payments, _, _) = CreateCheckout(db, catalog);
+
+        var result = await checkout.ResumeCheckoutAsync(subscription.Id, null, customerId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("checkout.quote_changed", result.Error.Code);
+        await payments.DidNotReceive().ExecutePaymentAsync(
+            Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -348,7 +521,8 @@ public sealed class CheckoutCouponFlowTests
     }
 
     private static (CustomerCheckoutService Checkout, IPaymentGatewayService Payments, ISender Sender, IDateTimeProvider Clock)
-        CreateCheckout(AppDbContext db, CheckoutCatalog catalog, decimal promoDiscountKwd = 10m)
+        CreateCheckout(AppDbContext db, CheckoutCatalog catalog, decimal promoDiscountKwd = 10m, Guid? addressId = null, Guid? regionId = null,
+            ISubscriptionCheckoutReadinessService? readinessOverride = null)
     {
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(FixedNow);
@@ -364,14 +538,17 @@ public sealed class CheckoutCouponFlowTests
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new PaymentCreationReceipt("test-payment", "https://localhost/pay?PaymentId=PAY-123", "test-track"));
 
-        var readiness = Substitute.For<ISubscriptionCheckoutReadinessService>();
-        readiness.EvaluateAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<RestaurantTier>(),
-                Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CancellationToken>(), Arg.Any<DateOnly?>())
-            .Returns(Result.Success(new SubscriptionCheckoutReadinessDto(
-                true, true, true, "", "", "", null,
-                new SubscriptionReadinessProgramDto(catalog.ProgramId, "برنامج", "Program"),
-                new SubscriptionSummaryAddressDto(Guid.NewGuid(), "المنزل", "السالمية", null, null, null, Guid.NewGuid()),
-                1, [], [new SubscriptionSummaryRestaurantDto(catalog.RestaurantId, "مطعم", "Restaurant", null, RestaurantTier.Basic)])));
+        var readiness = readinessOverride ?? Substitute.For<ISubscriptionCheckoutReadinessService>();
+        if (readinessOverride is null)
+        {
+            readiness.EvaluateAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<RestaurantTier>(),
+                    Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CancellationToken>(), Arg.Any<DateOnly?>())
+                .Returns(Result.Success(new SubscriptionCheckoutReadinessDto(
+                    true, true, true, "", "", "", null,
+                    new SubscriptionReadinessProgramDto(catalog.ProgramId, "برنامج", "Program"),
+                    new SubscriptionSummaryAddressDto(addressId ?? Guid.NewGuid(), "المنزل", "السالمية", null, null, null, regionId ?? Guid.NewGuid()),
+                    1, [], [new SubscriptionSummaryRestaurantDto(catalog.RestaurantId, "مطعم", "Restaurant", null, RestaurantTier.Basic)])));
+        }
 
         var eligibility = Substitute.For<IRestaurantEligibilityService>();
         eligibility.EvaluateAsync(Arg.Any<RestaurantEligibilityRequest>(), Arg.Any<CancellationToken>())

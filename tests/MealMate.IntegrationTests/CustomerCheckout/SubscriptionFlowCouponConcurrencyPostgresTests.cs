@@ -9,7 +9,6 @@ using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
-using Testcontainers.PostgreSql;
 using Xunit.Sdk;
 
 namespace MealMate.IntegrationTests.CustomerCheckout;
@@ -21,20 +20,20 @@ namespace MealMate.IntegrationTests.CustomerCheckout;
 /// </summary>
 public sealed class SubscriptionFlowCouponConcurrencyPostgresTests : IAsyncLifetime
 {
-    private PostgreSqlContainer _container = null!;
+    private MealMate.Testing.PostgresTestDatabase _container = null!;
 
     public async Task InitializeAsync()
     {
         try
         {
-            _container = new PostgreSqlBuilder().WithImage("postgres:16-alpine").Build();
+            _container = new MealMate.Testing.PostgresTestDatabase();
             await _container.StartAsync();
             await using var db = CreateDb();
             await db.Database.MigrateAsync();
         }
         catch (Exception ex)
         {
-            throw new XunitException("Docker is required for coupon concurrency integration tests.", ex);
+            throw new XunitException("Docker or an explicitly configured local PostgreSQL test database is required for coupon concurrency integration tests.", ex);
         }
     }
 

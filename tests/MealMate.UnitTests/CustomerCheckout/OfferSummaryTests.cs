@@ -164,6 +164,116 @@ public sealed class OfferSummaryTests
     }
 
     [Fact]
+    public async Task Summary_WithMinimumOrderAboveAuthoritativePrice_ReturnsSelectionNotEligible()
+    {
+        using var db = CreateDbContext();
+        var now = new DateTime(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+
+        var (program, bundle) = await SeedCatalogAsync(db);
+        var customerId = Guid.NewGuid();
+        var offer = new Offer
+        {
+            NameAr = "عرض بحد أدنى",
+            NameEn = "Offer with minimum order",
+            Status = OfferStatus.Active,
+            MinOrderAmount = new Money(200m, "KWD"),
+            StartsAtUtc = now.AddDays(-1),
+            EndsAtUtc = now.AddDays(10)
+        };
+        db.Offers.Add(offer);
+        await db.SaveChangesAsync();
+
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result<PricingEngineResult>.Success(PricingEngine.Calculate(new PricingEngineRequest(
+                MeanReferenceDailyPrice: 5m,
+                DurationDays: 26,
+                CampaignDiscountKwd: 0m,
+                DurationRatesPct: new Dictionary<int, decimal> { [26] = 0m },
+                GatewayFeePct: 0m,
+                GatewayFeeFixedKwd: 0m,
+                RoundingStepKwd: 0.001m,
+                FridayDays: 0,
+                FridayRatePct: 0m))));
+
+        var (service, startDate) = BuildService(db, clock, sender, customerId, program.Id, bundle.Id);
+        var request = new SubscriptionSummaryRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, DurationDays: 26,
+            StartDate: startDate, OfferId: offer.Id);
+
+        var result = await service.GetOrderSummaryAsync(request, customerId);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("checkout.selection_not_eligible");
+    }
+
+    [Fact]
+    public async Task Summary_WithNoOfferEligibleRestaurantInCoverage_ReturnsSelectionNotEligible()
+    {
+        using var db = CreateDbContext();
+        var now = new DateTime(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+
+        var (program, bundle) = await SeedCatalogAsync(db);
+        var customerId = Guid.NewGuid();
+        var coveredRestaurantId = Guid.NewGuid();
+        var offer = new Offer
+        {
+            NameAr = "عرض مطعم محدد",
+            NameEn = "Restaurant-scoped offer",
+            Status = OfferStatus.Active,
+            StartsAtUtc = now.AddDays(-1),
+            EndsAtUtc = now.AddDays(10),
+            EligibleRestaurants = [new OfferRestaurant { RestaurantId = Guid.NewGuid() }]
+        };
+        db.Offers.Add(offer);
+        await db.SaveChangesAsync();
+
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result<PricingEngineResult>.Success(PricingEngine.Calculate(new PricingEngineRequest(
+                MeanReferenceDailyPrice: 5m,
+                DurationDays: 26,
+                CampaignDiscountKwd: 0m,
+                DurationRatesPct: new Dictionary<int, decimal> { [26] = 0m },
+                GatewayFeePct: 0m,
+                GatewayFeeFixedKwd: 0m,
+                RoundingStepKwd: 0.001m,
+                FridayDays: 0,
+                FridayRatePct: 0m))));
+
+        var readiness = Substitute.For<ISubscriptionCheckoutReadinessService>();
+        readiness.EvaluateAsync(customerId, program.Id, bundle.Id, RestaurantTier.Basic, 26, false,
+                Arg.Any<CancellationToken>(), Arg.Any<DateOnly?>())
+            .Returns(Result<SubscriptionCheckoutReadinessDto>.Success(new SubscriptionCheckoutReadinessDto(
+                IsComplete: true,
+                CanOpenSummary: true,
+                CanCheckout: true,
+                NextAction: "CHECKOUT",
+                WarningAr: "",
+                WarningEn: "",
+                CheckoutBlockReason: null,
+                Program: new SubscriptionReadinessProgramDto(program.Id, program.NameAr, program.NameEn),
+                Address: new SubscriptionSummaryAddressDto(Guid.NewGuid(), "Home", "Kuwait City", "Capital", "Area 1", "1", Guid.NewGuid()),
+                DeliveringRestaurantCount: 1,
+                Items: [],
+                Restaurants: [new SubscriptionSummaryRestaurantDto(coveredRestaurantId, "مطعم متاح", "Covered restaurant", null, RestaurantTier.Basic)])));
+
+        var (service, startDate) = BuildService(db, clock, sender, customerId, program.Id, bundle.Id, readiness);
+        var request = new SubscriptionSummaryRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, DurationDays: 26,
+            StartDate: startDate, OfferId: offer.Id);
+
+        var result = await service.GetOrderSummaryAsync(request, customerId);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("checkout.selection_not_eligible");
+    }
+
+    [Fact]
     public async Task Summary_WithExpiredOffer_ReturnsUnavailableNotFound()
     {
         using var db = CreateDbContext();
@@ -311,6 +421,8 @@ public sealed class OfferSummaryTests
         summary.Coupon.Should().NotBeNull();
         summary.Coupon!.Status.Should().Be(SubscriptionCouponStatuses.StackingConflict);
         summary.Coupon.DiscountAmount.Should().Be(0m);
+        summary.CanCheckout.Should().BeFalse();
+        summary.QuoteId.Should().BeNull();
     }
 
     [Fact]
@@ -356,6 +468,123 @@ public sealed class OfferSummaryTests
         result.Error.Code.Should().Be(SubscriptionCheckoutGateCodes.ProfileIncomplete);
     }
 
+    [Fact]
+    public async Task Summary_WhenOfferQuoteCannotBePersisted_ReturnsQuoteCreationError()
+    {
+        using var db = CreateDbContext();
+        var now = new DateTime(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+
+        var (program, bundle) = await SeedCatalogAsync(db);
+        var customerId = Guid.NewGuid();
+        var offer = new Offer
+        {
+            NameAr = "عرض مباشر",
+            NameEn = "Direct offer",
+            Status = OfferStatus.Active,
+            StartsAtUtc = now.AddDays(-1),
+            EndsAtUtc = now.AddDays(10)
+        };
+        db.Offers.Add(offer);
+        await db.SaveChangesAsync();
+
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result<PricingEngineResult>.Success(PricingEngine.Calculate(new PricingEngineRequest(
+                MeanReferenceDailyPrice: 5m,
+                DurationDays: 26,
+                CampaignDiscountKwd: 0m,
+                DurationRatesPct: new Dictionary<int, decimal> { [26] = 0m },
+                GatewayFeePct: 0m,
+                GatewayFeeFixedKwd: 0m,
+                RoundingStepKwd: 0.001m,
+                FridayDays: 0,
+                FridayRatePct: 0m))));
+
+        var quoteService = Substitute.For<IOfferCheckoutQuoteService>();
+        quoteService.CreateQuoteAsync(Arg.Any<OfferCheckoutQuoteCreationRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Failure<OfferCheckoutQuote>(Error.Failure("checkout.quote_storage_unavailable")));
+
+        var (service, startDate) = BuildService(
+            db, clock, sender, customerId, program.Id, bundle.Id, quoteService: quoteService);
+        var request = new SubscriptionSummaryRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, DurationDays: 26,
+            StartDate: startDate, OfferId: offer.Id);
+
+        var result = await service.GetOrderSummaryAsync(request, customerId);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("checkout.quote_storage_unavailable");
+    }
+
+    [Fact]
+    public async Task Summary_WhenCheckoutIsBlocked_DoesNotCreateAnOfferQuote()
+    {
+        using var db = CreateDbContext();
+        var now = new DateTime(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc);
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+
+        var (program, bundle) = await SeedCatalogAsync(db);
+        var customerId = Guid.NewGuid();
+        var offer = new Offer
+        {
+            NameAr = "عرض مباشر",
+            NameEn = "Direct offer",
+            Status = OfferStatus.Active,
+            StartsAtUtc = now.AddDays(-1),
+            EndsAtUtc = now.AddDays(10)
+        };
+        db.Offers.Add(offer);
+        await db.SaveChangesAsync();
+
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<PreviewCustomerPricingQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result<PricingEngineResult>.Success(PricingEngine.Calculate(new PricingEngineRequest(
+                MeanReferenceDailyPrice: 5m,
+                DurationDays: 26,
+                CampaignDiscountKwd: 0m,
+                DurationRatesPct: new Dictionary<int, decimal> { [26] = 0m },
+                GatewayFeePct: 0m,
+                GatewayFeeFixedKwd: 0m,
+                RoundingStepKwd: 0.001m,
+                FridayDays: 0,
+                FridayRatePct: 0m))));
+
+        var readiness = Substitute.For<ISubscriptionCheckoutReadinessService>();
+        readiness.EvaluateAsync(customerId, program.Id, bundle.Id, RestaurantTier.Basic, 26, false,
+                Arg.Any<CancellationToken>(), Arg.Any<DateOnly?>())
+            .Returns(Result<SubscriptionCheckoutReadinessDto>.Success(new SubscriptionCheckoutReadinessDto(
+                IsComplete: true,
+                CanOpenSummary: true,
+                CanCheckout: false,
+                NextAction: "CHECKOUT",
+                WarningAr: "لا توجد تغطية",
+                WarningEn: "No coverage",
+                CheckoutBlockReason: "checkout.coverage_unavailable",
+                Program: new SubscriptionReadinessProgramDto(program.Id, program.NameAr, program.NameEn),
+                Address: new SubscriptionSummaryAddressDto(Guid.NewGuid(), "Home", "Kuwait City", "Capital", "Area 1", "1", Guid.NewGuid()),
+                DeliveringRestaurantCount: 0,
+                Items: [],
+                Restaurants: [])));
+        var quoteService = Substitute.For<IOfferCheckoutQuoteService>();
+
+        var (service, startDate) = BuildService(
+            db, clock, sender, customerId, program.Id, bundle.Id, readiness, quoteService);
+        var request = new SubscriptionSummaryRequest(
+            program.Id, bundle.Id, RestaurantTier.Basic, DurationDays: 26,
+            StartDate: startDate, OfferId: offer.Id);
+
+        var result = await service.GetOrderSummaryAsync(request, customerId);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.CanCheckout.Should().BeFalse();
+        result.Value.QuoteId.Should().BeNull();
+        await quoteService.DidNotReceive().CreateQuoteAsync(
+            Arg.Any<OfferCheckoutQuoteCreationRequest>(), Arg.Any<CancellationToken>());
+    }
+
     private static (SubscriptionFlowQueryService Service, DateOnly StartDate) BuildService(
         AppDbContext db,
         IDateTimeProvider clock,
@@ -363,7 +592,8 @@ public sealed class OfferSummaryTests
         Guid customerId,
         Guid programId,
         Guid bundleId,
-        ISubscriptionCheckoutReadinessService? mockReadiness = null)
+        ISubscriptionCheckoutReadinessService? mockReadiness = null,
+        IOfferCheckoutQuoteService? quoteService = null)
     {
         var startDate = new DateOnly(2026, 10, 25);
         var dates = Enumerable.Range(0, 26).Select(i => startDate.AddDays(i)).ToList();
@@ -430,7 +660,8 @@ public sealed class OfferSummaryTests
             diversification,
             sender,
             clock: clock,
-            offerEngine: new OfferEligibilityEngine());
+            offerEngine: new OfferEligibilityEngine(),
+            quoteService: quoteService);
 
         return (service, startDate);
     }

@@ -542,4 +542,18 @@ public static class MessageCodes
         public const string PricingPolicyCurrencyMismatch = "campaign.pricing_policy_currency_mismatch";
         public const string ConcurrentModification = "campaign.concurrent_modification";
     }
+
+    public static class OfferPurchaseOptions
+    {
+        public const string FamilyOnly = "offers.family_only";
+        public const string NoEligiblePackages = "offers.no_eligible_packages";
+        public const string PeriodUnavailable = "offers.period_unavailable";
+        public const string AvailabilityUnavailable = "offers.availability_unavailable";
+        public const string ReadinessUnavailable = "offers.readiness_unavailable";
+    }
+
+    public static class Checkout
+    {
+        public const string CouponFullDiscountUnsupported = "checkout.coupon_full_discount_unsupported";
+    }
 }

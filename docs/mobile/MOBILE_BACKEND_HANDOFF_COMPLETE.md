@@ -1,8 +1,10 @@
 # MealMate Mobile Backend Handoff — Complete Contract
 
-**Version:** 3.1
+**Version:** 3.2
 **Audience:** Flutter/mobile and backend teams  
 **Authority:** Server responses are the source of truth. The mobile client must not infer payment success, eligibility, price, coverage, or expiry locally.
+
+For the individual offer-selection screen and direct payment, use [Offer Direct Payment Mobile Contract](OFFER_DIRECT_PAYMENT_MOBILE_CONTRACT.md). It documents `purchase-options`, exact-offer summary, `quoteId`, retry ownership, actual error envelopes and payment polling. That focused contract takes precedence over earlier individual checkout examples here. Code changes still require deployment before mobile can use them on a server.
 
 ## 1. Canonical flow routes
 
@@ -25,6 +27,7 @@ GET /api/v1/customer/family-subscription-flow/programs
 GET /api/v1/customer/family-subscription-flow/programs/{programId}/bundles
 GET /api/v1/customer/offers/hub
 GET /api/v1/customer/offers/{offerId}/details
+GET /api/v1/customer/offers/{offerId}/purchase-options
 ```
 
 Catalog records always expose stable IDs, `nameAr`, `nameEn`, active availability, category/tier, and server-supported durations. Never identify a program, bundle, tier, or offer by display name or image.
@@ -67,8 +70,6 @@ Important fields:
   "basePrice": 300.000,
   "campaignDiscount": 20.000,
   "promoDiscount": 10.000,
-  "subtotal": 300.000,
-  "discount": 30.000,
   "walletCredit": 0.000,
   "gatewayFee": 0.000,
   "finalPrice": 270.000,
@@ -83,7 +84,7 @@ Important fields:
 }
 ```
 
-The canonical relationship is `subtotal = basePrice` and `discount = campaignDiscount + promoDiscount`. Do not add coupon discount a second time.
+The individual summary currently serializes `basePrice`, `campaignDiscount`, and `promoDiscount`; do not require `subtotal` or `discount` aliases from this DTO. A client display subtotal is `basePrice`, and a client display discount is `campaignDiscount + promoDiscount`. Do not add coupon discount a second time. The purchase-options card has its own additive `discount` field. Send the selected `offerId` in summary and follow the focused direct-payment contract for `quoteId` and its expiry.
 
 ## 5. Family setup and summary
 
@@ -262,4 +263,4 @@ Currency is `KWD`; monetary values use three decimal places and server-side roun
 
 ## 15. Compatibility
 
-All new fields are additive. Older clients may omit `clientContractVersion` and new idempotency fields; the server continues returning legacy fields. New clients should read both legacy price fields and the aggregate aliases during migration, preferring `subtotal`, `discount`, `walletCredit`, `gatewayFee`, and `finalPrice`.
+The individual summary retains `basePrice`, `campaignDiscount`, `promoDiscount`, `walletCredit`, `gatewayFee`, and `finalPrice`. Its `quoteId` field is additive. Legacy checkout requests without a quote retain their existing behavior; they do not gain the quote-backed idempotency guarantee by sending a correlation ID. Clients using the direct offer-payment flow must follow the focused contract and send the quote plus stable idempotency key. Family contracts retain their separately documented batch/version requirements.
