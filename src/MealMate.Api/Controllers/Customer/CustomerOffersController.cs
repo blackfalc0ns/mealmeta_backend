@@ -264,4 +264,32 @@ public sealed class CustomerOffersController : ApiControllerBase
             ? HandleResult(result)
             : Ok(result.Value!.Offer);
     }
+
+    [AllowAnonymous]
+    [HttpPost("validate-discount")]
+    public async Task<IActionResult> ValidateDiscount(
+        [FromBody] ValidateDiscountRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var customerId = ResolveCustomerId(request.CustomerUserId);
+        var result = await Sender.Send(new MealMate.Application.Features.ProgramsSubscriptions.ValidateDiscountCodeQuery(
+            request.Code,
+            request.SubscriptionId,
+            request.TotalAmountKwd,
+            customerId != Guid.Empty ? customerId : null,
+            request.ProgramId,
+            request.BundleId,
+            request.SubscriptionType), cancellationToken);
+        return HandleResult(result);
+    }
 }
+
+public sealed record ValidateDiscountRequest(
+    string Code,
+    Guid? SubscriptionId = null,
+    decimal TotalAmountKwd = 0m,
+    Guid? CustomerUserId = null,
+    Guid? ProgramId = null,
+    Guid? BundleId = null,
+    string? SubscriptionType = null);
+

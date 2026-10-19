@@ -10,6 +10,7 @@ using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 using MealMate.Application.Features.ProgramsSubscriptions.Flow;
+using MealMate.Domain.Offers.Enums;
 
 namespace MealMate.Application.Features.ProgramsSubscriptions;
 
@@ -313,7 +314,65 @@ public sealed class FamilyAndOffersHandlers :
 
             return new DiscountValidationResultDto(true, code, "ReferralCode", 0m, null,
                 DiscountPercent: referral.RewardPercent.Value,
-                EligibilityCode: "rule_only_amount_set_at_quote");
+                EligibilityCode: "rule_only_amount_set_at_quote",
+                FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.Valid, isReferralSource: true),
+                FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.Valid, isReferralSource: true));
+        }
+
+        // 3. Check Offer by PromoCode
+        var offer = await _db.Offers.FirstOrDefaultAsync(x => x.PromoCode == code, cancellationToken);
+        if (offer is not null)
+        {
+            if (offer.Status != OfferStatus.Active)
+            {
+                return new DiscountValidationResultDto(false, code, "Offer", 0m, "Offer is inactive or not currently running.",
+                    EligibilityCode: SubscriptionCouponStatuses.Inactive,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.Inactive),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.Inactive));
+            }
+            if (offer.StartsAtUtc > now)
+            {
+                return new DiscountValidationResultDto(false, code, "Offer", 0m, "Offer is not yet valid.",
+                    EligibilityCode: SubscriptionCouponStatuses.NotStarted,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.NotStarted),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.NotStarted));
+            }
+            if (offer.EndsAtUtc < now)
+            {
+                return new DiscountValidationResultDto(false, code, "Offer", 0m, "Offer has expired.",
+                    EligibilityCode: SubscriptionCouponStatuses.Expired,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.Expired),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.Expired));
+            }
+            if (offer.TotalUsageLimit.HasValue && offer.CurrentUsageCount >= offer.TotalUsageLimit.Value)
+            {
+                return new DiscountValidationResultDto(false, code, "Offer", 0m, "Offer usage limit reached.",
+                    EligibilityCode: SubscriptionCouponStatuses.UsageExhausted,
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.UsageExhausted),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.UsageExhausted));
+            }
+
+            if (offer.DiscountType == DiscountType.Percentage && offer.DiscountRate is not null)
+            {
+                return new DiscountValidationResultDto(true, code, "Offer", 0m, null,
+                    DiscountPercent: offer.DiscountRate.Value,
+                    EligibilityCode: "rule_only_amount_set_at_quote",
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.Valid),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.Valid));
+            }
+
+            if (offer.DiscountType == DiscountType.FixedAmount && offer.DiscountAmount is not null)
+            {
+                return new DiscountValidationResultDto(true, code, "Offer", offer.DiscountAmount.Amount, null,
+                    EligibilityCode: "fixed_amount_rule",
+                    FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.Valid),
+                    FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.Valid));
+            }
+
+            return new DiscountValidationResultDto(false, code, "Offer", 0m, "Offer has no discount configured.",
+                EligibilityCode: "no_rule",
+                FailureMessageAr: SubscriptionCouponMessages.MessageAr(SubscriptionCouponStatuses.Ineligible),
+                FailureMessageEn: SubscriptionCouponMessages.MessageEn(SubscriptionCouponStatuses.Ineligible));
         }
 
         return new DiscountValidationResultDto(false, code, "Unknown", 0m, $"Discount code '{code}' was not found.",

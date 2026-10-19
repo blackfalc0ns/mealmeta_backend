@@ -151,6 +151,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         var fridayDays = _schedule.CountFridays(serviceDates);
         var preview = await _sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
             IncludeFriday: request.IncludeFriday, FridayDays: fridayDays, CustomerId: customerUserId,
+            OfferId: request.OfferId,
             PromoCode: request.PromoCode, CustomerSubscriptionType: "Individual"), ct);
         if (preview.IsFailure) return preview.Error;
 
@@ -180,7 +181,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
 
             var discounted = await _sender.Send(new PreviewCustomerPricingQuery(request.ProgramId, request.BundleId, request.Tier, request.DurationDays,
                 IncludeFriday: request.IncludeFriday, FridayDays: fridayDays,
-                CustomerId: customerUserId, PromoCode: promoCode, CustomerSubscriptionType: "Individual"), ct);
+                CustomerId: customerUserId, OfferId: request.OfferId, PromoCode: promoCode, CustomerSubscriptionType: "Individual"), ct);
             if (discounted.IsFailure) return discounted.Error;
             pricingResult = discounted.Value;
         }
@@ -241,14 +242,14 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                     PromoCodeId: couponEvaluation is { IsValid: true, IsReferral: false }
                         && (couponEvaluation.PromoCodeId.HasValue ? pricingResult.PromoCodeDiscountApplied > 0m : pricingResult.CampaignDiscountApplied > 0m)
                         ? couponEvaluation.PromoCodeId : null,
-                    CouponOfferId: couponEvaluation is { IsValid: true, IsReferral: false }
+                    CouponOfferId: (couponEvaluation is { IsValid: true, IsReferral: false }
                         && !couponEvaluation.PromoCodeId.HasValue && pricingResult.CampaignDiscountApplied > 0m
-                        ? couponEvaluation.OfferId : null,
+                        ? couponEvaluation.OfferId : null) ?? (request.OfferId.HasValue && pricingResult.CampaignDiscountApplied > 0m ? request.OfferId : null),
                     CouponDiscountKwd: couponEvaluation is { IsValid: true }
                         ? couponEvaluation.PromoCodeId.HasValue || couponEvaluation.IsReferral
                             ? pricingResult.PromoCodeDiscountApplied
                             : pricingResult.CampaignDiscountApplied
-                        : 0m,
+                        : pricingResult.CampaignDiscountApplied,
                     WalletAppliedKwd: pricingResult.WalletCreditApplied,
                     CheckoutAnchorDate: chosenStartDate), transactionCt);
                 if (create.IsFailure) throw new CheckoutReservationException(create.Error.Code);
@@ -266,6 +267,12 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                             ? pricingResult.PromoCodeDiscountApplied
                             : pricingResult.CampaignDiscountApplied,
                         transactionCt);
+                else if (request.OfferId.HasValue && pricingResult.CampaignDiscountApplied > 0m)
+                {
+                    var offer = await _db.Offers.FirstOrDefaultAsync(x => x.Id == request.OfferId.Value, transactionCt);
+                    if (offer != null)
+                        await _coupons.CreateCheckoutHoldAsync(offer, create.Value.Id, customerUserId, pricingResult.CampaignDiscountApplied, transactionCt);
+                }
 
                 // The wallet hold is a ledger row only: the live balance is untouched until the
                 // payment is verified (converted to a debit) or fails (released).

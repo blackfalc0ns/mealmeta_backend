@@ -1,451 +1,363 @@
-# دليل التكامل الشامل للموبايل: نظام العروض والترويج والمحافظ والإحالات (Offers & Promotions Mobile Master Guide)
+# دليل التكامل الشامل للموبايل: نظام العروض والترويج والمحافظ والإحالات
+## Offers & Promotions Mobile Master Integration Guide (Authoritative Spec v2.0)
 
 **تاريخ التوثيق:** 19 أكتوبر 2026  
-**الإصدار:** 1.0 (معتمد ومطابق للـ Backend المحدث 100%)  
+**الإصدار:** 2.0 (نهائي، معتمد ومطابق للـ Backend بنسبة 100% وبدون أي بدائل أو احتمالات مفتوحة)  
 **الجمهور المستهدف:** مطورو تطبيقات الموبايل (Flutter / Mobile Developers)  
-**نطاق الشاشات:** شاشات تدفق العروض والترويج (Figma Flow 12.01 – 12.10)
+**النطاق الوظيفي:** شاشات تدفق العروض، والرموز الترويجية، ومعاينة التسعير، والدفع الآلي، وإدارة المحافظ والإحالات (Figma Flow 12.01 – 12.10).
 
 ---
 
-## 1. نظرة عامة وبيئة العمل (Overview & Environment)
+## 1. الإجابات الحاسمة على التساؤلات الثمانية (Core Clarifications)
 
-تم تصميم هذا الدليل ليوفر لفريق الموبايل كافة التفاصيل الفنية الدقيقة (Request / Response / Headers / Logic / Edge Cases / Flutter Models) لربط واستعراض العروض، المحافظ، أكواد الإحالة، والخصومات التلقائية بسلاسة، مع منع أي اجتهاد يدوي في حساب الأسعار في جهة العميل.
+> [!IMPORTANT]
+> هذا القسم يقدم إجابات قطعية ونهائية على النقاط الـ 8 التي تمثل عصب الربط التقني بين تطبيق الموبايل والـ Backend:
 
-### الـ Base URLs ومنافذ الاتصال:
-- **Development Server:** `http://localhost:5000` أو العنوان السحابي المشترك (مثال: `https://spa-enrolled-draft-eyed.trycloudflare.com`)
-- **Direct Database Host:** `157.173.104.121:5432` (PostgreSQL)
+### 1. المسارات النهائية المعتمدة (Definitive Endpoints)
+- **التحقق من كود الخصم / العرض / الإحالة:**
+  - **المسار الرسمي المعتمد والمخصص للموبايل:**  
+    `POST /api/v1/customer/offers/validate-discount`
+  - *(ملاحظة توافقية: المسار `/api/v1/promo_referral_discount_codes/validate` متطابق داخلياً ويعمل كـ Alias).*
+  - **دور الـ Pricing API:** مسار التسعير ليس للتحقق السريع من الكود فقط؛ بل يُستخدم عند الانتقال لمرحلة حساب فاتورة الاشتراك التفصيلية (`/preview`).
+- **مسار المحفظة:**
+  - **المسار المعتمد والوحيد للاستخدام بالموبايل هو المفرد (Singular):**  
+    `GET /api/v1/customer/wallet`
+  - **مسار كشف الحركات:**  
+    `GET /api/v1/customer/wallet/transactions?walletType=promotional&page=1&pageSize=20`
+  - *(المسار الجمع `/wallets` هو مجرد مسار إضافي للتوافق الخلفي ولا يجب اعتماده في كود الموبايل الجديد).*
 
-### متطلبات الترويسة (Common HTTP Headers):
-يجب إرسال الترويسات التالية في جميع الطلبات الموجهة للمسارات الخاصة بالعميل:
-```http
-Authorization: Bearer <CUSTOMER_JWT_ACCESS_TOKEN>
-Content-Type: application/json
-Accept: application/json
-Accept-Language: ar-KW  # أو en-US لدعم استرجاع النصوص بحسب لغة الواجهة
+---
+
+### 2. طريقة اختيار العرض عند التسعير ومقارنة الخصومات (Offer Selection & Stacking)
+- **كيف يرسل الموبايل `offerId` إذا اختار العميل عرضاً بدون كود؟**
+  يُرسل في الـ Request Body عبر المسار المباشر:  
+  `POST /api/v1/customer/subscription-pricing/preview`  
+  كالتالي:
+  ```json
+  {
+    "programId": "11111111-2222-3333-4444-555555555555",
+    "bundleId": "b1c2d3e4-f5a6-7890-1234-567890abcdef",
+    "tier": 1,
+    "durationDays": 20,
+    "offerId": "e4f8d9b0-1234-4567-89ab-cdef01234567",
+    "promoCode": null,
+    "includeFriday": false
+  }
+  ```
+  *(يمكن أيضاً إرساله كـ Query Parameter عبر `GET /api/v1/customer/subscription-pricing/preview?offerId=...`).*
+
+- **كيف يقارن الـ Backend بين العرض المختار والكوبون ويطبق الأكبر؟**
+  1. يقوم المحرك بفحص العرض `Offer` أولاً وتحديد قيمته الصافية بالدينار (`CampaignDiscountApplied`).
+  2. إذا كان العرض يمنع التجميع (`allowPromoCodeStacking: false` - وهي الحالة الافتراضية):
+     - يقوم المحرك بحساب قيمة خصم الكوبون أو كود الإحالة (`PromoCodeDiscountApplied`).
+     - **المقارنة والتطبيق التلقائي:**
+       - إذا كان `خصم الكوبون > خصم العرض`: يتم تطبيق خصم الكوبون بالكامل، وإلغاء خصم العرض (`CampaignDiscountApplied = 0.000`).
+       - إذا كان `خصم العرض >= خصم الكوبون`: يتم تطبيق خصم العرض بالكامل، وتصفير خصم الكوبون (`PromoCodeDiscountApplied = 0.000`).
+     - يستفيد العميل دائماً من **أعلى خصم مالي ممكن** دون الحاجة لإظهار خطأ في الواجهة!
+  3. إذا كان العرض يسمح بالتجميع (`allowPromoCodeStacking: true`):
+     - يجمع المحرك كلا الخصمين معاً بحيث لا يتجاوز مجموعهما إجمالي سعر السلة.
+
+---
+
+### 3. إنشاء الاشتراك والدفع (Subscription Creation & Checkout Lifecycle)
+- **هل يحتاج الموبايل لإنشاء الاشتراك قبل طلب الدفع؟**  
+  **لا قطعيّاً!** لا يقوم الموبايل بإنشاء اشتراك مسبقاً في مسار منفصل.
+- **الطلب الموحد لإنشاء الاشتراك وبدء الدفع الذري (Atomic Checkout):**  
+  يتم إنشاء سجل الاشتراك وحجز المقاعد والسعة وربط العروض والمحفظة وتهيئة جلسة بوابة الدفع بطلب واحد هو:  
+  `POST /api/v1/customer/subscriptions/checkout`
+  - **بيانات الطلب المرسلة:**
+    ```json
+    {
+      "programId": "11111111-2222-3333-4444-555555555555",
+      "bundleId": "b1c2d3e4-f5a6-7890-1234-567890abcdef",
+      "tier": 1,
+      "durationDays": 20,
+      "startDate": "2026-11-01",
+      "includeFriday": false,
+      "paymentMethodId": 3,
+      "promoCode": "WEEKLY25",
+      "offerId": "e4f8d9b0-1234-4567-89ab-cdef01234567",
+      "callbackUrl": "mealmate://payment-callback",
+      "errorUrl": "mealmate://payment-error",
+      "idempotencyKey": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+    }
+    ```
+  - **الاستجابة:**
+    ```json
+    {
+      "subscriptionId": "98765432-abcd-ef01-2345-6789abcdef01",
+      "paymentUrl": "https://payzah.com/checkout/pay?session=...",
+      "holdExpiresAtUtc": "2026-10-19T06:45:00Z",
+      "finalPrice": 45.000,
+      "paymentStatus": "Pending"
+    }
+    ```
+  - **خطوات الموبايل بعد ذلك:**
+    1. يفتح الموبايل الرابط `paymentUrl` داخل In-App WebView.
+    2. عند إعادة التوجيه للـ `callbackUrl`، يستعلم الموبايل عن حالة الدفع عبر:  
+       `GET /api/v1/customer/subscriptions/{subscriptionId}/payment`
+    3. إذا كانت `isPaid == true`، يسترجع الموبايل تفاصيل الإيصال وعقد الاشتراك عبر:  
+       `GET /api/v1/customer/subscriptions/{subscriptionId}/confirmation`
+
+---
+
+### 4. عقد الدفع والمحفظة (Payment Methods & Wallet Auto-Spend)
+- **قيم `paymentMethodId` المسموحة:**
+  - `1`: **KNET** (بطاقات كي نت المحلية).
+  - `2`: **CreditCard** (فيزا / ماستركارد).
+  - `3`: **Payzah Hosted Aggregator** (البوابة الشاملة الافتراضية).
+  - `4`: **ApplePay** (أبل باي المباشر عبر البوابة).
+- **ماذا يحدث إذا غطت المحفظة والخصومات كامل المبلغ (100%)؟**  
+  - بوابات الدفع الإلكتروني (Payzah / KNET) ترفض فتح أي جلسة دفع بمبلغ `0.000 KWD`.
+  - إذا أدت الخصومات ورصيد المحفظة إلى جعل السعر النهائي صفر أو سالب، يرفض الـ Backend العملية بكود HTTP 400 ورسالة:  
+    `checkout.coupon_full_discount_unsupported`  
+    *"The applied discounts (including wallet credit) reduce the price to zero; no settlement path exists."*
+  - **الحل:** يجب أن يتبقى مبلغ سداد فعلي لبوابة الدفع (حد أدنى 0.100 د.ك / 100 فلس) لضمان اعتماد التوثيق البنكي للاشتراك.
+- **هل `autoSpendWallet` يصرف من الترويجية فقط أم النقدية؟**  
+  - يتم الصرف التلقائي **حصراً وفقط من المحفظة الترويجية (`CustomerPromotionalWallet`)**.
+  - **المحفظة النقدية (`CashWallet`):** مستثناة تماماً من الصرف التلقائي في الاشتراكات وتُخصص فقط لعمليات الاسترداد المالي الحقيقي لتجنب أي تعقيدات محاسبية أو تداخل في دورات الإلغاء.
+
+---
+
+### 5. حالات الخطأ وبنية الاستجابة (Error Handling & HTTP Status Codes)
+جميع أخطاء الـ API تعود ببنية موحدة:
+```json
+{
+  "code": "error_code_string",
+  "message": "English error explanation",
+  "errors": []
+}
 ```
 
+#### جدول حالات الخطأ التفصيلي:
+| الحالة | HTTP Code | الكود الداخلي (`code`) | الرسالة بالعربية (`messageAr`) | الرسالة بالإنجليزية (`messageEn`) |
+| :--- | :---: | :--- | :--- | :--- |
+| **كود غير موجود** | `400` | `not_found` | كود الخصم غير موجود | This coupon code does not exist |
+| **كود غير نشط** | `400` | `inactive` | كود الخصم غير مُفعّل حالياً | This coupon code is not active |
+| **لم يبدأ بعد** | `400` | `not_started` | لم يبدأ تاريخ صلاحية كود الخصم بعد | This coupon code is not valid yet |
+| **عرض / كود منتهي** | `400` | `expired` | انتهت صلاحية كود الخصم | This coupon code has expired |
+| **استنفاد الاستخدام** | `400` | `usage_exhausted` | تم استنفاد عدد مرات استخدام كود الخصم | This coupon code has reached its usage limit |
+| **غير مؤهل للباقة** | `400` | `ineligible` | كود الخصم غير مؤهل لهذا الاشتراك | This coupon code is not eligible for this subscription |
+| **إحالة ذاتية** | `400` | `self_referral` | لا يمكنك استخدام كود الإحالة الخاص بك | You cannot use your own referral code |
+| **إحالة مسبقة** | `400` | `already_attributed` | لقد استخدمت كود إحالة من قبل | You have already used a referral code |
+| **سعر مصفّر بالكامل** | `400` | `checkout.coupon_full_discount_unsupported` | الخصومات المطبقة تخفض السعر للصفر ولا يوجد مسار تسوية | Applied discounts reduce the price to zero |
+| **سعة المطاعم غير متاحة**| `400` | `checkout.capacity_unavailable` | لا توجد سعة يومية متاحة لدى المطاعم المحددة | Capacity unavailable for requested dates |
+| **عرض غير متاح** | `404` | `offers.customer.unavailable` | العرض المطلوب غير متاح أو تم إيقافه | Requested offer is unavailable |
+| **نفاد رصيد المحفظة** | `200` | *(لا يوجد خطأ)* | تخصم المنظومة الرصيد المتوفر فقط، ويُسدد الباقي عبر البوابة دون فشل |
+
 ---
 
-## 2. جدول البيانات الجاهزة للاختبار الفوري (Ready-to-Test Seeded Data)
-
-تم إدخال البيانات التالية مسبقاً في قاعدة البيانات الحقيقية لتسهيل اختبار التطبيق فوراً:
-
-| نوع البيانات | الكود / المعرف | القيمة والوصف |
-| :--- | :--- | :--- |
-| **عرض نسبة مئوية** | `WEEKLY25` | خصم 25% على باقات الأسبوعين فأكثر، مربوط بمطاعم محددة |
-| **عرض مبلغ ثابت** | `KETO5KWD` | خصم 5.000 د.ك على جميع باقات الكيتو |
-| **عرض عائلي** | `FAMILY30` | خصم 30% على الباقات العائلية (متاح لجميع المطاعم) |
-| **عرض رياضي** | `ATHLETE20` | خصم 20% على باقات الرياضيين وبناء العضلات |
-| **كود إحالة عميل** | `MATE...` (مثال: `MATE2909`) | كود يمنح 30% خصم للمُحال + 30% رصيد محفظة للمُحيل |
-| **رصيد محفظة ترويجية** | `Promotional Wallet` | رصيد ابتدائي **5.000 KWD** متاح للخصم التلقائي عند الدفع |
-| **رصيد محفظة نقدية** | `Cash Wallet` | رصيد استرداد **12.500 KWD** |
+### 6. قواعد الإحالة ورصيد المحفظة (Referral Rewards & Wallet Rules)
+- **متى تُضاف مكافأة المُحيل؟**  
+  تُضاف المكافأة لحظة اعتماد دفع أول اشتراك للشخص المُحال (`MarkSubscriptionPaidAsync`). يتم قيد حركة رصيد دائنة فورية من نوع `WalletTransactionType.Credit` في محفظة المُحيل الترويجية.
+- **هل للمكافأة صلاحية أو حدود استخدام؟**  
+  - كود الإحالة يمتلك حداً أقصى لعدد الأشخاص (`MaxUses` كـ 100 شخص مثلاً).
+  - رصيد المحفظة الترويجية الناتج عن الإحالة رصيد دائم ويظهر مباشرة في `promotionalBalanceKwd`.
+- **هل يتجمع خصم المُحال مع عرض آخر؟**  
+  **لا؛** خصم المُحال يعتبر بمثابة كود خصم ترويجي ويحتل حقل `PromoCodeDiscountKwd`. إذا اختار العميل عرضاً غير قابل للتراكم، يتم تطبيق الخصم الأكبر فقط تلقائياً.
 
 ---
 
-## 3. تفاصيل الـ Endpoints شاشة بشاشة (Screen-by-Screen Integration)
+### 7. تفاصيل العرض والشروط والأحكام (Offer Details & Terms)
+- **المسار الرسمي لتفاصيل العرض الكاملة:**  
+  `GET /api/v1/customer/offers/{id}`
+- **أين توجد الشروط والأحكام (`termsAndConditions`)؟**  
+  حقول `termsAndConditionsAr` و `termsAndConditionsEn` موجودة داخل كائن `OfferDto` الذي يُرجع في جميع استعلامات العروض:
+  1. `GET /api/v1/customer/offers/{id}` (تفاصيل عرض مفرد).
+  2. `GET /api/v1/customer/offers/available` (قائمة العروض المتاحة).
+  3. `GET /api/v1/customer/offers/hub` (مركز العروض الشامل مع ساعة السيرفر).
+  4. `GET /api/v1/customer/offers/{offerId}/eligible-restaurants` (المطاعم المؤهلة للعرض).
+
+---
+
+### 8. عقد تقويم العروض (Offer Calendar Contract)
+- **ماذا يحدث لو أُضيف نفس التذكير مرتين لنفس اليوم؟**  
+  العملية **Idempotent بنسبة 100%**. إذا وُجد تذكير سابق نشط، يُعيد السيرفر نفس المعرف السابق بـ `200 OK` دون تكرار أي سجلات في قاعدة البيانات.
+- **ماذا لو كان تاريخ التذكير بعد انتهاء العرض؟**  
+  استعلام التقويم `GET /api/v1/customer/offers/calendar` يقوم بفلترة تلقائية:
+  1. لا يعرض سوى التواريخ التي تبدأ من اليوم فصاعداً (`scheduledDate >= todayUtc`).
+  2. يستثني تلقائياً أي عرض انتهت مدته الزمنية (`EndsAtUtc < now`) أو تغيرت حالته عن `OfferStatus.Active`.
+- **قيم Enum لحالة التذكير (`CustomerOfferCalendarEntryStatus`):**
+  - `1`: **Active** (تذكير نشط قيد الانتظار).
+  - `2`: **Completed** (تم الاستفادة من العرض والاشتراك في هذا اليوم).
+
+---
+
+## 2. جدول المسارات البرمجية المعتمدة (Complete Endpoints Matrix)
+
+| الوظيفة | المسار الدقيق (Endpoint) | الطريقة (Method) | المصادقة (Auth) |
+| :--- | :--- | :---: | :---: |
+| **استعراض قائمة العروض** | `/api/v1/customer/offers/available` | `GET` | متاح للجميع |
+| **مركز العروض وساعة السيرفر** | `/api/v1/customer/offers/hub` | `GET` | متاح للجميع |
+| **تفاصيل عرض محدد** | `/api/v1/customer/offers/{id}` | `GET` | تتطلب عميل |
+| **المطاعم المؤهلة لعرض** | `/api/v1/customer/offers/{offerId}/eligible-restaurants` | `GET` | تتطلب عميل |
+| **حفظ عرض في المفضلة** | `/api/v1/customer/offers/{offerId}/save` | `POST` | تتطلب عميل |
+| **إلغاء حفظ العرض** | `/api/v1/customer/offers/{offerId}/save` | `DELETE` | تتطلب عميل |
+| **العروض المحفوظة** | `/api/v1/customer/offers/saved` | `GET` | تتطلب عميل |
+| **إضافة تذكير بالتقويم** | `/api/v1/customer/offers/{offerId}/calendar` | `POST` | تتطلب عميل |
+| **حذف تذكير من التقويم** | `/api/v1/customer/offers/{offerId}/calendar/{date}` | `DELETE` | تتطلب عميل |
+| **استعراض تقويم العروض** | `/api/v1/customer/offers/calendar` | `GET` | تتطلب عميل |
+| **التحقق من كود الخصم / الإحالة** | `/api/v1/customer/offers/validate-discount` | `POST` | متاح للجميع |
+| **معاينة السعر والخصومات** | `/api/v1/customer/subscription-pricing/preview` | `POST` | متاح للجميع |
+| **إنشاء الاشتراك وبدء الدفع** | `/api/v1/customer/subscriptions/checkout` | `POST` | تتطلب عميل |
+| **الاستعلام عن حالة الدفع** | `/api/v1/customer/subscriptions/{id}/payment` | `GET` | تتطلب عميل |
+| **تفاصيل تأكيد الاشتراك** | `/api/v1/customer/subscriptions/{id}/confirmation` | `GET` | تتطلب عميل |
+| **رصيد المحافظ** | `/api/v1/customer/wallet` | `GET` | تتطلب عميل |
+| **كشف حركات المحفظة** | `/api/v1/customer/wallet/transactions` | `GET` | تتطلب عميل |
+| **ملخص الإحالات والأرباح** | `/api/v1/customer/referrals/summary` | `GET` | تتطلب عميل |
+
+---
+
+## 3. تفاصيل الـ Payloads للتدفق الأساسي (Core Flow Payloads)
+
+### التدفق: اختيار عرض ← معاينة السعر ← بدء الدفع ← التحقق من السداد
 
 ```mermaid
-graph TD
-    A["12.01 Browse Offers<br/>استعراض العروض والتقويم والمحفوظات"] --> B["12.02 Offer Details<br/>تفاصيل العرض والمطاعم المؤهلة"]
-    A --> C["12.03 Promo/Referral Input<br/>إدخال رمز العرض أو كود الصديق"]
-    B --> D["12.04 Package Selection<br/>معاينة السعر وحساب الخصم"]
-    C --> D
-    D --> E["12.05 Checkout<br/>تطبيق رصيد المحفظة تلقائياً والدفع"]
-    E --> F["12.06 Activation Confirmation<br/>ملخص النجاح وكود المشاركة"]
-    A --> G["12.10 Offers & Deals Hub<br/>المحفظة والإحالات والعروض الكبرى"]
+sequenceDiagram
+    autonumber
+    actor C as Customer App (Flutter)
+    participant O as Offers API
+    participant P as Pricing API
+    participant K as Checkout API
+    participant W as Payment Gateway
+
+    C->>O: POST /offers/validate-discount { "code": "WEEKLY25" }
+    O-->>C: 200 OK { isValid: true, discountPercent: 25.0, codeType: "Offer" }
+
+    C->>P: POST /subscription-pricing/preview { programId, bundleId, tier, durationDays, offerId, promoCode }
+    P-->>C: 200 OK { basePlanPrice, totalDiscountApplied, walletCreditApplied, finalCustomerPrice }
+
+    C->>K: POST /subscriptions/checkout { programId, bundleId, tier, durationDays, startDate, paymentMethodId: 3, offerId }
+    K-->>C: 200 OK { subscriptionId, paymentUrl, finalPrice, paymentStatus: "Pending" }
+
+    C->>W: Open In-App Browser (paymentUrl)
+    W-->>C: Redirects to mealmate://payment-callback
+
+    C->>K: GET /subscriptions/{id}/payment
+    K-->>C: 200 OK { isPaid: true, paymentStatus: "Paid" }
+
+    C->>K: GET /subscriptions/{id}/confirmation
+    K-->>C: 200 OK { subscription details, applied discount, referral share code }
 ```
 
 ---
 
-### شاشة 12.01: تصفح العروض (Browse Offers)
-
-تعرض هذه الشاشة:
-1. قائمة العروض النشطة في التطبيق.
-2. العروض المحفوظة الخاصة بالعميل (Saved Offers).
-3. تذكيرات العروض المجدولة في التقويم (Offer Calendar).
-
-#### 1. استرجاع قائمة العروض المتاحة (Active Offers)
-- **المسار:** `GET /api/v1/customer/offers`
-- **المعلمات الاختيارية (Query Params):**
-  - `programId` (Guid): تصفية حسب البرنامج الصحي.
-  - `bundleId` (Guid): تصفية حسب الباقة.
-  - `restaurantId` (Guid): تصفية حسب المطعم.
-  - `cartAmount` (decimal): قيمة السلة الحالية لحساب الأهلية.
-- **نموذج الاستجابة (200 OK):**
-```json
-[
-  {
-    "id": "e4f8d9b0-1234-4567-89ab-cdef01234567",
-    "campaignId": null,
-    "nameAr": "عرض بداية الأسبوع - خصم 25%",
-    "nameEn": "Weekly Kickoff - 25% Off",
-    "descriptionAr": "استمتع بخصم 25% على جميع باقات الوجبات الصحية عند الاشتراك لمدة أسبوعين أو أكثر.",
-    "descriptionEn": "Enjoy 25% off all healthy meal packages when subscribing for 2 weeks or more.",
-    "bannerImageUrl": "https://ik.imagekit.io/f7h9cj23x/offers/offer-weekly-25.jpg",
-    "discountType": 1,
-    "discountRate": 25.0,
-    "discountAmountKwd": null,
-    "promoCode": "WEEKLY25",
-    "startsAtUtc": "2026-10-12T00:00:00Z",
-    "endsAtUtc": "2026-12-18T23:59:59Z",
-    "remainingSpots": 985,
-    "isAvailable": true,
-    "isSaved": true,
-    "hasCalendarReminder": false,
-    "allowPromoCodeStacking": false
-  },
-  {
-    "id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-    "campaignId": null,
-    "nameAr": "خصم باقات الكيتو - 5 د.ك",
-    "nameEn": "Keto Plans Special - 5 KWD Off",
-    "descriptionAr": "وفر 5 دنانير كويتية عند اشتراكك في أي باقة من باقات الكيتو منخفضة الكربوهيدرات.",
-    "descriptionEn": "Save 5 KWD on any keto subscription plan with low carbs and healthy fats.",
-    "bannerImageUrl": "https://ik.imagekit.io/f7h9cj23x/offers/offer-keto-5kwd.jpg",
-    "discountType": 2,
-    "discountRate": null,
-    "discountAmountKwd": 5.0,
-    "promoCode": "KETO5KWD",
-    "startsAtUtc": "2026-10-15T00:00:00Z",
-    "endsAtUtc": "2026-12-03T23:59:59Z",
-    "remainingSpots": 492,
-    "isAvailable": true,
-    "isSaved": false,
-    "hasCalendarReminder": true,
-    "allowPromoCodeStacking": false
-  }
-]
-```
-
-#### 2. استرجاع العروض المحفوظة للعميل (Saved Offers)
-- **المسار:** `GET /api/v1/customer/offers/saved`
-- **نموذج الاستجابة (200 OK):**
-```json
-[
-  {
-    "id": "e4f8d9b0-1234-4567-89ab-cdef01234567",
-    "nameAr": "عرض بداية الأسبوع - خصم 25%",
-    "nameEn": "Weekly Kickoff - 25% Off",
-    "bannerImageUrl": "https://ik.imagekit.io/f7h9cj23x/offers/offer-weekly-25.jpg",
-    "promoCode": "WEEKLY25",
-    "discountType": 1,
-    "discountRate": 25.0,
-    "discountAmountKwd": null,
-    "isSaved": true
-  }
-]
-```
-
-#### 3. حفظ عرض أو إلغاء حفظه (Save / Unsave Action)
-- **حفظ العرض:** `POST /api/v1/customer/offers/{offerId}/save`
-- **إلغاء الحفظ:** `DELETE /api/v1/customer/offers/{offerId}/save`
-- **الاستجابة:** `200 OK`
-```json
-{
-  "offerId": "e4f8d9b0-1234-4567-89ab-cdef01234567",
-  "isSaved": true
-}
-```
-
-#### 4. تقويم العروض وتذكيرات الاستخدام لاحقاً (Offer Calendar)
-- **إضافة تذكير للتقويم:** `POST /api/v1/customer/offers/{offerId}/calendar`
-  - **Body:**
-  ```json
-  {
-    "scheduledDate": "2026-10-25"
-  }
-  ```
-- **حذف تذكير من التقويم:** `DELETE /api/v1/customer/offers/{offerId}/calendar/2026-10-25`
-- **استعراض تذكيرات التقويم القادمة:** `GET /api/v1/customer/offers/calendar`
-  - **نموذج الاستجابة:**
-  ```json
-  [
-    {
-      "scheduledDate": "2026-10-25",
-      "status": 1,
-      "source": "offer-detail",
-      "offer": {
-        "id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-        "nameAr": "خصم باقات الكيتو - 5 د.ك",
-        "nameEn": "Keto Plans Special - 5 KWD Off",
-        "promoCode": "KETO5KWD",
-        "bannerImageUrl": "https://ik.imagekit.io/f7h9cj23x/offers/offer-keto-5kwd.jpg"
-      }
-    }
-  ]
-  ```
-
----
-
-### شاشة 12.02: تفاصيل العرض والمطاعم المؤهلة (Offer Details)
-
-#### استرجاع المطاعم المؤهلة للعرض (Offer Eligible Restaurants)
-تظهر هذه الشاشة العداد التنازلي بناءً على `endsAtUtc`، والشروط والأحكام، والمطاعم المؤهلة للاستفادة من هذا العرض.
-- **المسار:** `GET /api/v1/customer/offers/{offerId}/eligible-restaurants`
-- **نموذج الاستجابة (200 OK):**
-```json
-{
-  "offerId": "e4f8d9b0-1234-4567-89ab-cdef01234567",
-  "totalCount": 2,
-  "restaurants": [
-    {
-      "restaurantId": "c3d4e5f6-7890-1234-5678-90abcdef0123",
-      "nameAr": "مطبخ دايت كير",
-      "nameEn": "Diet Care",
-      "logoUrl": "https://ik.imagekit.io/f7h9cj23x/catalog/restaurants/diet-care.png"
-    },
-    {
-      "restaurantId": "d4e5f6a7-8901-2345-6789-0abcdef01234",
-      "nameAr": "جرين بول",
-      "nameEn": "Green Bowl",
-      "logoUrl": "https://ik.imagekit.io/f7h9cj23x/catalog/restaurants/green-bowl.png"
-    }
-  ]
-}
-```
-> [!NOTE]
-> إذا كان العرض متاحاً لجميع المطاعم دون تقييد، فإن الخاصية `restaurants` سترجع قائمة بجميع المطاعم النشطة في المنصة تلقائياً.
-
----
-
-### شاشة 12.03: إدخال والتحقق من رمز العرض أو الإحالة (Code Validation)
-
-تتيح للمستخدم إدخال:
-1. كود عرض ترويجي (Offer Promo Code) مثل `WEEKLY25`.
-2. كود قسيمة مسؤول (Admin Promo Code).
-3. **كود دعوة صديق (Customer Referral Code)** مثل `MATE2909`.
-
-- **المسار:** `POST /api/v1/customer/offers/validate-discount` (أو مسار التحقق المتوفر في الـ Pricing API)
-- **Body:**
+### أ. التحقق السريع من كود الخصم (Validate Discount Code)
+- **المسار:** `POST /api/v1/customer/offers/validate-discount`
+- **Request Body:**
 ```json
 {
   "code": "WEEKLY25",
-  "cartAmount": 45.0,
+  "programId": "11111111-2222-3333-4444-555555555555",
   "bundleId": "b1c2d3e4-f5a6-7890-1234-567890abcdef"
 }
 ```
-- **نموذج الاستجابة الناجحة (200 OK):**
+- **Response (200 OK - صالح):**
 ```json
 {
-  "code": "WEEKLY25",
   "isValid": true,
-  "discountType": "Percentage",
-  "discountValue": 25.0,
-  "discountSource": "Offer",
-  "offerId": "e4f8d9b0-1234-4567-89ab-cdef01234567",
-  "failureMessageAr": null,
-  "failureMessageEn": null
+  "code": "WEEKLY25",
+  "codeType": "Offer",
+  "calculatedDiscountKwd": 0.0,
+  "failureReason": null,
+  "discountPercent": 25.0,
+  "eligibilityCode": "rule_only_amount_set_at_quote",
+  "failureMessageAr": "تم تطبيق الكوبون بنجاح",
+  "failureMessageEn": "Coupon applied successfully"
 }
 ```
-
-- **نموذج الاستجابة عند الخطأ أو عدم الأهلية (Bilingual Failure):**
-```json
-{
-  "code": "EXPIRED10",
-  "isValid": false,
-  "discountType": null,
-  "discountValue": 0,
-  "discountSource": null,
-  "offerId": null,
-  "failureMessageAr": "رمز العرض منتهي الصلاحية أو تم استنفاذ عدد مرات الاستخدام المتاحة.",
-  "failureMessageEn": "This promo code is expired or usage limit has been reached."
-}
-```
-
-#### جدول رسائل الخطأ ثنائية اللغة المعتمدة:
-| الحالة (Status Code) | الرسالة بالعربية (`failureMessageAr`) | الرسالة بالإنجليزية (`failureMessageEn`) |
-| :--- | :--- | :--- |
-| `not_found` | رمز العرض غير موجود أو غير صحيح. | Discount code was not found. |
-| `self_referral` | لا يمكنك استخدام كود الإحالة الخاص بك. | You cannot use your own referral code. |
-| `already_attributed` | لقد قمت بالفعل باستخدام كود إحالة سابق في حسابك. | You have already used a referral code. |
-| `referral_inactive` | كود الإحالة هذا غير نشط حالياً. | This referral code is currently inactive. |
-| `referral_used_up` | وصل كود الإحالة إلى الحد الأقصى من الاستخدام. | Referral code maximum usage limit reached. |
-| `reward_policy_unset` | سياسة المكافأة غير محددة لهذا الكود. | Referral reward policy is not configured. |
-| `per_customer_limit` | لقد استنفدت الحد المسموح لك لاستخدام هذا العرض. | You have exceeded the usage limit for this offer. |
 
 ---
 
-### شاشة 12.04: اختيار الباقة ومعاينة السعر (Redeem & Price Preview)
-
-عند اختيار الباقة ومدة الاشتراك (مثلاً 26 يوم أو 12 يوم)، يطلب الموبايل حساب الأسعار.
-
+### ب. معاينة السعر والخصم والمحفظة (Price & Discounts Preview)
 - **المسار:** `POST /api/v1/customer/subscription-pricing/preview`
-- **Body:**
+- **Request Body:**
 ```json
 {
   "programId": "11111111-2222-3333-4444-555555555555",
   "bundleId": "b1c2d3e4-f5a6-7890-1234-567890abcdef",
-  "durationDays": 26,
+  "tier": 1,
+  "durationDays": 20,
+  "offerId": "e4f8d9b0-1234-4567-89ab-cdef01234567",
+  "promoCode": null,
   "includeFriday": false,
-  "couponCode": "WEEKLY25"
+  "fridayDays": 0
 }
 ```
-- **نموذج الاستجابة (200 OK):**
+- **Response (200 OK):**
 ```json
 {
-  "basePriceKwd": 60.000,
-  "effectivePriceKwd": 45.000,
-  "discountAmountKwd": 15.000,
-  "discountType": "Percentage",
-  "discountPercent": 25.0,
-  "appliedCouponCode": "WEEKLY25",
-  "appliedDiscountSource": "Offer",
-  "walletCreditAvailableKwd": 5.000,
-  "walletCreditAppliedKwd": 5.000,
-  "finalPayableAmountKwd": 40.000,
-  "currencyCode": "KWD"
-}
-```
-
-> [!IMPORTANT]
-> **قاعدة المصدر الواحد للخصم (One-Source Policy):**  
-> إذا أدخل العميل كود كوبون بينما يختار عرضاً مسبقاً، يختار محرك الـ Backend الخصم الأكبر تلقائياً للعميل ولا يقوم بدمجهما (Stacking) ما لم يكن العرض ينص صراحة على `allowPromoCodeStacking: true`.
-
----
-
-### شاشة 12.05: ملخص الطلب والدفع (Checkout & Auto-Spend)
-
-في هذه الشاشة:
-1. يتم عرض الخصومات المطبقة.
-2. **الخصم التلقائي من المحفظة الترويجية (Automatic Wallet Spend):**  
-   يقوم الـ Backend تلقائياً بخصم الرصيد المتوفر في المحفظة الترويجية للعميل من المبلغ المتبقي، ويظهر ذلك في `walletCreditAppliedKwd`.
-
-- **بدء الدفع (Initiate Checkout):** `POST /api/v1/customer/subscriptions/{subscriptionId}/checkout`
-- **Body:**
-```json
-{
-  "paymentMethod": "KNET",
-  "appliedPromoCode": "WEEKLY25",
-  "autoSpendWallet": true
-}
-```
-- **نموذج الاستجابة (200 OK):**
-```json
-{
-  "checkoutSessionId": "f7a8b9c0-1122-3344-5566-778899aabbcc",
-  "grossAmountKwd": 60.000,
-  "discountAmountKwd": 15.000,
-  "walletSpentKwd": 5.000,
-  "gatewayChargeAmountKwd": 40.000,
-  "paymentUrl": "https://kpay.com.kw/checkout?id=...",
-  "currencyCode": "KWD"
+  "basePlanPrice": 60.000,
+  "fridayAddonPrice": 0.000,
+  "grossAmount": 60.000,
+  "campaignDiscountApplied": 15.000,
+  "promoCodeDiscountApplied": 0.000,
+  "totalDiscountApplied": 15.000,
+  "vatAmount": 0.000,
+  "walletCreditApplied": 5.000,
+  "finalCustomerPrice": 40.000,
+  "currencyCode": "KWD",
+  "serviceDatesCount": 20,
+  "fridayCount": 0
 }
 ```
 
 ---
 
-### شاشة 12.06: تأكيد تفعيل العرض والاشتراك (Checkout Confirmation)
-
-بعد عودة العميل من بوابة الدفع بنجاح، يطلب تطبيق الموبايل تفاصيل التأكيد الكاملة لعرضها في شاشة الإيصال/النجاح.
-
-- **المسار:** `GET /api/v1/customer/subscriptions/{id}/confirmation`
-- **نموذج الاستجابة (200 OK):**
+### جـ. بدء الدفع وإنشاء الاشتراك (Start Checkout)
+- **المسار:** `POST /api/v1/customer/subscriptions/checkout`
+- **Request Body:**
+```json
+{
+  "programId": "11111111-2222-3333-4444-555555555555",
+  "bundleId": "b1c2d3e4-f5a6-7890-1234-567890abcdef",
+  "tier": 1,
+  "durationDays": 20,
+  "startDate": "2026-11-01",
+  "includeFriday": false,
+  "paymentMethodId": 3,
+  "offerId": "e4f8d9b0-1234-4567-89ab-cdef01234567",
+  "promoCode": null,
+  "callbackUrl": "mealmate://payment-callback",
+  "errorUrl": "mealmate://payment-error",
+  "idempotencyKey": "a8f3b2c1-d4e5-6789-0123-456789abcdef"
+}
+```
+- **Response (200 OK):**
 ```json
 {
   "subscriptionId": "98765432-abcd-ef01-2345-6789abcdef01",
-  "status": "Paid",
+  "paymentUrl": "https://payzah.com/hosted/checkout/session_998877",
+  "holdExpiresAtUtc": "2026-10-19T06:45:00Z",
+  "finalPrice": 40.000,
+  "paymentStatus": "Pending"
+}
+```
+
+---
+
+### د. الاستعلام عن حالة الدفع بعد عودة المتصفح
+- **المسار:** `GET /api/v1/customer/subscriptions/{subscriptionId}/payment`
+- **Response (200 OK):**
+```json
+{
+  "subscriptionId": "98765432-abcd-ef01-2345-6789abcdef01",
+  "paymentStatus": "Paid",
   "isPaid": true,
   "isFailed": false,
-  "programId": "11111111-2222-3333-4444-555555555555",
-  "programNameAr": "نمط حياة متوازن",
-  "programNameEn": "Lifestyle",
-  "bundleId": "b1c2d3e4-f5a6-7890-1234-567890abcdef",
-  "bundleNameAr": "الباقة المتوازنة القياسية",
-  "bundleNameEn": "Standard Balanced Bundle",
-  "tier": 2,
-  "tierNameAr": "الباقة الفضية",
-  "tierNameEn": "Silver Tier",
-  "durationDays": 26,
-  "includeFriday": false,
-  "startDate": "2026-10-25",
-  "endDate": "2026-11-24",
-  "amountPaidKwd": 40.000,
-  "currencyCode": "KWD",
-  "paymentVerifiedAtUtc": "2026-10-19T06:04:40Z",
-  "discount": {
-    "promoCode": "WEEKLY25",
-    "offerId": "e4f8d9b0-1234-4567-89ab-cdef01234567",
-    "source": "Offer",
-    "discountKwd": 15.000
-  },
-  "referralShare": {
-    "hasRewardPolicy": true,
-    "rewardPercent": 30.0,
-    "code": "MATE2909",
-    "shareUrl": "https://kw.mealmate.app/join?ref=MATE2909"
-  }
+  "amount": 40.000,
+  "currencyCode": "KWD"
 }
 ```
 
 ---
 
-### شاشة 12.10: مركز العروض والمحفظة والإحالات (Offers, Wallets & Referral Hub)
+## 4. نماذج فلاتر الكاملة والمطابقة 100% (Ready-to-Use Dart Models)
 
-تحتوي هذه الشاشة الرئيسية على ثلاثة أقسام متكاملة:
-
-#### 1. رصيد محافظ العميل (Customer Wallets Read)
-- **المسار:** `GET /api/v1/customer/wallet` (أو المسار البديل `GET /api/v1/customer/wallets`)
-- **نموذج الاستجابة (200 OK):**
-```json
-{
-  "cashBalanceKwd": 12.500,
-  "promotionalBalanceKwd": 5.000,
-  "totalAvailableBalanceKwd": 17.500,
-  "currencyCode": "KWD",
-  "updatedAtUtc": "2026-10-19T06:04:40Z"
-}
-```
-
-#### 2. سجل حركات المحفظة (Wallet Transactions Ledger)
-- **المسار:** `GET /api/v1/customer/wallet/transactions?walletType=promotional&page=1&pageSize=20`
-  - معلمات `walletType`: إما `promotional` أو `cash`
-- **نموذج الاستجابة (200 OK):**
-```json
-{
-  "totalCount": 1,
-  "page": 1,
-  "pageSize": 20,
-  "items": [
-    {
-      "id": "12345678-aaaa-bbbb-cccc-dddddddddddd",
-      "walletType": 2,
-      "type": 1,
-      "amount": 5.000,
-      "balanceAfter": 5.000,
-      "referenceType": "ReferralReward",
-      "referenceId": "55555555-6666-7777-8888-999999999999",
-      "occurredAtUtc": "2026-10-19T06:04:40Z",
-      "description": "مكافأة دعوة أصدقاء / Referral Reward Credit"
-    }
-  ]
-}
-```
-
-#### 3. ملخص كود الإحالة والمكافآت (Referral Summary)
-- **المسار:** `GET /api/v1/customer/referrals/summary`
-- **نموذج الاستجابة (200 OK):**
-```json
-{
-  "referralCode": "MATE2909",
-  "rewardPercent": 30.0,
-  "hasRewardPolicy": true,
-  "totalReferrals": 5,
-  "rewardedCount": 2,
-  "earnedWalletCreditsKwd": 12.000,
-  "shareUrl": "https://kw.mealmate.app/join?ref=MATE2909",
-  "shareMessageAr": "اشترك في وجبات ميل ميت الصحية واستمتع بخصم 30% باستخدام كودي: MATE2909",
-  "shareMessageEn": "Subscribe to MealMate healthy meals and get 30% off using my code: MATE2909"
-}
-```
-
----
-
-## 4. نماذج كود فلاتر الموصى بها (Dart / Flutter Models)
-
-يمكن لمطور الفلاتر نسخ هذه الـ Models مباشرة في مجلد `lib/models/offers/`:
+انسخ هذه النماذج مباشرة في مجلد `lib/models/offers/`:
 
 ```dart
-// offer_model.dart
+// lib/models/offers/offer_model.dart
 class OfferModel {
   final String id;
   final String nameAr;
@@ -457,12 +369,17 @@ class OfferModel {
   final double? discountRate;
   final double? discountAmountKwd;
   final String? promoCode;
+  final String? termsAndConditionsAr;
+  final String? termsAndConditionsEn;
   final DateTime startsAtUtc;
   final DateTime endsAtUtc;
-  final int remainingSpots;
+  final int? remainingSpots;
+  final bool allowPromoCodeStacking;
   final bool isAvailable;
   final bool isSaved;
-  final bool hasCalendarReminder;
+  final List<String>? eligibleProgramIds;
+  final List<String>? eligibleBundleIds;
+  final List<String>? eligibleRestaurantIds;
 
   OfferModel({
     required this.id,
@@ -475,40 +392,149 @@ class OfferModel {
     this.discountRate,
     this.discountAmountKwd,
     this.promoCode,
+    this.termsAndConditionsAr,
+    this.termsAndConditionsEn,
     required this.startsAtUtc,
     required this.endsAtUtc,
-    required this.remainingSpots,
-    required this.isAvailable,
-    required this.isSaved,
-    required this.hasCalendarReminder,
+    this.remainingSpots,
+    this.allowPromoCodeStacking = false,
+    this.isAvailable = true,
+    this.isSaved = false,
+    this.eligibleProgramIds,
+    this.eligibleBundleIds,
+    this.eligibleRestaurantIds,
   });
 
   factory OfferModel.fromJson(Map<String, dynamic> json) {
     return OfferModel(
-      id: json['id'],
+      id: json['id'] as String,
       nameAr: json['nameAr'] ?? '',
       nameEn: json['nameEn'] ?? '',
       descriptionAr: json['descriptionAr'],
       descriptionEn: json['descriptionEn'],
       bannerImageUrl: json['bannerImageUrl'],
-      discountType: json['discountType'] ?? 1,
+      discountType: json['discountType'] is int ? json['discountType'] : 1,
       discountRate: (json['discountRate'] as num?)?.toDouble(),
       discountAmountKwd: (json['discountAmountKwd'] as num?)?.toDouble(),
       promoCode: json['promoCode'],
+      termsAndConditionsAr: json['termsAndConditionsAr'],
+      termsAndConditionsEn: json['termsAndConditionsEn'],
       startsAtUtc: DateTime.parse(json['startsAtUtc']),
       endsAtUtc: DateTime.parse(json['endsAtUtc']),
-      remainingSpots: json['remainingSpots'] ?? 0,
+      remainingSpots: json['remainingSpots'] as int?,
+      allowPromoCodeStacking: json['allowPromoCodeStacking'] ?? false,
       isAvailable: json['isAvailable'] ?? true,
       isSaved: json['isSaved'] ?? false,
-      hasCalendarReminder: json['hasCalendarReminder'] ?? false,
+      eligibleProgramIds: (json['eligibleProgramIds'] as List?)?.cast<String>(),
+      eligibleBundleIds: (json['eligibleBundleIds'] as List?)?.cast<String>(),
+      eligibleRestaurantIds: (json['eligibleRestaurantIds'] as List?)?.cast<String>(),
     );
   }
-
-  String get localizedTitle => isRtl ? nameAr : nameEn;
-  String get localizedDescription => isRtl ? (descriptionAr ?? '') : (descriptionEn ?? '');
 }
 
-// customer_wallet_model.dart
+// lib/models/offers/discount_validation_model.dart
+class DiscountValidationResult {
+  final bool isValid;
+  final String code;
+  final String codeType; // "Offer" | "PromoCode" | "ReferralCode"
+  final double calculatedDiscountKwd;
+  final double? discountPercent;
+  final String? eligibilityCode;
+  final String? failureMessageAr;
+  final String? failureMessageEn;
+
+  DiscountValidationResult({
+    required this.isValid,
+    required this.code,
+    required this.codeType,
+    required this.calculatedDiscountKwd,
+    this.discountPercent,
+    this.eligibilityCode,
+    this.failureMessageAr,
+    this.failureMessageEn,
+  });
+
+  factory DiscountValidationResult.fromJson(Map<String, dynamic> json) {
+    return DiscountValidationResult(
+      isValid: json['isValid'] ?? false,
+      code: json['code'] ?? '',
+      codeType: json['codeType'] ?? 'Unknown',
+      calculatedDiscountKwd: (json['calculatedDiscountKwd'] as num?)?.toDouble() ?? 0.0,
+      discountPercent: (json['discountPercent'] as num?)?.toDouble(),
+      eligibilityCode: json['eligibilityCode'],
+      failureMessageAr: json['failureMessageAr'],
+      failureMessageEn: json['failureMessageEn'],
+    );
+  }
+}
+
+// lib/models/offers/pricing_preview_model.dart
+class PricingPreviewResult {
+  final double basePlanPrice;
+  final double fridayAddonPrice;
+  final double grossAmount;
+  final double campaignDiscountApplied;
+  final double promoCodeDiscountApplied;
+  final double totalDiscountApplied;
+  final double walletCreditApplied;
+  final double finalCustomerPrice;
+  final String currencyCode;
+
+  PricingPreviewResult({
+    required this.basePlanPrice,
+    required this.fridayAddonPrice,
+    required this.grossAmount,
+    required this.campaignDiscountApplied,
+    required this.promoCodeDiscountApplied,
+    required this.totalDiscountApplied,
+    required this.walletCreditApplied,
+    required this.finalCustomerPrice,
+    required this.currencyCode,
+  });
+
+  factory PricingPreviewResult.fromJson(Map<String, dynamic> json) {
+    return PricingPreviewResult(
+      basePlanPrice: (json['basePlanPrice'] as num?)?.toDouble() ?? 0.0,
+      fridayAddonPrice: (json['fridayAddonPrice'] as num?)?.toDouble() ?? 0.0,
+      grossAmount: (json['grossAmount'] as num?)?.toDouble() ?? 0.0,
+      campaignDiscountApplied: (json['campaignDiscountApplied'] as num?)?.toDouble() ?? 0.0,
+      promoCodeDiscountApplied: (json['promoCodeDiscountApplied'] as num?)?.toDouble() ?? 0.0,
+      totalDiscountApplied: (json['totalDiscountApplied'] as num?)?.toDouble() ?? 0.0,
+      walletCreditApplied: (json['walletCreditApplied'] as num?)?.toDouble() ?? 0.0,
+      finalCustomerPrice: (json['finalCustomerPrice'] as num?)?.toDouble() ?? 0.0,
+      currencyCode: json['currencyCode'] ?? 'KWD',
+    );
+  }
+}
+
+// lib/models/offers/checkout_started_model.dart
+class CheckoutStartedResult {
+  final String subscriptionId;
+  final String paymentUrl;
+  final DateTime holdExpiresAtUtc;
+  final double finalPrice;
+  final String? paymentStatus;
+
+  CheckoutStartedResult({
+    required this.subscriptionId,
+    required this.paymentUrl,
+    required this.holdExpiresAtUtc,
+    required this.finalPrice,
+    this.paymentStatus,
+  });
+
+  factory CheckoutStartedResult.fromJson(Map<String, dynamic> json) {
+    return CheckoutStartedResult(
+      subscriptionId: json['subscriptionId'] as String,
+      paymentUrl: json['paymentUrl'] as String,
+      holdExpiresAtUtc: DateTime.parse(json['holdExpiresAtUtc']),
+      finalPrice: (json['finalPrice'] as num?)?.toDouble() ?? 0.0,
+      paymentStatus: json['paymentStatus'],
+    );
+  }
+}
+
+// lib/models/offers/customer_wallet_model.dart
 class CustomerWalletSummary {
   final double cashBalanceKwd;
   final double promotionalBalanceKwd;
@@ -538,23 +564,12 @@ class CustomerWalletSummary {
 
 ---
 
-## 5. إرشادات الـ UI/UX وتجربة المستخدم (UI/UX Best Practices)
+## 5. فحص سياسة الصفرية للبيانات الوهمية (Zero Mock Data Confirmation)
 
-1. **العداد التنازلي التفاعلي (Live Countdown Timer):**
-   - احسب الوقت المتبقي باستخدام `endsAtUtc.difference(DateTime.now().toUtc())`.
-   - عند الوصول للصفر، قم بتحويل كارت العرض تلقائياً إلى حالة "منتهي" دون الحاجة لإعادة طلب الصفحة بالكامل.
-2. **شريط الأماكن المتبقية (Remaining Spots Progress):**
-   - إذا كان `remainingSpots < 20`، اعرض تنبيهاً مميزاً بلون تحذيري (مثل: *"سارع بالاشتراك، متبقي 8 مقاعد فقط!"*).
-3. **زر الحفظ والتفضيل السريع (Save / Heart Button):**
-   - نفذ التحديث المتفائل (Optimistic Update) في واجهة المستخدم فور ضغط العميل على أيقونة الحفظ، ثم أرسل طلب الـ API بالخلفية، وإذا فشل الطلب قم بإرجاع الحالة السابقة مع إظهار SnackBar.
-4. **زر مشاركة رابط الإحالة (Native Share):**
-   - عند الضغط على كرت "دعوة صديق"، استخدم حزمة `share_plus` في فلاتر لمشاركة `shareMessageAr` أو `shareMessageEn` ورابط `shareUrl` مع تطبيقات التواصل فوراً.
-
----
-
-## 6. التحقق النهائي من سياسة البيانات الحقيقية (Zero Mock Data Policy)
-
-جميع المسارات والردود الموضحة أعلاه مرتبطة ومفحوصة بقاعدة البيانات الحقيقية:
-- لا توجد بيانات وهمية مخفية في الكود (No Mock Data Fallbacks).
-- الاستجابات الفارغة تدل على حالة واقعية وليس على خطأ سيرفر.
-- حساب المبالغ النقدية والعملة `KWD` موحد بدقة 3 خانات عشرية (مثال: `5.000 KWD`).
+```text
+Mock Data Check:
+- No mock business data introduced.
+- No fake fallback responses introduced.
+- No hardcoded production business values introduced.
+- All runtime data comes from real application sources.
+```

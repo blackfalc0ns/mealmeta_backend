@@ -32,4 +32,37 @@ public sealed class CustomerSubscriptionPricingController : ApiControllerBase
         CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new PreviewCustomerPricingQuery(
             programId, bundleId, tier, durationDays, campaignDiscountKwd, promoCodeDiscountKwd, includeFriday, fridayDays, offerId, customerId, promoCode), cancellationToken));
+
+    [HttpPost("preview")]
+    [AllowAnonymous]
+    public async Task<IActionResult> PreviewPricingPost(
+        [FromBody] PreviewCustomerPricingRequest request,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new PreviewCustomerPricingQuery(
+            request.ProgramId,
+            request.BundleId,
+            request.Tier,
+            request.DurationDays,
+            request.CampaignDiscountKwd,
+            request.PromoCodeDiscountKwd,
+            request.IncludeFriday,
+            request.FridayDays,
+            request.OfferId,
+            request.CustomerId,
+            request.PromoCode,
+            request.CustomerSubscriptionType ?? "Individual"), cancellationToken));
 }
+
+public sealed record PreviewCustomerPricingRequest(
+    Guid ProgramId,
+    Guid BundleId,
+    RestaurantTier Tier,
+    int DurationDays,
+    Guid? OfferId = null,
+    Guid? CustomerId = null,
+    string? PromoCode = null,
+    decimal CampaignDiscountKwd = 0m,
+    decimal PromoCodeDiscountKwd = 0m,
+    bool IncludeFriday = false,
+    int FridayDays = 0,
+    string? CustomerSubscriptionType = "Individual");
