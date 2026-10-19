@@ -38,6 +38,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
     private readonly ISubscriptionFlowCouponService _coupons;
     private readonly ISandboxCheckoutService? _sandbox;
     private readonly IWalletSpendingService _wallets;
+    private readonly IOfferCheckoutQuoteService _quotes;
 
     public CustomerCheckoutService(
         IAppDbContext db,
@@ -58,7 +59,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         ISandboxCheckoutService? sandbox = null,
         ISubscriptionFlowCouponService? couponService = null,
         IApplicationLockManager? applicationLocks = null,
-        IWalletSpendingService? wallets = null)
+        IWalletSpendingService? wallets = null,
+        IOfferCheckoutQuoteService? quotes = null)
     {
         _db = db;
         _payments = payments;
@@ -78,6 +80,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         _sandbox = sandbox;
         _coupons = couponService ?? new SubscriptionFlowCouponService(db, new OfferEligibilityEngine(), clock, applicationLocks);
         _wallets = wallets ?? new WalletSpendingService(db, clock, applicationLocks);
+        _quotes = quotes ?? new OfferCheckoutQuoteService(db, clock, configuration);
     }
 
     public async Task<Result<IReadOnlyList<CheckoutCatalogItem>>> GetCatalogAsync(CancellationToken ct = default)
@@ -194,6 +197,19 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                 "The applied discounts (including wallet credit) reduce the price to zero; no settlement path exists.");
         }
 
+        if (request.QuoteId.HasValue)
+        {
+            var quoteValidation = await _quotes.ValidateQuoteAtCheckoutAsync(
+                request.QuoteId.Value,
+                customerUserId,
+                request,
+                pricingResult,
+                gate.Value.Address?.Id,
+                ct);
+            if (quoteValidation.IsFailure)
+                return quoteValidation.Error;
+        }
+
         CheckoutReservationOutcome reservation;
         try
         {
@@ -298,6 +314,11 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
                         await _coupons.ReleaseCheckoutRedemptionAsync(prevSubId, transactionCt);
                         await _wallets.ReleaseCheckoutHoldAsync(prevSubId, customerUserId, transactionCt);
                     }
+                }
+
+                if (request.QuoteId.HasValue)
+                {
+                    await _quotes.MarkQuoteAsUsedAsync(request.QuoteId.Value, transactionCt);
                 }
 
                 await _db.SaveChangesAsync(transactionCt);
@@ -437,7 +458,7 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         var canPayDirectly = isHoldActive && isDateValid;
         var reason = canPayDirectly ? null : (!isDateValid ? "start_date_passed" : "capacity_hold_expired");
 
-        _schedule.TryResolveCheckoutStart(_clock.TodayUtc.AddDays(1), subscription.IncludeFriday, out var suggestedDate, out _);
+        var suggestedDate = _schedule.ResolveFirstDeliveryDate(_schedule.GetKuwaitToday(), subscription.IncludeFriday);
 
         var pricingRow = await _db.SystemSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Key == SubscriptionPricingSettingsDefaults.Key && x.IsActive, ct);
         var tierLabels = SubscriptionPricingSettingsReader.Deserialize(pricingRow?.ValueJson).TierLabels;
@@ -504,9 +525,8 @@ public sealed class CustomerCheckoutService : ICustomerCheckoutService
         if (!IsAllowedRedirectUrl(callbackUrl) || !IsAllowedRedirectUrl(errorUrl))
             return Error.Validation("checkout.redirect_url_not_allowed");
 
-        // Resume reuses the stored first-delivery StartDate: the +3/+4 lead was applied once at
-        // checkout and must never be applied again (Oct 11 must not become Oct 15). Only a
-        // genuinely new chosen day sent by the client re-derives a fresh first delivery.
+        // Resume reuses the stored first-delivery StartDate. A client-selected day is already
+        // the delivery date, so it is validated and persisted without adding lead days again.
         var requestedStartDate = request?.StartDate;
         DateOnly startDate;
         DateOnly offerAnchor;

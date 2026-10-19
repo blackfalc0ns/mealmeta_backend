@@ -8,6 +8,7 @@ public enum ErrorType
     Conflict = 3,
     Unauthorized = 4,
     Forbidden = 5,
+    Gone = 6,
 }
 
 /// <summary>
@@ -41,6 +42,9 @@ public sealed record Error(
 
     public static Error Forbidden(string code, string? description = null)
         => new(code, description, ErrorType.Forbidden);
+
+    public static Error Gone(string code, string? description = null)
+        => new(code, description, ErrorType.Gone);
 
     public static Error Failure(string code, string? description = null)
         => new(code, description, ErrorType.Failure);

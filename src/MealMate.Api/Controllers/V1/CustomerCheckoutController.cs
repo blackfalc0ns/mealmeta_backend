@@ -154,6 +154,12 @@ public sealed class CustomerCheckoutController : ApiControllerBase
             return Conflict(new { error = error.Code });
         }
 
+        if (error.Type == ErrorType.Gone)
+            return StatusCode(StatusCodes.Status410Gone, new { error = error.Code });
+
+        if (error.Type == ErrorType.Failure)
+            return StatusCode(StatusCodes.Status422UnprocessableEntity, new { error = error.Code });
+
         if (error.Arguments is [ { } badPayload ])
             return BadRequest(badPayload);
 

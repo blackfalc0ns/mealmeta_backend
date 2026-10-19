@@ -254,7 +254,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         await using var db = CreateDb();
         var (controller, spouseId, _) = await CreateLinkedSpouseAsync(db);
         db.ChangeTracker.Clear();
-        var today = new SubscriptionScheduleService(TestPricingClock()).GetKuwaitToday();
+        var schedule = new SubscriptionScheduleService(TestPricingClock());
+        var today = schedule.ResolveFirstDeliveryDate(schedule.GetKuwaitToday(), includeFriday: false);
         var stored = await db.FamilyMembers.AsNoTracking().ToListAsync();
         stored.Should().HaveCount(2);
         stored.Should().OnlyContain(x => x.StartDate == today);
@@ -296,7 +297,8 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("Family"), CancellationToken.None);
         var screen = created.Should().BeOfType<OkObjectResult>().Subject.Value.Should().BeOfType<FamilyGroupScreenDto>().Subject;
         var member = screen.Members.Single();
-        var today = new SubscriptionScheduleService(TestPricingClock()).GetKuwaitToday();
+        var schedule = new SubscriptionScheduleService(TestPricingClock());
+        var today = schedule.ResolveFirstDeliveryDate(schedule.GetKuwaitToday(), includeFriday: false);
         member.StartDate.Should().Be(today);
         db.ChangeTracker.Clear();
         (await db.FamilyMembers.SingleAsync()).StartDate.Should().Be(today);
@@ -1442,8 +1444,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
 
         var schedule = summary.MemberSchedules.Should().NotBeNull().And.ContainSingle(s => s.MemberId == spouseId).Subject;
         var scheduleService = new SubscriptionScheduleService(Substitute.For<IDateTimeProvider>());
-        var expectedDates = scheduleService.GetServiceDates(
-            scheduleService.ResolveFirstDeliveryDate(chosenStart, false), 6, false);
+        var expectedDates = scheduleService.GetServiceDates(chosenStart, 6, false);
         schedule.PaymentDate.Should().Be(new DateOnly(2026, 8, 19));
         schedule.FirstDeliveryDate.Should().Be(expectedDates[0]);
         schedule.EndDate.Should().Be(expectedDates[^1]);

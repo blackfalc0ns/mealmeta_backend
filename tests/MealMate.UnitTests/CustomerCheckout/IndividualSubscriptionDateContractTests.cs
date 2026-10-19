@@ -28,22 +28,21 @@ public sealed class IndividualSubscriptionDateContractTests
     private static readonly DateOnly FirstDeliveryDay = new(2026, 10, 11); // Sunday — subscription start + first delivery
 
     [Fact]
-    public void Example_payment_day_oct8_resolves_first_delivery_oct11_when_friday_excluded()
+    public void Customer_selected_first_delivery_oct11_is_kept_when_friday_is_excluded()
     {
         var schedule = new SubscriptionScheduleService(FixedClock());
 
-        Assert.Equal(FirstDeliveryDay, schedule.ResolveFirstDeliveryDate(PaymentDay, includeFriday: false));
-        // The payment day itself is never the subscription start.
-        Assert.NotEqual(PaymentDay, schedule.ResolveFirstDeliveryDate(PaymentDay, includeFriday: false));
+        Assert.True(schedule.TryResolveCheckoutStart(FirstDeliveryDay, includeFriday: false, out var firstDelivery, out _));
+        Assert.Equal(FirstDeliveryDay, firstDelivery);
     }
 
     [Fact]
-    public void Example_with_friday_included_keeps_four_day_lead()
+    public void Customer_selected_first_delivery_is_kept_when_friday_is_included()
     {
         var schedule = new SubscriptionScheduleService(FixedClock());
 
-        // Window Oct 9..11 contains a Friday but Friday is included, so the full 4-day lead applies.
-        Assert.Equal(new DateOnly(2026, 10, 12), schedule.ResolveFirstDeliveryDate(PaymentDay, includeFriday: true));
+        Assert.True(schedule.TryResolveCheckoutStart(new DateOnly(2026, 10, 12), includeFriday: true, out var firstDelivery, out _));
+        Assert.Equal(new DateOnly(2026, 10, 12), firstDelivery);
     }
 
     [Fact]
@@ -69,17 +68,17 @@ public sealed class IndividualSubscriptionDateContractTests
     {
         // 2026-10-07 20:59 UTC = 2026-10-07 23:59 Kuwait -> chosen Oct 7 still allowed.
         var beforeMidnight = new SubscriptionScheduleService(ClockAt(new DateTime(2026, 10, 7, 20, 59, 0, DateTimeKind.Utc)));
-        Assert.True(beforeMidnight.TryResolveCheckoutStart(new DateOnly(2026, 10, 7), false, out var wednesdayDelivery, out _));
-        Assert.Equal(new DateOnly(2026, 10, 10), wednesdayDelivery);
+        Assert.False(beforeMidnight.TryResolveCheckoutStart(new DateOnly(2026, 10, 7), false, out _, out _));
         Assert.False(beforeMidnight.TryResolveCheckoutStart(new DateOnly(2026, 10, 6), false, out _, out var pastError));
         Assert.Equal("checkout.start_date_invalid", pastError);
 
-        // 2026-10-07 21:00 UTC = 2026-10-08 00:00 Kuwait -> payment day Oct 8 is "today";
-        // the example resolves to first delivery Oct 11, not the payment day itself.
+        // 2026-10-07 21:00 UTC = 2026-10-08 00:00 Kuwait -> a first delivery before Oct 11 is too soon.
         var atMidnight = new SubscriptionScheduleService(ClockAt(new DateTime(2026, 10, 7, 21, 0, 0, DateTimeKind.Utc)));
         Assert.False(atMidnight.TryResolveCheckoutStart(new DateOnly(2026, 10, 7), false, out _, out var dayLateError));
         Assert.Equal("checkout.start_date_invalid", dayLateError);
-        Assert.True(atMidnight.TryResolveCheckoutStart(PaymentDay, false, out var firstDelivery, out _));
+        Assert.False(atMidnight.TryResolveCheckoutStart(PaymentDay, false, out _, out var tooSoonError));
+        Assert.Equal("checkout.start_date_invalid", tooSoonError);
+        Assert.True(atMidnight.TryResolveCheckoutStart(FirstDeliveryDay, false, out var firstDelivery, out _));
         Assert.Equal(FirstDeliveryDay, firstDelivery);
     }
 
@@ -136,13 +135,13 @@ public sealed class IndividualSubscriptionDateContractTests
         await db.SaveChangesAsync();
 
         var service = CreateCheckoutService(db, clock);
-        var result = await service.ResumeCheckoutAsync(subscription.Id, new ResumeCheckoutRequest(StartDate: new DateOnly(2026, 10, 10)), customerId);
+        var result = await service.ResumeCheckoutAsync(subscription.Id, new ResumeCheckoutRequest(StartDate: new DateOnly(2026, 10, 14)), customerId);
 
         Assert.True(result.IsSuccess, result.Error?.Code ?? "resume failed");
         await db.Entry(subscription).ReloadAsync();
-        // Sat Oct 10 chosen: no Friday in the 3-day window -> +4 -> Wed Oct 14, applied once.
+        // Wed Oct 14 is selected as the first delivery and is persisted as-is.
         Assert.Equal(new DateOnly(2026, 10, 14), subscription.StartDate);
-        Assert.Equal(new DateOnly(2026, 10, 10), result.Value.PaymentDate);
+        Assert.Equal(new DateOnly(2026, 10, 14), result.Value.PaymentDate);
         Assert.Equal(new DateOnly(2026, 10, 14), result.Value.StartDate);
     }
 

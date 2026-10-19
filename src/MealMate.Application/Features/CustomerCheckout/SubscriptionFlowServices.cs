@@ -59,14 +59,14 @@ public interface ISubscriptionScheduleService
     /// <summary>Kuwait calendar date for "today" comparisons on start-day pickers.</summary>
     DateOnly GetKuwaitToday();
     /// <summary>
-    /// User-chosen subscription start day → first delivery box date.
-    /// Rule: first delivery = chosenStartDate + 4 calendar days (72h + 24h) to allow a 24h selection window,
-    /// except when Friday falls in the window [chosenStartDate+1..chosenStartDate+3] and Friday is excluded (stays 3 days).
-    /// Skips Friday when excluded.
+    /// Returns the earliest first-delivery date allowed after payment. This remains available for
+    /// date-picker defaults; a customer-selected delivery date is validated by TryResolveCheckoutStart
+    /// and is not shifted a second time.
     /// </summary>
     DateOnly ResolveFirstDeliveryDate(DateOnly chosenStartDate, bool includeFriday);
     /// <summary>
-    /// Validates the user-chosen start day and returns the first delivery date used as Subscription.StartDate.
+    /// Validates a customer-selected first-delivery day and returns that same day. The selected day
+    /// must be at least the 72-hour preparation window plus the one-day selection buffer after today.
     /// Error codes: checkout.start_date_required, checkout.start_date_invalid, checkout.start_date_too_soon.
     /// </summary>
     bool TryResolveCheckoutStart(DateOnly? chosenStartDate, bool includeFriday, out DateOnly firstDeliveryDate, out string? errorCode);
@@ -203,13 +203,14 @@ public sealed class SubscriptionScheduleService : ISubscriptionScheduleService
         }
 
         var today = GetKuwaitToday();
-        if (chosenStartDate.Value < today)
+        var earliestDeliveryDate = ResolveFirstDeliveryDate(today, includeFriday);
+        if (chosenStartDate.Value < earliestDeliveryDate)
         {
             errorCode = "checkout.start_date_invalid";
             return false;
         }
 
-        firstDeliveryDate = ResolveFirstDeliveryDate(chosenStartDate.Value, includeFriday);
+        firstDeliveryDate = chosenStartDate.Value;
         return true;
     }
 

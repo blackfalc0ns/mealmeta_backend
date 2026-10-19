@@ -1086,5 +1086,10 @@
   <data name="campaign.payment.return.message" xml:space="preserve"><value>ارجع إلى التطبيق لعرض حالة دفع الحملة.</value></data>
   <data name="family.plan_conflicting_tier" xml:space="preserve"><value>يجب أن تتطابق قيمة التصنيف مع selectedTier عند إرسالهما معًا.</value></data>
   <data name="family.plan_conflicting_bundle" xml:space="preserve"><value>يجب أن تتطابق قيمة الباقة مع selectedBundleId عند إرسالهما معًا.</value></data>
-  <data name="checkout.start_date_invalid" xml:space="preserve"><value>لا يمكن أن يكون تاريخ البداية في الماضي.</value></data>
+  <data name="checkout.start_date_invalid" xml:space="preserve"><value>يجب أن يكون تاريخ أول توصيل بعد 72 ساعة ويوم إضافي من تاريخ الدفع.</value></data>
+  <data name="checkout.quote_changed" xml:space="preserve"><value>تغير عرض السعر أو التفاصيل. يُرجى مراجعة الملخص المحدّث والمحاولة مجددًا.</value></data>
+  <data name="checkout.idempotency_conflict" xml:space="preserve"><value>تم إرسال محاولة الدفع هذه مسبقًا بتفاصيل مختلفة. يُرجى استعادة المحاولة الأصلية أو بدء عملية دفع جديدة.</value></data>
+  <data name="checkout.in_progress" xml:space="preserve"><value>عملية الدفع قيد التنفيذ حاليًا لهذا الطلب. يُرجى الانتظار والتحقق من الحالة.</value></data>
+  <data name="checkout.quote_expired" xml:space="preserve"><value>انتهت صلاحية عرض السعر. يُرجى تحديث الملخص للحصول على عرض سعر محدّث.</value></data>
+  <data name="checkout.selection_not_eligible" xml:space="preserve"><value>الباقة أو التكوين المختار غير مؤهل لهذا العرض.</value></data>
 </root>

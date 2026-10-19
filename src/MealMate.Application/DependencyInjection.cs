@@ -60,6 +60,7 @@ public static class DependencyInjection
         services.AddScoped<Features.ProgramsSubscriptions.Freeze.ISubscriptionFreezePreparationService, Features.ProgramsSubscriptions.Freeze.SubscriptionFreezePreparationService>();
         services.AddScoped<Features.CustomerCheckout.IRestaurantPoolSnapshotService, Features.CustomerCheckout.RestaurantPoolSnapshotService>();
         services.AddScoped<Features.CustomerCheckout.ICustomerIndividualSubscriptionGate, Features.CustomerCheckout.CustomerIndividualSubscriptionGate>();
+        services.AddScoped<Features.CustomerCheckout.IOfferCheckoutQuoteService, Features.CustomerCheckout.OfferCheckoutQuoteService>();
         services.AddScoped<Features.CustomerCheckout.ICustomerCheckoutService, Features.CustomerCheckout.CustomerCheckoutService>();
         services.AddScoped<Features.CustomerCheckout.IAdminCheckoutOperationsService, Features.CustomerCheckout.AdminCheckoutOperationsService>();
         services.AddScoped<Features.CustomerCheckout.IPayzahWebhookService, Features.CustomerCheckout.PayzahWebhookService>();

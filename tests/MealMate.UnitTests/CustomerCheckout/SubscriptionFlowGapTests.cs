@@ -114,7 +114,10 @@ public sealed class SubscriptionFlowGapTests
         Assert.False(schedule.TryResolveCheckoutStart(null, false, out _, out var missingError));
         Assert.Equal("checkout.start_date_required", missingError);
 
-        Assert.True(schedule.TryResolveCheckoutStart(new DateOnly(2026, 8, 13), false, out var firstDelivery, out var okError));
+        Assert.False(schedule.TryResolveCheckoutStart(new DateOnly(2026, 8, 15), false, out _, out var tooSoonError));
+        Assert.Equal("checkout.start_date_invalid", tooSoonError);
+
+        Assert.True(schedule.TryResolveCheckoutStart(new DateOnly(2026, 8, 16), false, out var firstDelivery, out var okError));
         Assert.Null(okError);
         Assert.Equal(new DateOnly(2026, 8, 16), firstDelivery);
     }

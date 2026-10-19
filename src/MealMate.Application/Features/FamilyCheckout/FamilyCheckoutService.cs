@@ -871,8 +871,13 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
 
             if (member.StartDate is not DateOnly chosenStartDate)
                 return Error.Validation("family.start_date_required", "Choose a subscription start date for every paying family member.");
-            var startDate = _schedule.ResolveFirstDeliveryDate(chosenStartDate, member.IncludeFriday);
-            if (startDate == default) startDate = chosenStartDate;
+            if (!_schedule.TryResolveCheckoutStart(chosenStartDate, member.IncludeFriday, out var startDate, out var startError))
+                return Error.Validation(startError ?? "checkout.start_date_invalid", "Selected first delivery date is too soon.");
+            // A valid resolver always returns the selected date. Keep the request
+            // as a safe fallback for lightweight collaborators that only return
+            // the validation result.
+            if (startDate == default)
+                startDate = chosenStartDate;
             if (address.RegionId is null || string.IsNullOrWhiteSpace(address.AddressLine))
                 return Error.Validation("family.address_required", "family.address_required");
             var regionId = address.RegionId ?? Guid.Empty;

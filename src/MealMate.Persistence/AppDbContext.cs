@@ -1,4 +1,4 @@
-﻿using System.Linq.Expressions;
+using System.Linq.Expressions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.CalendarMeals;
@@ -336,6 +336,7 @@ public sealed class AppDbContext
     public DbSet<OfferAuditLog> OfferAuditLogs => Set<OfferAuditLog>();
     public DbSet<CustomerSavedOffer> CustomerSavedOffers => Set<CustomerSavedOffer>();
     public DbSet<CustomerOfferCalendarEntry> CustomerOfferCalendarEntries => Set<CustomerOfferCalendarEntry>();
+    public DbSet<MealMate.Domain.ProgramsSubscriptions.OfferCheckoutQuote> OfferCheckoutQuotes => Set<MealMate.Domain.ProgramsSubscriptions.OfferCheckoutQuote>();
 
     // â”€â”€ Transactional Outbox & Inbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();

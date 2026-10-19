@@ -50,6 +50,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
     private readonly ISubscriptionCatalogAvailabilityService _catalog;
     private readonly IDateTimeProvider _clock;
     private readonly IOfferEligibilityEngine _offerEngine;
+    private readonly IOfferCheckoutQuoteService _quoteService;
 
     public SubscriptionFlowQueryService(
         IAppDbContext db,
@@ -72,7 +73,8 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         ISubscriptionCatalogPreparationService? preparation = null,
         ISubscriptionCatalogAvailabilityService? catalogAvailability = null,
         IDateTimeProvider? clock = null,
-        IOfferEligibilityEngine? offerEngine = null)
+        IOfferEligibilityEngine? offerEngine = null,
+        IOfferCheckoutQuoteService? quoteService = null)
     {
         _db = db;
         _eligibility = eligibility;
@@ -94,6 +96,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         _prerequisitesGate = prerequisitesGate ?? new CustomerProfilePrerequisitesGate(db);
         var resolvedClock = clock ?? new CustomerProfilePrerequisitesGate.SystemDateTimeProvider();
         _clock = resolvedClock;
+        _quoteService = quoteService ?? new OfferCheckoutQuoteService(db, resolvedClock, configuration);
         var deliveryAddresses = new CustomerDeliveryAddressService(db, resolvedClock);
         _preparation = preparation ?? new SubscriptionCatalogPreparationService(db, resolvedClock);
         _catalog = catalogAvailability ?? new SubscriptionCatalogAvailabilityService(db, resolvedClock, deliveryAddresses,
@@ -1221,6 +1224,39 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var labels = await LoadTierLabelsAsync(ct);
         var (tierNameAr, tierNameEn) = TierDisplayName(request.Tier, labels);
 
+        Guid? quoteId = null;
+        var summaryExpiresAt = _clock.UtcNow.AddMinutes(5);
+        if (request.OfferId.HasValue)
+        {
+            var quoteResult = await _quoteService.CreateQuoteAsync(new OfferCheckoutQuoteCreationRequest(
+                customerUserId,
+                request.OfferId.Value,
+                request.ProgramId,
+                request.BundleId,
+                request.Tier,
+                request.DurationDays,
+                startDate,
+                dates.Last(),
+                request.IncludeFriday,
+                fridayDays,
+                dates.Count,
+                promoCode,
+                priceValue.UnroundedCorePrice,
+                priceValue.CampaignDiscountApplied,
+                priceValue.PromoCodeDiscountApplied,
+                priceValue.WalletCreditApplied,
+                priceValue.GatewayCostRecoveryAmount,
+                priceValue.FinalCustomerPrice,
+                priceValue.CurrencyCode,
+                readiness.Value.Address?.Id), ct);
+
+            if (quoteResult.IsSuccess)
+            {
+                quoteId = quoteResult.Value.Id;
+                summaryExpiresAt = quoteResult.Value.ExpiresAtUtc;
+            }
+        }
+
         return new SubscriptionOrderSummaryDto(
             program.Id, program.NameAr, program.NameEn, CatalogImageStorage.ToContentUrl(program.ImageStorageKey),
             bundle.Id, bundle.NameAr, bundle.NameEn, CatalogImageStorage.ToContentUrl(bundle.ImageStorageKey),
@@ -1248,8 +1284,9 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
                         readiness.Value.CheckoutBlockReason,
                         readiness.Value.WarningAr,
                         readiness.Value.WarningEn) }),
-            SummaryExpiresAtUtc: _clock.UtcNow.AddMinutes(5),
-            ServerNowUtc: _clock.UtcNow);
+            SummaryExpiresAtUtc: summaryExpiresAt,
+            ServerNowUtc: _clock.UtcNow,
+            QuoteId: quoteId);
     }
 
     public async Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default, bool allowSandboxCompletion = true)

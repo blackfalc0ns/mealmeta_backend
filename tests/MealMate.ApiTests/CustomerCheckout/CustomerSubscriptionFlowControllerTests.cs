@@ -1175,8 +1175,9 @@ public sealed class CustomerSubscriptionFlowControllerTests
         await db.SaveChangesAsync();
         // Summary validates StartDate against Kuwait calendar day, not UTC date.
         var request = new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, schedule.GetKuwaitToday());
-        var chosenStart = request.StartDate!.Value;
-        var expectedFirstDelivery = schedule.ResolveFirstDeliveryDate(chosenStart, false);
+        var chosenStart = schedule.ResolveFirstDeliveryDate(request.StartDate!.Value, includeFriday: false);
+        request = request with { StartDate = chosenStart };
+        var expectedFirstDelivery = chosenStart;
 
         var result = Assert.IsType<OkObjectResult>(await controller.Summary(request, CancellationToken.None));
         var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);

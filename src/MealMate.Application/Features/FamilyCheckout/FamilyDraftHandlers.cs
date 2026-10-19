@@ -1368,6 +1368,9 @@ public sealed class FamilyDraftHandlers :
         if (member.MemberSubscriptionId is not null && group.Status == FamilyGroupStatus.Active)
             return Error.Conflict("family.plan_locked", "Paid family members cannot change the start date from this flow.");
 
+        if (!_schedule.TryResolveCheckoutStart(request.StartDate, member.IncludeFriday, out _, out var startError))
+            return Error.Validation(startError ?? "checkout.start_date_invalid", "Selected first delivery date is too soon.");
+
         member.StartDate = request.StartDate;
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
 
@@ -1484,8 +1487,9 @@ public sealed class FamilyDraftHandlers :
                 m.StartDate is null ? "checkout.start_date_required" : "subscription_flow.invalid_context");
             if (m.StartDate is DateOnly startDate && m.DurationDays is > 0)
             {
-                var deliveryStart = _schedule.ResolveFirstDeliveryDate(startDate, m.IncludeFriday);
-                if (deliveryStart == default) deliveryStart = startDate;
+                var deliveryStart = _schedule.TryResolveCheckoutStart(startDate, m.IncludeFriday, out var validatedDeliveryStart, out _)
+                    ? validatedDeliveryStart
+                    : startDate;
                 var serviceDates = _schedule.GetServiceDates(deliveryStart, m.DurationDays.Value, m.IncludeFriday);
                 deliveryDays = serviceDates.Count;
                 if (deliveryDays > 0)
@@ -2230,7 +2234,7 @@ public sealed class FamilyDraftHandlers :
             && (b.Status == FamilyCheckoutBatchStatus.PaymentPending || b.Status == FamilyCheckoutBatchStatus.ReviewRequired), ct))
             return;
 
-        var chosenStart = _schedule.GetKuwaitToday();
+        var chosenStart = _schedule.ResolveFirstDeliveryDate(_schedule.GetKuwaitToday(), includeFriday: false);
         foreach (var member in missing)
             member.StartDate = chosenStart;
         await SaveDraftChangesAsync(ct);

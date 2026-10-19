@@ -57,6 +57,7 @@ public abstract class ApiControllerBase : ControllerBase
             ErrorType.Conflict => StatusCodes.Status409Conflict,
             ErrorType.Unauthorized => StatusCodes.Status401Unauthorized,
             ErrorType.Forbidden => StatusCodes.Status403Forbidden,
+            ErrorType.Gone => StatusCodes.Status410Gone,
             _ => StatusCodes.Status422UnprocessableEntity,
         };
 

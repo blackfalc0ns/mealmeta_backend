@@ -88,6 +88,9 @@ public sealed class FamilyCheckoutServiceTests
         var serviceDates = new List<DateOnly> { startDate, startDate.AddDays(1) };
         schedule.GetServiceDates(Arg.Any<DateOnly>(), Arg.Any<int>(), Arg.Any<bool>()).Returns(serviceDates);
         schedule.ResolveFirstDeliveryDate(Arg.Any<DateOnly>(), Arg.Any<bool>()).Returns(new DateOnly(2026, 9, 5));
+        DateOnly resolvedStart = new(2026, 9, 5);
+        string? startError = null;
+        schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError).ReturnsForAnyArgs(true);
 
         var restaurantId = Guid.NewGuid();
         var menuVersionId = Guid.NewGuid();
@@ -286,6 +289,9 @@ public sealed class FamilyCheckoutServiceTests
         var serviceDates = new List<DateOnly> { startDate, startDate.AddDays(1) };
         schedule.GetServiceDates(Arg.Any<DateOnly>(), Arg.Any<int>(), Arg.Any<bool>()).Returns(serviceDates);
         schedule.ResolveFirstDeliveryDate(Arg.Any<DateOnly>(), Arg.Any<bool>()).Returns(new DateOnly(2026, 9, 5));
+        DateOnly resolvedStart = new(2026, 9, 5);
+        string? startError = null;
+        schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError).ReturnsForAnyArgs(true);
 
         var restaurantId = Guid.NewGuid();
         var menuVersionId = Guid.NewGuid();
@@ -467,6 +473,9 @@ public sealed class FamilyCheckoutServiceTests
         var serviceDates = new List<DateOnly> { startDate, startDate.AddDays(1) };
         schedule.GetServiceDates(Arg.Any<DateOnly>(), Arg.Any<int>(), Arg.Any<bool>()).Returns(serviceDates);
         schedule.ResolveFirstDeliveryDate(Arg.Any<DateOnly>(), Arg.Any<bool>()).Returns(new DateOnly(2026, 9, 5));
+        DateOnly resolvedStart = new(2026, 9, 5);
+        string? startError = null;
+        schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError).ReturnsForAnyArgs(true);
 
         var restaurantId = Guid.NewGuid();
         var menuVersionId = Guid.NewGuid();
@@ -618,7 +627,7 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             Substitute.For<IUserAccountService>(),
             Substitute.For<IFamilyQuoteService>(),
-            Substitute.For<ISubscriptionScheduleService>(),
+            CreateConfiguredSchedule(),
             Substitute.For<IRestaurantEligibilityService>(),
             Substitute.For<ICapacityConcurrencyLock>(),
             new InlineTransactionExecutor(),
@@ -714,7 +723,7 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             users,
             Substitute.For<IFamilyQuoteService>(),
-            Substitute.For<ISubscriptionScheduleService>(),
+            CreateConfiguredSchedule(),
             Substitute.For<IRestaurantEligibilityService>(),
             Substitute.For<ICapacityConcurrencyLock>(),
             new InlineTransactionExecutor(),
@@ -838,7 +847,7 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             users,
             Substitute.For<IFamilyQuoteService>(),
-            Substitute.For<ISubscriptionScheduleService>(),
+            CreateConfiguredSchedule(),
             Substitute.For<IRestaurantEligibilityService>(),
             Substitute.For<ICapacityConcurrencyLock>(),
             new InlineTransactionExecutor(),
@@ -1123,7 +1132,7 @@ public sealed class FamilyCheckoutServiceTests
             currentUser,
             Substitute.For<IUserAccountService>(),
             quoteService,
-            Substitute.For<ISubscriptionScheduleService>(),
+            CreateConfiguredSchedule(),
             Substitute.For<IRestaurantEligibilityService>(),
             Substitute.For<ICapacityConcurrencyLock>(),
             new InlineTransactionExecutor(),
@@ -1571,6 +1580,16 @@ public sealed class FamilyCheckoutServiceTests
     private static AppDbContext CreateDb()
         => new(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
             Substitute.For<IDomainEventDispatcher>());
+
+    private static ISubscriptionScheduleService CreateConfiguredSchedule()
+    {
+        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        DateOnly resolvedStart = new(2026, 9, 5);
+        string? startError = null;
+        schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError)
+            .ReturnsForAnyArgs(true);
+        return schedule;
+    }
 
     private static async Task SeedPendingBatchAsync(AppDbContext db, FamilyGroup group, string url)
     {

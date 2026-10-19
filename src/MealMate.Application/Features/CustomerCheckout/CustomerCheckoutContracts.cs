@@ -39,7 +39,8 @@ public sealed record StartCheckoutRequest(
     string? PromoCode = null,
     string? IdempotencyKey = null,
     int? ClientContractVersion = null,
-    Guid? OfferId = null);
+    Guid? OfferId = null,
+    Guid? QuoteId = null);
 
 public sealed record EligibleRestaurantDto(
     Guid RestaurantId,

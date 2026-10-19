@@ -1,4 +1,4 @@
-﻿using MealMate.Domain.AdminDashboard;
+using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Advertising;
 using MealMate.Domain.CollaborativeCampaigns;
@@ -256,6 +256,8 @@ public interface IAppDbContext
     DbSet<MealMate.Domain.ProgramsSubscriptions.FamilyCheckoutBatchLine> FamilyCheckoutBatchLines { get; }
 
     DbSet<MealMate.Domain.ProgramsSubscriptions.FamilySubscriptionDeliveryAmendment> FamilySubscriptionDeliveryAmendments { get; }
+
+    DbSet<MealMate.Domain.ProgramsSubscriptions.OfferCheckoutQuote> OfferCheckoutQuotes { get; }
 
     DbSet<MealMate.Domain.VoiceCalls.VoiceCallDeviceSession> VoiceCallDeviceSessions { get; }
 

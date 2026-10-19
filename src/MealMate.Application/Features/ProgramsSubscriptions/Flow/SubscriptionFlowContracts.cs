@@ -512,7 +512,8 @@ public sealed record SubscriptionOrderSummaryDto(
     IReadOnlyList<MobileBlockingReasonDto>? BlockingReasons = null,
     MobileEligibilityDto? Eligibility = null,
     DateTime? SummaryExpiresAtUtc = null,
-    DateTime? ServerNowUtc = null);
+    DateTime? ServerNowUtc = null,
+    Guid? QuoteId = null);
 
 /// <summary>Contextual availability for the individual flow: one verdict for the whole period plus
 /// the eligible browse cards. TotalCount is the eligible list size before pagination.</summary>
