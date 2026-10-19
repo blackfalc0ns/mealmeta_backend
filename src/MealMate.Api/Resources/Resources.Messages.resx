@@ -1142,4 +1142,7 @@
   <data name="campaign.payment.catalog_missing" xml:space="preserve"><value>The campaign bundle catalog is unavailable.</value></data>
   <data name="campaign.payment.return.title" xml:space="preserve"><value>Campaign payment</value></data>
   <data name="campaign.payment.return.message" xml:space="preserve"><value>Return to the app to view your campaign payment status.</value></data>
+  <data name="family.plan_conflicting_tier" xml:space="preserve"><value>Tier and selectedTier must match when both are provided.</value></data>
+  <data name="family.plan_conflicting_bundle" xml:space="preserve"><value>BundleId and selectedBundleId must match when both are provided.</value></data>
+  <data name="checkout.start_date_invalid" xml:space="preserve"><value>Start date cannot be in the past.</value></data>
 </root>

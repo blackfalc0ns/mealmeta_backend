@@ -50,7 +50,8 @@ public sealed record CustomerManagedSubscriptionDto(
     int MemberCount = 1,
     string? FamilyName = null,
     Guid? FamilyMemberId = null,
-    string? FamilyMemberName = null);
+    string? FamilyMemberName = null,
+    string? StatusNameEn = null);
 
 public sealed record CustomerSubscriptionSlimDto(
     Guid SubscriptionId,
@@ -87,7 +88,8 @@ public sealed record CustomerSubscriptionSlimDto(
     int MemberCount = 1,
     string? FamilyName = null,
     Guid? FamilyMemberId = null,
-    string? FamilyMemberName = null);
+    string? FamilyMemberName = null,
+    string? StatusNameEn = null);
 
 public sealed record CustomerFrozenRestaurantDto(
     Guid RestaurantId,

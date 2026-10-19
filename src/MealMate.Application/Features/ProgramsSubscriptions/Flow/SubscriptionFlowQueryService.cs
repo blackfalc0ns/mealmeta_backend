@@ -108,6 +108,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var famDescAr = SubscriptionFlowLocalization.FamilyDescriptionAr(hasIndividual, hasFamily);
         var famDescEn = SubscriptionFlowLocalization.FamilyDescriptionEn(hasIndividual, hasFamily);
 
+        var familySettings = await new FamilyPricingSettingsReader(_db).GetAsync(ct);
         IReadOnlyList<SubscriptionTypeOptionDto> types =
         [
             new SubscriptionTypeOptionDto(
@@ -118,7 +119,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             new SubscriptionTypeOptionDto(
                 "FAMILY", famNameAr, famNameEn,
                 famDescAr, famDescEn,
-                4, true, false,
+                familySettings.MaxMembers, true, false,
                 DisabledReason: null,
                 RequiresConversion: hasIndividual,
                 ConversionEndpoint: hasIndividual ? conversionOptions : null)
@@ -1133,7 +1134,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         // A zero-eligible set must not fabricate a positive repetition limit: show 0 instead of
         // calculating a limit against a placeholder count of 1.
         var repetition = restaurantCount > 0
-            ? _diversification.CalculateLimit(Guid.Empty, request.DurationDays, restaurantCount)
+            ? _diversification.CalculateLimit(Guid.Empty, dates.Count, restaurantCount)
             : null;
         var restaurantRepetition = repetition is null
             ? new RestaurantRepetitionSummaryDto(0, 0, request.DurationDays)

@@ -945,7 +945,8 @@ public sealed class CustomerCalendarEngine
             .ToListAsync(ct);
         var preferences = await MealPreferenceFilter.LoadAsync(_db, subscription.CustomerUserId, ct);
         var adminCeiling = await ReadAdminCeilingAsync(ct);
-        var limit = _calculator.CalculateLimit(subscription.Id, subscription.DurationDays, Math.Max(1, restaurants.Count), adminCeiling);
+        var serviceDayCount = days.Count(x => x.Status is not (SubscriptionDayStatus.Cancelled or SubscriptionDayStatus.Frozen));
+        var limit = _calculator.CalculateLimit(subscription.Id, serviceDayCount, Math.Max(1, restaurants.Count), adminCeiling);
         var slotRequirements = SlotRequirementJson.Parse(
             restaurantDays.FirstOrDefault()?.SlotRequirementsJson
             ?? daySnapshots.FirstOrDefault()?.RequiredSlotsJson);
@@ -1012,7 +1013,7 @@ public sealed class CustomerCalendarEngine
 
         var ctx = new CalendarContext(
             subscription, days, selections, restaurantPicks, daySnapshots, restaurants, restaurantDays, busy, preferences,
-            limit.LimitValue, adminCeiling, slotRequirements, logos, ratingsMap, serviceRegions, program, tierLabels,
+            limit.LimitValue, limit.LMax, slotRequirements, logos, ratingsMap, serviceRegions, program, tierLabels,
             nutritionTarget, rejectedMealIds);
         ctx.CanEditDailyMeals = canEditMeals;
         ctx.CanViewPlan = canViewPlan;

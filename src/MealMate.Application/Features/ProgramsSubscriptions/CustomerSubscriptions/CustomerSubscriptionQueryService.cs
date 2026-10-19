@@ -530,7 +530,8 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             displays[subscription.Id] = new FamilySubscriptionDisplay(
                 "FAMILY", familyId, Math.Max(memberCount, 1), group?.Name, Math.Max(amount.Value, 0m),
                 SubscriptionLocalization.FamilyStatusNameAr(subscription.Status), subscription.FamilyMemberId,
-                subscription.FamilyMemberId is Guid memberId && memberNames.TryGetValue(memberId, out var name) ? name : null);
+                subscription.FamilyMemberId is Guid memberId && memberNames.TryGetValue(memberId, out var name) ? name : null,
+                SubscriptionLocalization.FamilyStatusNameEn(subscription.Status));
         }
 
         return displays;
@@ -539,7 +540,8 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
     private async Task<FamilySubscriptionDisplay> FamilyDisplayAsync(Subscription subscription, CancellationToken ct, Guid? actorUserId)
     {
         if (subscription.FamilyGroupId is not Guid familyId)
-            return new("INDIVIDUAL", null, 1, null, subscription.PaidAmount.Amount, SubscriptionLocalization.StatusNameAr(subscription.Status));
+            return new("INDIVIDUAL", null, 1, null, subscription.PaidAmount.Amount,
+                SubscriptionLocalization.StatusNameAr(subscription.Status), StatusNameEn: SubscriptionLocalization.StatusNameEn(subscription.Status));
         var group = await _db.FamilyGroups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == familyId, ct);
         var member = await _db.FamilyMembers.AsNoTracking().FirstOrDefaultAsync(x =>
             x.FamilyGroupId == familyId && (subscription.FamilyMemberId.HasValue
@@ -565,7 +567,8 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             memberCount = legacy?.MemberCount ?? 1;
         }
         return new("FAMILY", familyId, memberCount, group?.Name, amount,
-            SubscriptionLocalization.FamilyStatusNameAr(subscription.Status), member?.Id, member?.DisplayName);
+            SubscriptionLocalization.FamilyStatusNameAr(subscription.Status), member?.Id, member?.DisplayName,
+            SubscriptionLocalization.FamilyStatusNameEn(subscription.Status));
     }
 
     private IQueryable<InvoiceReceiptRow> InvoiceReceiptQuery(Guid customerUserId)
@@ -607,7 +610,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
             common.Restaurant, common.PendingFreeze, canViewInvoices ? common.PendingUpgrade : null, await AuthorizeActionsAsync(subscription, actorUserId, common.Actions, ct), invoices, common.ActiveFreeze,
             family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName,
-            family.FamilyMemberId, family.FamilyMemberName);
+            family.FamilyMemberId, family.FamilyMemberName, family.StatusNameEn);
     }
 
     private async Task<CustomerSubscriptionSlimDto> MapSlimSubscription(
@@ -622,7 +625,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
             common.Restaurant, common.PendingFreeze, canViewInvoices ? common.PendingUpgrade : null, await AuthorizeActionsAsync(subscription, actorUserId!.Value, common.Actions, ct), common.ActiveFreeze,
             family.Kind, family.FamilyGroupId, family.MemberCount, family.FamilyName,
-            family.FamilyMemberId, family.FamilyMemberName);
+            family.FamilyMemberId, family.FamilyMemberName, family.StatusNameEn);
     }
 
     private async Task<CustomerSubscriptionActionsDto> AuthorizeActionsAsync(Subscription subscription, Guid actor,
@@ -1080,7 +1083,8 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         decimal? PaidAmount,
         string StatusNameAr,
         Guid? FamilyMemberId = null,
-        string? FamilyMemberName = null);
+        string? FamilyMemberName = null,
+        string? StatusNameEn = null);
     private sealed record SubscriptionCommonData(
         string StatusNameAr,
         string TierNameAr,

@@ -294,6 +294,8 @@ public static class MessageCodes
         public const string SessionExpired = "family.session_expired";
         public const string DetachRequiresActiveLogin = "family.detach_requires_active_login";
         public const string CheckoutRequirementsIncomplete = "family.checkout_requirements_incomplete";
+        public const string PlanConflictingTier = "family.plan_conflicting_tier";
+        public const string PlanConflictingBundle = "family.plan_conflicting_bundle";
     }
 
     public static class Maps

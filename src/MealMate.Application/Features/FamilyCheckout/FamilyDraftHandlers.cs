@@ -1403,12 +1403,7 @@ public sealed class FamilyDraftHandlers :
             .OrderByDescending(x => x.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
         var locked = batch is not null && batch.Status != FamilyCheckoutBatchStatus.Draft;
         var quoteResult = locked
-            ? Result<FamilyQuoteResult>.Success(new FamilyQuoteResult(batch!.Lines.Where(x => x.CheckoutSelected)
-                .Select(x => new FamilyQuoteLine(x.FamilyMemberId, group.Members.FirstOrDefault(m => m.Id == x.FamilyMemberId)?.DisplayName ?? "",
-                    x.PriceBeforeFamilyDiscount, 0m, 0m, 0m)).ToList(), batch.Subtotal, batch.FamilyDiscountPercent,
-                batch.FamilyDiscountAmount, batch.FinalPrice, batch.CurrencyCode, batch.FamilyDiscountAmount > 0m,
-                batch.PackageId, batch.PackageMinMembers, batch.PackageMaxMembers,
-                batch.Lines.Count(x => x.CheckoutSelected), "locked"))
+            ? await BuildLockedQuoteAsync(group, batch!, cancellationToken)
             : await _quote.QuoteAsync(group, cancellationToken, new FamilyQuoteScope(activeIds, defaultSelection, request.PromoCode, managerId.Value));
         if (quoteResult.IsFailure) return quoteResult.Error;
         var quote = quoteResult.Value;
@@ -1636,6 +1631,59 @@ public sealed class FamilyDraftHandlers :
                     quote.PromoCodeDiscountAmount, evaluation.MessageAr, evaluation.MessageEn)
                 : null);
     }
+
+    private async Task<Result<FamilyQuoteResult>> BuildLockedQuoteAsync(
+        FamilyGroup group,
+        FamilyCheckoutBatch batch,
+        CancellationToken cancellationToken)
+    {
+        var selectedMemberIds = batch.Lines
+            .Where(x => x.CheckoutSelected && group.Members.Any(m => m.Id == x.FamilyMemberId))
+            .Select(x => x.FamilyMemberId)
+            .ToHashSet();
+        var participation = await new FamilyParticipationContextReader(_db, _clock, _settings)
+            .GetAsync(group, selectedMemberIds, cancellationToken);
+        var maxSeats = batch.PackageMaxMembers ?? participation.MaxSeats;
+        var occupiedSeats = participation.OccupiedSeats;
+        var participantCount = Math.Max(participation.QualifyingParticipantCount, selectedMemberIds.Count);
+        var availableSeats = maxSeats > 0
+            ? Math.Max(0, maxSeats - occupiedSeats)
+            : participation.AvailableSeats;
+
+        var lines = batch.Lines.Where(x => x.CheckoutSelected)
+            .Select(x => new FamilyQuoteLine(
+                x.FamilyMemberId,
+                group.Members.FirstOrDefault(m => m.Id == x.FamilyMemberId)?.DisplayName ?? "",
+                x.PriceBeforeFamilyDiscount, 0m, 0m, 0m))
+            .ToList();
+
+        return Result<FamilyQuoteResult>.Success(new FamilyQuoteResult(
+            lines,
+            batch.Subtotal,
+            batch.FamilyDiscountPercent,
+            batch.FamilyDiscountAmount,
+            batch.FinalPrice,
+            batch.CurrencyCode,
+            batch.FamilyDiscountAmount > 0m,
+            batch.PackageId,
+            batch.PackageMinMembers,
+            batch.PackageMaxMembers,
+            participantCount,
+            "locked",
+            batch.PackageNameAr,
+            batch.PackageNameEn,
+            occupiedSeats,
+            availableSeats,
+            participation.DeferredMemberCount,
+            selectedMemberIds.Count,
+            participation.IsInitialPurchaseOrReactivation ? 2 : 1,
+            participation.ManagerSeatExempt,
+            participation.ManagerIndividualIsLive,
+            participation.ManagerIndividualSubscriptionId,
+            participation.IsInitialPurchaseOrReactivation,
+            participation.ManagerMustBeFunded));
+    }
+
 
     public Task<Result<bool>> Handle(AbandonFamilyDraftCommand request, CancellationToken cancellationToken)
         => WithGroupLockAsync(ct => HandleCore(request, ct), cancellationToken);

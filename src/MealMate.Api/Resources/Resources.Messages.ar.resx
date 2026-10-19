@@ -1084,4 +1084,7 @@
   <data name="campaign.payment.catalog_missing" xml:space="preserve"><value>كتالوج باقة الحملة غير متاح.</value></data>
   <data name="campaign.payment.return.title" xml:space="preserve"><value>دفع الحملة</value></data>
   <data name="campaign.payment.return.message" xml:space="preserve"><value>ارجع إلى التطبيق لعرض حالة دفع الحملة.</value></data>
+  <data name="family.plan_conflicting_tier" xml:space="preserve"><value>يجب أن تتطابق قيمة التصنيف مع selectedTier عند إرسالهما معًا.</value></data>
+  <data name="family.plan_conflicting_bundle" xml:space="preserve"><value>يجب أن تتطابق قيمة الباقة مع selectedBundleId عند إرسالهما معًا.</value></data>
+  <data name="checkout.start_date_invalid" xml:space="preserve"><value>لا يمكن أن يكون تاريخ البداية في الماضي.</value></data>
 </root>
