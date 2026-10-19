@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -1058,4 +1058,30 @@
   <data name="Advertising.ReasonTooLong" xml:space="preserve"><value>يجب ألا يتجاوز سبب الرد 500 حرف.</value></data>
   <data name="offer.not_saved" xml:space="preserve"><value>هذا العرض غير محفوظ في قائمتك.</value></data>
   <data name="offer.calendar_not_booked" xml:space="preserve"><value>هذا العرض غير مجدول على تقويمك في هذا التاريخ.</value></data>
+  <data name="campaign.payment.idempotency_key_invalid" xml:space="preserve"><value>مفتاح منع التكرار غير صالح.</value></data>
+  <data name="campaign.payment.session_not_found" xml:space="preserve"><value>جلسة دفع الحملة غير موجودة.</value></data>
+  <data name="campaign.payment.idempotency_conflict" xml:space="preserve"><value>تم استخدام مفتاح منع التكرار مع تفاصيل دفع مختلفة.</value></data>
+  <data name="campaign.payment.initialization_pending" xml:space="preserve"><value>ما زال بدء الدفع قيد الاكتمال.</value></data>
+  <data name="campaign.payment.already_started" xml:space="preserve"><value>بدأ الدفع بالفعل لهذه الجلسة.</value></data>
+  <data name="campaign.payment.session_expired" xml:space="preserve"><value>انتهت صلاحية جلسة دفع الحملة.</value></data>
+  <data name="campaign.payment.session_not_payable" xml:space="preserve"><value>لا يمكن الدفع لهذه الجلسة.</value></data>
+  <data name="campaign.payment.quote_missing" xml:space="preserve"><value>يلزم عرض سعر صالح لدفع الحملة.</value></data>
+  <data name="campaign.payment.return_url_missing" xml:space="preserve"><value>روابط العودة من الدفع مطلوبة.</value></data>
+  <data name="campaign.payment.return_url_not_allowed" xml:space="preserve"><value>رابط العودة من الدفع غير مسموح.</value></data>
+  <data name="campaign.payment.customer_not_found" xml:space="preserve"><value>العميل غير موجود.</value></data>
+  <data name="campaign.payment.customer_contact_unverified" xml:space="preserve"><value>تحقق من رقم الهاتف قبل بدء الدفع.</value></data>
+  <data name="campaign.payment.method_invalid" xml:space="preserve"><value>طريقة الدفع المحددة غير مدعومة.</value></data>
+  <data name="campaign.payment.initialization_unknown" xml:space="preserve"><value>تعذر بدء جلسة الدفع.</value></data>
+  <data name="campaign.payment.status_unavailable" xml:space="preserve"><value>حالة الدفع غير متاحة مؤقتًا.</value></data>
+  <data name="campaign.payment.status_unverified" xml:space="preserve"><value>تعذر التحقق من حالة الدفع.</value></data>
+  <data name="campaign.payment.provider_invalid" xml:space="preserve"><value>بوابة الدفع غير مدعومة.</value></data>
+  <data name="campaign.payment.quote_mismatch" xml:space="preserve"><value>مبلغ الدفع أو العملة لا يطابقان عرض الحملة.</value></data>
+  <data name="campaign.payment.callback_unverified" xml:space="preserve"><value>تعذر التحقق من إشعار الدفع.</value></data>
+  <data name="campaign.payment.callback_identity_invalid" xml:space="preserve"><value>هوية إشعار الدفع غير صالحة.</value></data>
+  <data name="campaign.payment.callback_pending" xml:space="preserve"><value>لم تؤكد بوابة الدفع هذه العملية بعد.</value></data>
+  <data name="campaign.payment.terminal_paid" xml:space="preserve"><value>اكتمل دفع هذه الحملة بالفعل.</value></data>
+  <data name="campaign.payment.journal_missing" xml:space="preserve"><value>سجل بدء الدفع غير موجود.</value></data>
+  <data name="campaign.payment.catalog_missing" xml:space="preserve"><value>كتالوج باقة الحملة غير متاح.</value></data>
+  <data name="campaign.payment.return.title" xml:space="preserve"><value>دفع الحملة</value></data>
+  <data name="campaign.payment.return.message" xml:space="preserve"><value>ارجع إلى التطبيق لعرض حالة دفع الحملة.</value></data>
 </root>

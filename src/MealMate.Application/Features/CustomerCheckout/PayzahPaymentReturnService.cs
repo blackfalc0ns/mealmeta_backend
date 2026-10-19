@@ -1,6 +1,9 @@
 using System.Net;
 using System.Text.Encodings.Web;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
+using MealMate.Application.Features.CollaborativeCampaigns.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.CustomerCheckout;
 
@@ -8,13 +11,22 @@ public sealed class PayzahPaymentReturnService : IPayzahPaymentReturnService
 {
     private readonly IPaymentGatewayService _payments;
     private readonly ISubscriptionPaymentProcessor _paymentProcessor;
+    private readonly IAppDbContext? _db;
+    private readonly ICampaignPaymentService? _campaignPayments;
+    private readonly ILocalizedMessageProvider? _messages;
 
     public PayzahPaymentReturnService(
         IPaymentGatewayService payments,
-        ISubscriptionPaymentProcessor paymentProcessor)
+        ISubscriptionPaymentProcessor paymentProcessor,
+        IAppDbContext? db = null,
+        ICampaignPaymentService? campaignPayments = null,
+        ILocalizedMessageProvider? messages = null)
     {
         _payments = payments;
         _paymentProcessor = paymentProcessor;
+        _db = db;
+        _campaignPayments = campaignPayments;
+        _messages = messages;
     }
 
     public async Task<string> ProcessReturnAndBuildHtmlAsync(
@@ -34,6 +46,30 @@ public sealed class PayzahPaymentReturnService : IPayzahPaymentReturnService
         }
 
         var captured = IsPaid(gateway);
+        if (_db is not null && _campaignPayments is not null && _messages is not null &&
+            gateway?.CustomerReference is { } campaignReference &&
+            campaignReference.StartsWith("campaign-checkout:", StringComparison.Ordinal) &&
+            Guid.TryParseExact(campaignReference["campaign-checkout:".Length..], "N", out var sessionId))
+        {
+            var session = await _db.CampaignCheckoutSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sessionId, cancellationToken);
+            if (session is not null && session.PaymentIdempotencyKey is not null)
+            {
+                // A browser query cannot choose a destination or assert capture: use the persisted attempt and verified status service.
+                var result = await _campaignPayments.GetStatusAsync(session.Id, session.CustomerId, cancellationToken);
+                var state = result.IsSuccess ? result.Value.Status : "Pending";
+                var destination = result.IsSuccess && result.Value.IsFailed ? session.PaymentErrorUrl : session.PaymentCallbackUrl;
+                if (!string.IsNullOrWhiteSpace(destination))
+                {
+                    var parts = destination.Split('#', 2);
+                    var separator = parts[0].Contains('?') ? '&' : '?';
+                    var link = parts[0] + separator + "sessionId=" + session.Id.ToString("D") +
+                        "&paymentId=" + Uri.EscapeDataString(session.PaymentId ?? string.Empty) +
+                        "&status=" + Uri.EscapeDataString(state) + (parts.Length == 2 ? "#" + parts[1] : string.Empty);
+                    return BuildHtml(_messages.GetMessage("campaign.payment.return.title"),
+                        _messages.GetMessage("campaign.payment.return.message"), link);
+                }
+            }
+        }
         var paid = false;
         var review = captured;
         var failed = IsFailed(gateway);

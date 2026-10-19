@@ -34,4 +34,6 @@ public interface IApplicationLockManager
     Task LockCustomerIdentityAsync(Guid userId, CancellationToken cancellationToken = default);
     Task LockAdAuctionAsync(Guid auctionId, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task LockPromoCodeAsync(Guid promoCodeId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task LockCampaignPaymentKeyAsync(Guid customerId, string key, CancellationToken cancellationToken = default);
+    Task LockCampaignCheckoutSessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
 }

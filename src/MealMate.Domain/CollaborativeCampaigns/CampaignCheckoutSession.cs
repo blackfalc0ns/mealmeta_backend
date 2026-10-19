@@ -41,6 +41,19 @@ public sealed class CampaignCheckoutSession : AuditableEntity
     /// <summary>Campaign snapshot version captured when the quote was issued.</summary>
     public int? CampaignSnapshotVersion { get; set; }
 
+    /// <summary>Durable provider attempt and initiation journal; never populated from mobile payment claims.</summary>
+    public string? PaymentId { get; set; }
+    public string? PaymentUrl { get; set; }
+    public string? PaymentIdempotencyKey { get; set; }
+    public string? PaymentRequestHash { get; set; }
+    public string? PaymentCallbackUrl { get; set; }
+    public string? PaymentErrorUrl { get; set; }
+    public DateTime? PaymentInitializationStartedAtUtc { get; set; }
+    public string? PaymentInitializationErrorCode { get; set; }
+    public bool PaymentWasCancelled { get; set; }
+    /// <summary>Prevents a failed/expired reservation from releasing another session's capacity on replay.</summary>
+    public DateTime? ReservationsReleasedAtUtc { get; set; }
+
     public ICollection<CampaignReservationAllocation> Allocations { get; set; } = new List<CampaignReservationAllocation>();
 
     public ICollection<CampaignPaymentTransaction> PaymentTransactions { get; set; } = new List<CampaignPaymentTransaction>();

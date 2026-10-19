@@ -1,5 +1,6 @@
 using MealMate.Api.Common;
 using MealMate.Application.Features.CollaborativeCampaigns.Commands;
+using MealMate.Application.Features.CollaborativeCampaigns.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -12,6 +13,14 @@ namespace MealMate.Api.Controllers.Webhooks;
 public sealed class CampaignPaymentWebhookController : ApiControllerBase
 {
     private IConfiguration? _config;
+    private ICampaignPaymentService? _payments;
+
+    [ActivatorUtilitiesConstructor]
+    public CampaignPaymentWebhookController(IConfiguration config, ICampaignPaymentService payments)
+    {
+        _config = config;
+        _payments = payments;
+    }
 
     public CampaignPaymentWebhookController() { }
 
@@ -39,7 +48,10 @@ public sealed class CampaignPaymentWebhookController : ApiControllerBase
             return Unauthorized();
         }
 
-        var result = await Sender.Send(command, cancellationToken);
+        var payments = _payments ?? HttpContext.RequestServices.GetService<ICampaignPaymentService>();
+        var result = payments is null
+            ? await Sender.Send(command, cancellationToken)
+            : await payments.ProcessCallbackAsync(command, cancellationToken);
         return HandleResult(result);
     }
 }

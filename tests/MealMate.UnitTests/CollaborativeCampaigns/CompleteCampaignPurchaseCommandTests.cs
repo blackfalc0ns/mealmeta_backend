@@ -101,6 +101,28 @@ public class CompleteCampaignPurchaseCommandTests
     }
 
     [Fact]
+    public async Task Handle_CampaignBundleScopeResolvesItsPersistedCatalogBundle()
+    {
+        var (campaign, session, _, catalogBundleId, _, _) = SeedPaidSession();
+        var catalogBundle = await _context.Bundles.SingleAsync(b => b.Id == catalogBundleId);
+        var scope = new CampaignBundle { CampaignId = campaign.Id, BundleId = catalogBundleId };
+        _context.CampaignBundles.Add(scope);
+        session.BundleId = scope.Id;
+        foreach (var allocation in session.Allocations) allocation.BundleId = scope.Id;
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(new CompleteCampaignPurchaseCommand(session.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var subscription = await _context.Subscriptions.SingleAsync(s => s.Id == result.Value.SubscriptionId);
+        subscription.BundleId.Should().Be(catalogBundleId);
+        subscription.ProgramId.Should().Be(catalogBundle.ProgramId);
+        var replay = await _handler.Handle(new CompleteCampaignPurchaseCommand(session.Id), CancellationToken.None);
+        replay.Value.SubscriptionId.Should().Be(subscription.Id);
+        _context.Subscriptions.Count().Should().Be(1);
+    }
+
+    [Fact]
     public async Task Handle_WhenSessionPaid_CreatesSubscriptionAndSubscriptionDaysAndCompletesSession()
     {
         var (campaign, session, tx, bundleId, restA, date1) = SeedPaidSession();

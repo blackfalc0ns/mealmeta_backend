@@ -1,4 +1,5 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Models;
 using MealMate.Domain.CollaborativeCampaigns.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,68 +14,69 @@ public sealed class CampaignReservationExpirationService : ICampaignReservationE
 {
     private readonly IAppDbContext _context;
     private readonly IDateTimeProvider _clock;
+    private readonly IApplicationTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
 
     public CampaignReservationExpirationService(
         IAppDbContext context,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IApplicationTransactionExecutor? transactions = null,
+        IApplicationLockManager? locks = null)
     {
         _context = context;
         _clock = clock;
+        _transactions = transactions;
+        _locks = locks;
     }
 
     public async Task<int> ExpireStaleReservationsAsync(CancellationToken ct = default)
     {
         var now = _clock.UtcNow;
 
-        // Query candidate sessions with their allocations and payment transactions
         var candidateSessions = await _context.CampaignCheckoutSessions
-            .Include(s => s.Allocations)
-            .Include(s => s.PaymentTransactions)
+            .AsNoTracking()
             .Where(s =>
                 (s.Status == CampaignCheckoutSessionStatus.Pending && s.ExpiresAtUtc <= now) ||
                 (s.Status == CampaignCheckoutSessionStatus.PaymentPending && s.ExpiresAtUtc <= now &&
                  (s.ProcessingLeaseExpiresAtUtc == null || s.ProcessingLeaseExpiresAtUtc <= now)))
-            .ToListAsync(ct);
+            .Select(s => s.Id).ToListAsync(ct);
 
         var expiredCount = 0;
 
-        foreach (var session in candidateSessions)
+        foreach (var sessionId in candidateSessions)
         {
-            // If PaymentPending, double-check that no transaction succeeded
-            if (session.Status == CampaignCheckoutSessionStatus.PaymentPending &&
-                session.PaymentTransactions.Any(p => p.Status == PaymentTransactionStatus.Succeeded))
+            async Task<Result<int>> ExpireLocked(CancellationToken token)
             {
-                continue;
-            }
+                if (_locks is not null) await _locks.LockCampaignCheckoutSessionAsync(sessionId, token);
+                var session = await _context.CampaignCheckoutSessions.Include(s => s.Allocations)
+                    .Include(s => s.PaymentTransactions).FirstOrDefaultAsync(s => s.Id == sessionId, token);
+                if (session is null || session.ExpiresAtUtc > now ||
+                    session.Status is not (CampaignCheckoutSessionStatus.Pending or CampaignCheckoutSessionStatus.PaymentPending) ||
+                    session.PaymentTransactions.Any(p => p.Status == PaymentTransactionStatus.Succeeded) ||
+                    session.MarkExpired(now).IsFailure)
+                    return Result.Success(0);
 
-            // Mark session expired
-            session.Status = CampaignCheckoutSessionStatus.Expired;
-            expiredCount++;
-
-            // Release daily capacity allocations
-            if (session.Allocations.Count > 0)
-            {
-                var dates = session.Allocations.Select(a => (DateOnly?)a.ServiceDate).Distinct().ToList();
-                var restIds = session.Allocations.Select(a => a.RestaurantId).Distinct().ToList();
-
-                var capacities = await _context.CampaignRestaurantCapacities
-                    .Where(c => c.CampaignId == session.CampaignId && dates.Contains(c.ServiceDate) && restIds.Contains(c.RestaurantId))
-                    .ToListAsync(ct);
-
-                foreach (var alloc in session.Allocations)
+                if (!session.ReservationsReleasedAtUtc.HasValue)
                 {
-                    var cap = capacities.FirstOrDefault(c => c.RestaurantId == alloc.RestaurantId && c.ServiceDate == alloc.ServiceDate);
-                    if (cap != null)
+                    var dates = session.Allocations.Select(a => (DateOnly?)a.ServiceDate).Distinct().ToList();
+                    var restIds = session.Allocations.Select(a => a.RestaurantId).Distinct().ToList();
+                    var capacities = await _context.CampaignRestaurantCapacities
+                        .Where(c => c.CampaignId == session.CampaignId && dates.Contains(c.ServiceDate) && restIds.Contains(c.RestaurantId))
+                        .ToListAsync(token);
+                    foreach (var alloc in session.Allocations)
                     {
-                        cap.ReservedBoxes = Math.Max(0, cap.ReservedBoxes - alloc.Units);
+                        var cap = capacities.FirstOrDefault(c => c.RestaurantId == alloc.RestaurantId && c.ServiceDate == alloc.ServiceDate);
+                        if (cap is not null) cap.ReservedBoxes = Math.Max(0, cap.ReservedBoxes - alloc.Units);
                     }
+                    session.ReservationsReleasedAtUtc = now;
                 }
+                await _context.SaveChangesAsync(token);
+                return Result.Success(1);
             }
-        }
-
-        if (expiredCount > 0)
-        {
-            await _context.SaveChangesAsync(ct);
+            var result = _transactions is null
+                ? await ExpireLocked(ct)
+                : await _transactions.ExecuteResultAsync(ExpireLocked, ct);
+            if (result.IsSuccess) expiredCount += result.Value;
         }
 
         return expiredCount;

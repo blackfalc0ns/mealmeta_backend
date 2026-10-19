@@ -11,15 +11,18 @@ public sealed class CampaignCheckoutReconciliationService : ICampaignCheckoutRec
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
     private readonly IMediator _mediator;
+    private readonly ICampaignPaymentService? _payments;
 
     public CampaignCheckoutReconciliationService(
         IAppDbContext db,
         IDateTimeProvider clock,
-        IMediator mediator)
+        IMediator mediator,
+        ICampaignPaymentService? payments = null)
     {
         _db = db;
         _clock = clock;
         _mediator = mediator;
+        _payments = payments;
     }
 
     public async Task<int> ReconcileStuckSessionsAsync(CancellationToken cancellationToken = default)
@@ -37,6 +40,13 @@ public sealed class CampaignCheckoutReconciliationService : ICampaignCheckoutRec
 
         foreach (var session in stuckSessions)
         {
+            // New initiated payments are reconciled through the same provider verification and locks as customer polling.
+            if (_payments is not null && session.PaymentIdempotencyKey is not null)
+            {
+                var result = await _payments.GetStatusAsync(session.Id, session.CustomerId, cancellationToken);
+                if (result.IsSuccess && result.Value.Status != "Pending") reconciledCount++;
+                continue;
+            }
             // Skip sessions with an active processing lease
             if (session.ProcessingLeaseExpiresAtUtc.HasValue && session.ProcessingLeaseExpiresAtUtc.Value > utcNow)
             {
