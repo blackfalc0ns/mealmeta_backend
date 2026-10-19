@@ -233,7 +233,7 @@ public sealed class OfferCheckoutQuotePersistenceTests : IAsyncLifetime
             OfferId = Guid.NewGuid(),
             ProgramId = Guid.NewGuid(),
             BundleId = Guid.NewGuid(),
-            Tier = RestaurantTier.Standard,
+            Tier = RestaurantTier.Basic,
             DurationDays = 26,
             StartDate = new DateOnly(2026, 11, 1),
             EndDate = new DateOnly(2026, 11, 30),
