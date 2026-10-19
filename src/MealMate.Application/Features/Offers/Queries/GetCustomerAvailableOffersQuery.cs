@@ -124,7 +124,8 @@ public sealed class GetCustomerAvailableOffersQueryHandler : IQueryHandler<GetCu
                 request.DeliveryGovernorate,
                 request.ProgramId,
                 request.BundleId,
-                request.RestaurantId);
+                request.RestaurantId,
+                Purpose: OfferEvaluationPurpose.Discovery);
 
             var eval = _eligibilityEngine.Evaluate(offer, ctx, now);
             if (eval.IsEligible)

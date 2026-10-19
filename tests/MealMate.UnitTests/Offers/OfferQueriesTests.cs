@@ -169,4 +169,92 @@ public class OfferQueriesTests
         inactive.IsFailure.Should().BeTrue();
         inactive.Error.Type.Should().Be(ErrorType.NotFound);
     }
+
+    [Fact]
+    public async Task GetCustomerAvailableOffersQuery_IncludesTargetedOffers_WhenNoPackageSelected()
+    {
+        using var db = CreateDbContext();
+        var programId = Guid.NewGuid();
+        var bundleId = Guid.NewGuid();
+        var offer = new Offer
+        {
+            NameAr = "عرض مخصص",
+            NameEn = "Targeted Offer",
+            Status = OfferStatus.Active,
+            CustomerSegment = CustomerSegmentFilter.All,
+            StartsAtUtc = DateTime.UtcNow.AddDays(-1),
+            EndsAtUtc = DateTime.UtcNow.AddDays(5),
+            PerCustomerLimit = 1,
+            PackageTargets =
+            [
+                new OfferPackageTarget
+                {
+                    SubscriptionType = "Individual",
+                    ProgramId = programId,
+                    BundleId = bundleId,
+                    Tier = MealMate.Domain.Enums.RestaurantTier.Platinum,
+                    AllowedDurationDays = [26]
+                }
+            ]
+        };
+        db.Offers.Add(offer);
+        await db.SaveChangesAsync();
+
+        var engine = new OfferEligibilityEngine();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+
+        var handler = new GetCustomerAvailableOffersQueryHandler(db, engine, clock);
+        // Customer opens offers hub without selecting any package
+        var query = new GetCustomerAvailableOffersQuery(CustomerId: Guid.NewGuid());
+
+        var result = await handler.Handle(query, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().ContainSingle(o => o.Id == offer.Id);
+    }
+
+    [Fact]
+    public async Task CustomerDetails_ReturnsTargetedOffer_WhenNavigatedDirectlyWithoutPackageSelection()
+    {
+        using var db = CreateDbContext();
+        var now = DateTime.UtcNow;
+        var programId = Guid.NewGuid();
+        var bundleId = Guid.NewGuid();
+        var offer = new Offer
+        {
+            NameAr = "عرض مخصص",
+            NameEn = "Targeted Offer",
+            Status = OfferStatus.Active,
+            CustomerSegment = CustomerSegmentFilter.All,
+            StartsAtUtc = now.AddDays(-1),
+            EndsAtUtc = now.AddDays(5),
+            PerCustomerLimit = 1,
+            PackageTargets =
+            [
+                new OfferPackageTarget
+                {
+                    SubscriptionType = "Individual",
+                    ProgramId = programId,
+                    BundleId = bundleId,
+                    Tier = MealMate.Domain.Enums.RestaurantTier.Platinum,
+                    AllowedDurationDays = [26]
+                }
+            ]
+        };
+        db.Offers.Add(offer);
+        await db.SaveChangesAsync();
+
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(now);
+        var available = new GetCustomerAvailableOffersQueryHandler(db, new OfferEligibilityEngine(), clock);
+        var handler = new GetCustomerOfferDetailsQueryHandler(available, clock);
+
+        // Deep link without specifying package context
+        var result = await handler.Handle(new GetCustomerOfferDetailsQuery(offer.Id, Guid.NewGuid()), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().NotBeNull();
+        result.Value!.Offer.Id.Should().Be(offer.Id);
+    }
 }

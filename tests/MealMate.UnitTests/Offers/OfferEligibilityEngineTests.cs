@@ -158,4 +158,73 @@ public class OfferEligibilityEngineTests
 
         result.IsEligible.Should().BeTrue();
     }
+
+    [Fact]
+    public void Evaluate_AllowsTargetedOfferInDiscovery_WithoutSelectedPackage()
+    {
+        var programId = Guid.NewGuid();
+        var bundleId = Guid.NewGuid();
+        var offer = new Offer
+        {
+            Status = OfferStatus.Active,
+            StartsAtUtc = DateTime.UtcNow.AddDays(-1),
+            EndsAtUtc = DateTime.UtcNow.AddDays(5),
+            PackageTargets = [new OfferPackageTarget
+            {
+                SubscriptionType = "Individual",
+                ProgramId = programId,
+                BundleId = bundleId,
+                Tier = RestaurantTier.Platinum,
+                AllowedDurationDays = [20, 26]
+            }]
+        };
+
+        // In Discovery mode without package selection, the offer should be discoverable
+        var discoveryContext = new OfferEligibilityContext(
+            Guid.NewGuid(), 0, 0,
+            Purpose: OfferEvaluationPurpose.Discovery);
+
+        var result = _engine.Evaluate(offer, discoveryContext, DateTime.UtcNow);
+
+        result.IsEligible.Should().BeTrue();
+        result.IsScopeUnresolved.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Evaluate_RejectsTargetedOfferAtCheckout_WhenMissingOrWrongSubscriptionType()
+    {
+        var programId = Guid.NewGuid();
+        var bundleId = Guid.NewGuid();
+        var offer = new Offer
+        {
+            Status = OfferStatus.Active,
+            StartsAtUtc = DateTime.UtcNow.AddDays(-1),
+            EndsAtUtc = DateTime.UtcNow.AddDays(5),
+            PackageTargets = [new OfferPackageTarget
+            {
+                SubscriptionType = "Individual",
+                ProgramId = programId,
+                BundleId = bundleId,
+                Tier = RestaurantTier.Platinum,
+                AllowedDurationDays = [26]
+            }]
+        };
+
+        // Checkout mode without package selection: must fail
+        var missingPackageContext = new OfferEligibilityContext(
+            Guid.NewGuid(), 0, 0,
+            Purpose: OfferEvaluationPurpose.Checkout);
+        var missingResult = _engine.Evaluate(offer, missingPackageContext, DateTime.UtcNow);
+        missingResult.IsEligible.Should().BeFalse();
+        missingResult.IneligibilityReasons.Should().Contain(r => r.Contains("package target"));
+
+        // Checkout mode with wrong subscription type (Family vs Individual)
+        var wrongTypeContext = new OfferEligibilityContext(
+            Guid.NewGuid(), 0, 0, CartAmount: 100m, DurationDays: 26,
+            ProgramId: programId, BundleId: bundleId, Tier: RestaurantTier.Platinum,
+            SubscriptionType: "Family", Purpose: OfferEvaluationPurpose.Checkout);
+        var wrongTypeResult = _engine.Evaluate(offer, wrongTypeContext, DateTime.UtcNow);
+        wrongTypeResult.IsEligible.Should().BeFalse();
+        wrongTypeResult.IneligibilityReasons.Should().Contain(r => r.Contains("package target"));
+    }
 }

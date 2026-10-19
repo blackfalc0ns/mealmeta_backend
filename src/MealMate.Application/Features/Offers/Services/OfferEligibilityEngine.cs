@@ -80,20 +80,72 @@ public sealed class OfferEligibilityEngine : IOfferEligibilityEngine
             }
         }
 
+        var isScopeUnresolved = false;
+        if (context.Purpose == OfferEvaluationPurpose.Discovery)
+        {
+            var isFullyResolved = context.ProgramId.HasValue
+                && context.BundleId.HasValue
+                && context.Tier.HasValue
+                && !string.IsNullOrWhiteSpace(context.SubscriptionType)
+                && context.DurationDays > 0;
+            if (!isFullyResolved)
+            {
+                isScopeUnresolved = true;
+            }
+        }
+
         // 9. Program Scope Check
         if (offer.PackageTargets.Count > 0)
         {
-            var packageMatch = context.ProgramId.HasValue && context.BundleId.HasValue && context.Tier.HasValue
-                && !string.IsNullOrWhiteSpace(context.SubscriptionType)
-                && offer.PackageTargets.Any(target =>
-                    target.ProgramId == context.ProgramId.Value
-                    && target.BundleId == context.BundleId.Value
-                    && target.Tier == context.Tier.Value
-                    && string.Equals(target.SubscriptionType, context.SubscriptionType, StringComparison.OrdinalIgnoreCase)
-                    && target.AllowedDurationDays.Contains(context.DurationDays));
-            if (!packageMatch)
+            if (context.Purpose == OfferEvaluationPurpose.Discovery)
             {
-                reasons.Add("Offer does not match the selected package target (subscription type, program, bundle, tier and duration).");
+                var candidateTargets = offer.PackageTargets.AsEnumerable();
+
+                if (context.ProgramId.HasValue)
+                {
+                    candidateTargets = candidateTargets.Where(t => t.ProgramId == context.ProgramId.Value);
+                }
+
+                if (context.BundleId.HasValue)
+                {
+                    candidateTargets = candidateTargets.Where(t => t.BundleId == context.BundleId.Value);
+                }
+
+                if (context.Tier.HasValue)
+                {
+                    candidateTargets = candidateTargets.Where(t => t.Tier == context.Tier.Value);
+                }
+
+                if (!string.IsNullOrWhiteSpace(context.SubscriptionType))
+                {
+                    candidateTargets = candidateTargets.Where(t => string.Equals(t.SubscriptionType, context.SubscriptionType, StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (context.DurationDays > 0)
+                {
+                    candidateTargets = candidateTargets.Where(t => t.AllowedDurationDays.Contains(context.DurationDays));
+                }
+
+                var matchingTargets = candidateTargets.ToList();
+                if (matchingTargets.Count == 0)
+                {
+                    reasons.Add("Offer does not match the selected package target (subscription type, program, bundle, tier and duration).");
+                }
+            }
+            else
+            {
+                var packageMatch = context.ProgramId.HasValue && context.BundleId.HasValue && context.Tier.HasValue
+                    && !string.IsNullOrWhiteSpace(context.SubscriptionType)
+                    && offer.PackageTargets.Any(target =>
+                        target.ProgramId == context.ProgramId.Value
+                        && target.BundleId == context.BundleId.Value
+                        && target.Tier == context.Tier.Value
+                        && string.Equals(target.SubscriptionType, context.SubscriptionType, StringComparison.OrdinalIgnoreCase)
+                        && target.AllowedDurationDays.Contains(context.DurationDays));
+                if (!packageMatch)
+                {
+                    reasons.Add("Offer does not match the selected package target (subscription type, program, bundle, tier and duration).");
+                }
             }
         }
 
@@ -139,6 +191,6 @@ public sealed class OfferEligibilityEngine : IOfferEligibilityEngine
             discount = Math.Min(context.CartAmount, Math.Round(offer.DiscountAmount.Amount, 3, MidpointRounding.AwayFromZero));
         }
 
-        return new OfferEligibilityResult(true, discount, Array.Empty<string>());
+        return new OfferEligibilityResult(true, discount, Array.Empty<string>(), isScopeUnresolved);
     }
 }
