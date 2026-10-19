@@ -13,7 +13,7 @@
 | حقل | من أين | المعنى للعرض |
 |-----|--------|----------------|
 | طلب `startDate` | اختيار العميل في الواجهة | يوم يختاره ≥ اليوم (تقويم الكويت) |
-| رد `chosenStartDate` | من الباك | نفس اختيار العميل |
+| رد `paymentDate` | من الباك | نفس اختيار العميل |
 | رد `startDate` | من الباك | **أول يوم توصيل** = اختيار + 3 أيام (تخطي الجمعة إن `includeFriday=false`) |
 | رد `serviceDates` / `endDate` | من الباك | أيام الخدمة تبدأ من أول التوصيل |
 
@@ -35,7 +35,7 @@ GET /api/v1/customer/subscription-flow/summary
 ```
 
 3. في UI الملخص اعرض بوضوح:
-   - «يبدأ اشتراكك / يوم الدفع: `chosenStartDate`»
+   - «يبدأ اشتراكك / يوم الدفع: `paymentDate`»
    - «أول توصيل بعد 3 أيام: `startDate`»
    - «يمكنك تكرار نفس المطعم حتى `restaurantRepetition.limit` يوم خلال الاشتراك»
 4. خزّن نفس `startDate` (اختيار العميل/يوم الدفع) لـ checkout — **لا ترسل تاريخ أول التوصيل كطلب**؛ الباك يحسبه مرة أخرى.
@@ -44,7 +44,7 @@ GET /api/v1/customer/subscription-flow/summary
 
 ```json
 {
-  "chosenStartDate": "2026-08-27",
+  "paymentDate": "2026-08-27",
   "startDate": "2026-08-30",
   "durationDays": 26,
   "restaurantCount": 5,
@@ -75,7 +75,7 @@ GET /api/v1/customer/subscription-flow/summary
 }
 ```
 
-من الرد استخدم `chosenStartDate` + `startDate` للتأكيد قبل فتح الدفع.
+من الرد استخدم `paymentDate` + `startDate` للتأكيد قبل فتح الدفع.
 
 ## أخطاء لازم تعالجها في UI
 

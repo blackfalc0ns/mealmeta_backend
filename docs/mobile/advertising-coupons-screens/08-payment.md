@@ -48,7 +48,7 @@ Content-Type: application/json
 }
 ```
 
-استجابة النجاح `CheckoutStartedDto` تشمل `subscriptionId`, `paymentUrl`, `holdExpiresAtUtc`, `menuPlanVersionId`, `finalPrice`، وحقولًا اختيارية مثل `priceSnapshotId`, `eligibilityCheckedAtUtc`, `menuPlanVersionsByDate`, `restaurantPoolSnapshotId`, `restaurantSnapshotCount`, `paymentStatus`, `fulfillmentStatus`, `includeFriday`, `fridayDays`, `totalServiceDays`, `restaurantId`, `regionId`, `startDate`, `deliveryAddress`, `chosenStartDate`. احتفظ بـ `subscriptionId` قبل فتح `paymentUrl` لاستعادة التدفق عند إغلاق التطبيق.
+استجابة النجاح `CheckoutStartedDto` تشمل `subscriptionId`, `paymentUrl`, `holdExpiresAtUtc`, `menuPlanVersionId`, `finalPrice`، وحقولًا اختيارية مثل `priceSnapshotId`, `eligibilityCheckedAtUtc`, `menuPlanVersionsByDate`, `restaurantPoolSnapshotId`, `restaurantSnapshotCount`, `paymentStatus`, `fulfillmentStatus`, `includeFriday`, `fridayDays`, `totalServiceDays`, `restaurantId`, `regionId`, `startDate`, `deliveryAddress`, `paymentDate`. احتفظ بـ `subscriptionId` قبل فتح `paymentUrl` لاستعادة التدفق عند إغلاق التطبيق.
 
 أرسل المعرفات المحفوظة واختيارات العميل الحالية فقط. لا ترسل سعرًا محسوبًا محليًا. عالج أخطاء التحقق والتعارض وتغير التوفر وفشل بوابة الدفع (502) برسالة مترجمة وإعادة تحميل الملخص أو إعادة المحاولة المناسبة.
 

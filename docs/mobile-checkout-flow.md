@@ -109,7 +109,7 @@ Content-Type: application/json
 
 باقي الجسم: `programId`, `bundleId`, `tier`, `durationDays`, `includeFriday`, `correlationId`, و`promoCode` اختياري.
 
-لا ترسل `restaurantId` ولا `regionId` ولا `deliveryAddress`. الباك يملّيهم من عنوان العميل الافتراضي وأول مطعم مؤهل. أول صندوق = `startDate + 3 أيام` (تخطي الجمعة إن لزم). الرد يعيد `chosenStartDate` + `startDate` (أول توصيل).
+لا ترسل `restaurantId` ولا `regionId` ولا `deliveryAddress`. الباك يملّيهم من عنوان العميل الافتراضي وأول مطعم مؤهل. أول صندوق = `startDate + 3 أيام` (تخطي الجمعة إن لزم). الرد يعيد `paymentDate` + `startDate` (أول توصيل).
 
 **كود الخصم في الدفع:**
 
@@ -171,7 +171,7 @@ Content-Type: application/json
   "paymentStatus": "PendingPayment",
   "restaurantId": "97db2bbb-b652-4aaa-8584-3414e6966792",
   "regionId": "6590e7e9-5951-4977-895c-fc586b6a2952",
-  "chosenStartDate": "2026-08-27",
+  "paymentDate": "2026-08-27",
   "startDate": "2026-08-30",
   "deliveryAddress": "Salmiya, Kuwait"
 }

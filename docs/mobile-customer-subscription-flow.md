@@ -38,10 +38,10 @@ Accept-Language: ar
 
 بعد المدة والتصنيف افتح شاشة الملخص مباشرة. لا ترسل `restaurantId` في `summary` في هذه الخطوة. `tiers.restaurants` معاينة لوجوهات فقط (`restaurantId` + `logoUrl`). زر «استعراض المطاعم» على كرت التصنيف يستدعي `GET .../tiers/{tier}/restaurants` ويمكن إرسال `restaurantIds` من `tiers[].restaurants`. كل كرت يرجع الاسم واللوجو والتقييم وعدد الوجبات و`bundleMealCount` وتصنيفات المطعم `{ logoUrl, tier }` فقط بدون أسماء. القائمة الكاملة للأهلية والوجبات تبقى في `GET /customer/subscription-flow/restaurants` بعد اختيار التصنيف والمنطقة والتاريخ.
 
-`summary` و`checkout` يأخذان `startDate` = يوم اختيار العميل / يوم الدفع (تقويم الكويت، ≥ اليوم). الباك يحسب **أول يوم توصيل** = `chosenStartDate + 3 أيام` (تخطي الجمعة إذا `includeFriday=false`). مثال: دفع/اختيار يوم 27 → أول وجبة 30.
+`summary` و`checkout` يأخذان `startDate` = يوم اختيار العميل / يوم الدفع (تقويم الكويت، ≥ اليوم). الباك يحسب **أول يوم توصيل** = `paymentDate + 3 أيام` (تخطي الجمعة إذا `includeFriday=false`). مثال: دفع/اختيار يوم 27 → أول وجبة 30.
 
 الرد يعيد:
-- `chosenStartDate` — يوم الاختيار/الدفع
+- `paymentDate` — يوم الاختيار/الدفع
 - `startDate` — أول توصيل
 - `serviceDates` / `endDate` — من أول التوصيل
 - `restaurantRepetition` — حد تكرار نفس المطعم خلال المدة:
@@ -230,7 +230,7 @@ GET /customer/subscription-flow/summary?programId=..&bundleId=..&tier=Basic&dura
 
 `promoCode` اختياري. أرسله بنفس القيمة التي أظهرها الملخص؛ الباك يعيد التحقق ويحسب السعر بنفسه ولا يقبل مبلغًا من التطبيق. إذا صار الكود غير صالح بين الملخص والدفع يُرفض الطلب بـ`400 checkout.coupon_rejected` مع تفاصيل الكوبون قبل إنشاء أي دفع — أعد عرض الملخص بنفس الرسالة. تفاصيل كود الخصم ودورة الدفع: [`mobile-checkout-flow.md`](./mobile-checkout-flow.md).
 
-أرسل `startDate` = يوم اختيار العميل (نفس قيمة الملخص). لا ترسل `restaurantId` ولا `regionId` ولا `deliveryAddress`. الباك يملّي المطعم/المنطقة من عنوان العميل، و`startDate` في الرد = أول يوم توصيل (`chosenStartDate + 3`). الرد فيه `chosenStartDate`, `startDate`, `serviceDates` مع `paymentUrl`.
+أرسل `startDate` = يوم اختيار العميل (نفس قيمة الملخص). لا ترسل `restaurantId` ولا `regionId` ولا `deliveryAddress`. الباك يملّي المطعم/المنطقة من عنوان العميل، و`startDate` في الرد = أول يوم توصيل (`paymentDate + 3`). الرد فيه `paymentDate`, `startDate`, `serviceDates` مع `paymentUrl`.
 
 استجابة النجاح تحتوي `subscriptionId`, `paymentUrl`, `holdExpiresAtUtc`, `finalPrice`, `priceSnapshotId`, `restaurantPoolSnapshotId` ونسخة المنيو لكل تاريخ.
 

@@ -120,7 +120,7 @@ public sealed class IndividualSubscriptionDateContractTests
         Assert.Equal(FirstDeliveryDay, subscription.StartDate);
         Assert.Equal(new DateOnly(2026, 10, 17), subscription.EndDate);
         Assert.Equal(FirstDeliveryDay, result.Value.StartDate);
-        Assert.Equal(FirstDeliveryDay, result.Value.ChosenStartDate);
+        Assert.Equal(FirstDeliveryDay, result.Value.PaymentDate);
         // Service dates still start at the preserved first delivery date.
         Assert.Equal(FirstDeliveryDay, result.Value.MenuPlanVersionsByDate![0].ServiceDate);
     }
@@ -142,7 +142,7 @@ public sealed class IndividualSubscriptionDateContractTests
         await db.Entry(subscription).ReloadAsync();
         // Sat Oct 10 chosen: no Friday in the 3-day window -> +4 -> Wed Oct 14, applied once.
         Assert.Equal(new DateOnly(2026, 10, 14), subscription.StartDate);
-        Assert.Equal(new DateOnly(2026, 10, 10), result.Value.ChosenStartDate);
+        Assert.Equal(new DateOnly(2026, 10, 10), result.Value.PaymentDate);
         Assert.Equal(new DateOnly(2026, 10, 14), result.Value.StartDate);
     }
 

@@ -270,7 +270,7 @@ GET  /api/v1/customer/subscriptions/{id}/calendar
 
 ملخص ناقص البروفايل يرجع `409 subscription_flow.profile_incomplete` مع `nextAction` مثل `ALLERGIES` / `DIETARY_PREFERENCES`.
 
-`summary` و`checkout` يتطلبان `startDate` (يوم اختيار العميل). أول صندوق = اختيار + 3 أيام؛ الرد يعيد `chosenStartDate` و`startDate` (أول توصيل). التفاصيل: [`../../mobile-customer-subscription-flow.md`](../../mobile-customer-subscription-flow.md).
+`summary` و`checkout` يتطلبان `startDate` (يوم اختيار العميل). أول صندوق = اختيار + 3 أيام؛ الرد يعيد `paymentDate` و`startDate` (أول توصيل). التفاصيل: [`../../mobile-customer-subscription-flow.md`](../../mobile-customer-subscription-flow.md).
 
 ---
 

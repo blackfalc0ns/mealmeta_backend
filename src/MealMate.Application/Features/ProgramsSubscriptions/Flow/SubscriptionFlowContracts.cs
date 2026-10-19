@@ -503,7 +503,7 @@ public sealed record SubscriptionOrderSummaryDto(
     IReadOnlyList<SubscriptionSummaryRestaurantDto>? Restaurants = null,
     bool CanCheckout = true,
     string? CheckoutBlockReason = null,
-    DateOnly? ChosenStartDate = null,
+    DateOnly? PaymentDate = null,
     RestaurantRepetitionSummaryDto? RestaurantRepetition = null,
     CustomerPaginationMetaDto? RestaurantsPagination = null,
     SubscriptionSummaryCouponDto? Coupon = null,

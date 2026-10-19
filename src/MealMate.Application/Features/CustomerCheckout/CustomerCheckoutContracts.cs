@@ -71,7 +71,7 @@ public sealed record CheckoutStartedDto(
     Guid? RegionId = null,
     DateOnly? StartDate = null,
     string? DeliveryAddress = null,
-    DateOnly? ChosenStartDate = null);
+    DateOnly? PaymentDate = null);
 
 public sealed record SubscriptionPaymentStatusDto(
     Guid SubscriptionId,

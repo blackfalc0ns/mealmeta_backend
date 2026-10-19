@@ -1193,7 +1193,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(26, summary.DurationDays);
         Assert.Equal(bundle.Id, summary.BundleId);
         Assert.Contains("keto.webp", summary.ProgramImageUrl);
-        Assert.Equal(chosenStart, summary.ChosenStartDate);
+        Assert.Equal(chosenStart, summary.PaymentDate);
         Assert.Equal(expectedFirstDelivery, summary.StartDate);
         Assert.NotNull(summary.RestaurantRepetition);
         Assert.Equal(1, summary.RestaurantRepetition!.RestaurantCount);
