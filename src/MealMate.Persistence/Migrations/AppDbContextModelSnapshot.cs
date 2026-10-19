@@ -10619,6 +10619,10 @@ namespace MealMate.Persistence.Migrations
                     b.Property<DateOnly?>("StartDate")
                         .HasColumnType("date");
 
+                    b.Property<bool>("StartDateIsAutomatic")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.HasKey("Id");
 
                     b.HasIndex("FamilyGroupId");

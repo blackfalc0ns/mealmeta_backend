@@ -1306,13 +1306,22 @@ public sealed class FamilyDraftHandlers :
             if (full.IsFailure) return full.Error;
         }
 
+        if (plan.StartDate.IsSpecified
+            && !_schedule.TryResolveCheckoutStart(plan.StartDate.Value, includeFriday, out _, out var startError))
+            return Error.Validation(startError ?? "checkout.start_date_invalid", "Selected first delivery date is too soon.");
+
         member.ProgramId = programId;
         member.BundleId = bundleId;
         member.SelectedTier = tier;
         member.DurationDays = durationDays;
-        member.IncludeFriday = includeFriday;
         if (plan.StartDate.IsSpecified)
+        {
             member.StartDate = plan.StartDate.Value;
+            member.StartDateIsAutomatic = false;
+        }
+        else if (member.StartDateIsAutomatic && member.IncludeFriday != includeFriday)
+            member.StartDate = _schedule.ResolveFirstDeliveryDate(_schedule.GetKuwaitToday(), includeFriday);
+        member.IncludeFriday = includeFriday;
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
 
         var settings = await _settings.GetAsync(cancellationToken);
@@ -1372,6 +1381,7 @@ public sealed class FamilyDraftHandlers :
             return Error.Validation(startError ?? "checkout.start_date_invalid", "Selected first delivery date is too soon.");
 
         member.StartDate = request.StartDate;
+        member.StartDateIsAutomatic = false;
         member.SetupStatus = FamilyMemberPlanRules.ResolveSetupStatus(member);
 
         var settings = await _settings.GetAsync(cancellationToken);
@@ -2224,8 +2234,8 @@ public sealed class FamilyDraftHandlers :
 
     private async Task EnsureDefaultStartDatesAsync(FamilyGroup group, CancellationToken ct)
     {
-        // A chosen start day is distinct from first delivery. Use the shared Kuwait
-        // schedule so the preparation interval and Friday rules are applied once.
+        // Keep generated dates marked so changing Friday can recalculate them
+        // without overwriting a first delivery date selected by the customer.
         if (group.Status == FamilyGroupStatus.CheckoutPending)
             return;
         var missing = group.Members.Where(m => m.MemberSubscriptionId is null
@@ -2234,9 +2244,12 @@ public sealed class FamilyDraftHandlers :
             && (b.Status == FamilyCheckoutBatchStatus.PaymentPending || b.Status == FamilyCheckoutBatchStatus.ReviewRequired), ct))
             return;
 
-        var chosenStart = _schedule.ResolveFirstDeliveryDate(_schedule.GetKuwaitToday(), includeFriday: false);
+        var today = _schedule.GetKuwaitToday();
         foreach (var member in missing)
-            member.StartDate = chosenStart;
+        {
+            member.StartDate = _schedule.ResolveFirstDeliveryDate(today, member.IncludeFriday);
+            member.StartDateIsAutomatic = true;
+        }
         await SaveDraftChangesAsync(ct);
     }
 

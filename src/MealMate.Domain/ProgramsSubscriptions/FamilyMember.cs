@@ -18,6 +18,7 @@ public sealed class FamilyMember : AuditableEntity
     public string? PhoneNumber { get; set; }
     public string? Occupation { get; set; }
     public DateOnly? StartDate { get; set; }
+    public bool StartDateIsAutomatic { get; set; }
     public FamilyMemberSetupStatus SetupStatus { get; set; } = FamilyMemberSetupStatus.NotStarted;
     public Guid? ProgramId { get; set; }
     public Guid? BundleId { get; set; }

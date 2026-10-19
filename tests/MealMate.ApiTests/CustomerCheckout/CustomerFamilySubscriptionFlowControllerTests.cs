@@ -314,6 +314,43 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
     }
 
     [Fact]
+    public async Task EnablingFriday_RecalculatesOnlyAutomaticFamilyStartDate()
+    {
+        await using var db = CreateDb();
+        var paymentDay = new DateOnly(2026, 10, 19);
+        var controller = CreateController(db, Guid.NewGuid(),
+            nowUtc: new DateTime(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc));
+        var created = await controller.UpsertGroup(new UpsertFamilyGroupRequest("Family"), CancellationToken.None);
+        var member = created.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyGroupScreenDto>().Subject.Members.Single();
+        var schedule = new SubscriptionScheduleService(FixedClock(new DateTime(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc)));
+        member.StartDate.Should().Be(schedule.ResolveFirstDeliveryDate(paymentDay, includeFriday: false));
+
+        var enabled = await controller.SetMemberPlan(member.MemberId,
+            new SetFamilyMemberPlanRequest { IncludeFriday = Optional<bool>.Of(true) }, CancellationToken.None);
+        var updated = enabled.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyGroupScreenDto>().Subject.Members.Single();
+        updated.StartDate.Should().Be(new DateOnly(2026, 10, 23));
+        (await db.FamilyMembers.SingleAsync()).StartDate.Should().Be(new DateOnly(2026, 10, 23));
+
+        (await db.FamilyMembers.SingleAsync()).StartDate = null;
+        await db.SaveChangesAsync();
+        var refreshed = await controller.Current(CancellationToken.None);
+        refreshed.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyGroupScreenDto>().Subject.Members.Single().StartDate
+            .Should().Be(new DateOnly(2026, 10, 23));
+
+        var chosen = new DateOnly(2026, 10, 25);
+        (await controller.SetMemberStartDate(member.MemberId,
+            new SetFamilyMemberStartDateRequest(chosen), CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+        var disabled = await controller.SetMemberPlan(member.MemberId,
+            new SetFamilyMemberPlanRequest { IncludeFriday = Optional<bool>.Of(false) }, CancellationToken.None);
+        disabled.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<FamilyGroupScreenDto>().Subject.Members.Single().StartDate.Should().Be(chosen);
+    }
+
+    [Fact]
     public async Task Summary_LegacyMissingStartDateIsPersistedBeforeRestaurantEvaluation()
     {
         await using var db = CreateDb();
@@ -463,6 +500,14 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(DateTime.UtcNow);
         clock.TodayUtc.Returns(DateOnly.FromDateTime(DateTime.UtcNow));
+        return clock;
+    }
+
+    private static IDateTimeProvider FixedClock(DateTime nowUtc)
+    {
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(nowUtc);
+        clock.TodayUtc.Returns(DateOnly.FromDateTime(nowUtc));
         return clock;
     }
 
@@ -3537,7 +3582,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         IFamilyPricingSettingsReader? settings = null,
         ISubscriptionFlowQueryService? queryService = null,
         IRestaurantEligibilityService? restaurantEligibility = null,
-        ICapacityHoldExpiryService? holdExpiry = null, bool transactionalLocks = false)
+        ICapacityHoldExpiryService? holdExpiry = null, bool transactionalLocks = false, DateTime? nowUtc = null)
     {
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(userId);
@@ -3591,7 +3636,7 @@ public sealed class CustomerFamilySubscriptionFlowControllerTests
         });
 
         var clock = Substitute.For<IDateTimeProvider>();
-        clock.UtcNow.Returns(DateTime.UtcNow);
+        clock.UtcNow.Returns(nowUtc ?? DateTime.UtcNow);
         var tiers = new RestaurantTierClassificationService(db, clock);
         var pricingHandlers = new PricingAndClassificationHandlers(
             db, Substitute.For<IAuditLogger>(), clock, tiers);
