@@ -396,6 +396,15 @@ if (args.Any(arg => string.Equals(arg, "--seed-support-issues", StringComparison
     return;
 }
 
+if (args.Any(arg => string.Equals(arg, "--seed-offers-promotions", StringComparison.OrdinalIgnoreCase)))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var seedLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("OffersPromotionsSeeder");
+    await OffersPromotionsSeeder.SeedAsync(db, seedLogger);
+    return;
+}
+
 var createAdminIndex = Array.FindIndex(
     args,
     arg => string.Equals(arg, "--create-admin", StringComparison.OrdinalIgnoreCase));

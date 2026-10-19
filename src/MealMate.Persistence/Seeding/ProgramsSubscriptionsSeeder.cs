@@ -1,4 +1,4 @@
-﻿using MealMate.Domain.Enums;
+using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +25,7 @@ public static class ProgramsSubscriptionsSeeder
         await FoodSafetyCatalogSeeder.SeedAsync(db, cancellationToken);
         await ReceiptTemplatesSeeder.SeedAsync(db, logger, cancellationToken);
         await MealBoxLabelTemplatesSeeder.SeedAsync(db, logger, cancellationToken);
+        await OffersPromotionsSeeder.SeedAsync(db, logger, cancellationToken);
     }
 
     private static async Task EnsureProgramDisplayContentAsync(AppDbContext db, ILogger logger, CancellationToken cancellationToken)
