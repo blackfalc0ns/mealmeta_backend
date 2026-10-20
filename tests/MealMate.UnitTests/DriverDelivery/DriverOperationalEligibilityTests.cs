@@ -231,7 +231,7 @@ public class DriverOperationalEligibilityTests
         await db.SaveChangesAsync();
 
         var messages = NullLocalizedMessageProvider.Instance;
-        var handler = new AssignBoxToDriverCommandHandler(db, messages);
+        var handler = new AssignBoxToDriverCommandHandler(db, messages, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var result = await handler.Handle(new AssignBoxToDriverCommand(stop.Id, driver.Id), CancellationToken.None);
 
@@ -254,7 +254,7 @@ public class DriverOperationalEligibilityTests
         await db.SaveChangesAsync();
 
         var messages = NullLocalizedMessageProvider.Instance;
-        var handler = new BulkAssignBoxesCommandHandler(db, messages);
+        var handler = new BulkAssignBoxesCommandHandler(db, messages, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var result = await handler.Handle(new BulkAssignBoxesCommand([Guid.NewGuid()], driver.Id), CancellationToken.None);
 

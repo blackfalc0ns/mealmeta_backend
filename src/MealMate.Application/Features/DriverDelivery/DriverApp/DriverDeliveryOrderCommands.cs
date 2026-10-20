@@ -5,8 +5,10 @@ using MealMate.Application.Common.Models;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace MealMate.Application.Features.DriverDelivery.DriverApp;
 
@@ -99,6 +101,8 @@ public sealed class DriverDeliveryOrderCommandHandlers
     private readonly IRestaurantDeliveryNotifier? _restaurantNotifier;
     private readonly ICustomerPushNotifier? _customerPush;
     private readonly IFileStorage? _fileStorage;
+    private readonly IApplicationTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
 
     /// <summary>Text cap matching the 250-character counter on screens 08.01/08.02.</summary>
     private const int MaxIssueTextLength = 250;
@@ -112,7 +116,9 @@ public sealed class DriverDeliveryOrderCommandHandlers
         ILocalizedMessageProvider messages,
         IRestaurantDeliveryNotifier? restaurantNotifier = null,
         ICustomerPushNotifier? customerPushNotifier = null,
-        IFileStorage? fileStorage = null)
+        IFileStorage? fileStorage = null,
+        IApplicationTransactionExecutor? transactions = null,
+        IApplicationLockManager? locks = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -120,9 +126,15 @@ public sealed class DriverDeliveryOrderCommandHandlers
         _restaurantNotifier = restaurantNotifier;
         _customerPush = customerPushNotifier;
         _fileStorage = fileStorage;
+        _transactions = transactions;
+        _locks = locks;
     }
 
-    public async Task<Result<PickupBoxResponseDto>> Handle(PickupBoxCommand request, CancellationToken cancellationToken)
+    public Task<Result<PickupBoxResponseDto>> Handle(PickupBoxCommand request, CancellationToken cancellationToken)
+        => ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+            token => PickupBoxCoreAsync(request, token), cancellationToken);
+
+    private async Task<Result<PickupBoxResponseDto>> PickupBoxCoreAsync(PickupBoxCommand request, CancellationToken cancellationToken)
     {
         var stop = await _db.TripStops
             .Include(s => s.Trip)
@@ -310,7 +322,12 @@ public sealed class DriverDeliveryOrderCommandHandlers
         ));
     }
 
-    public async Task<Result<CompleteDeliveryResponseDto>> Handle(CompleteBoxDeliveryCommand request, CancellationToken cancellationToken)
+    public Task<Result<CompleteDeliveryResponseDto>> Handle(CompleteBoxDeliveryCommand request, CancellationToken cancellationToken)
+        => ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+            token => CompleteBoxDeliveryCoreAsync(request, token), cancellationToken,
+            allowDeliveredReplay: true);
+
+    private async Task<Result<CompleteDeliveryResponseDto>> CompleteBoxDeliveryCoreAsync(CompleteBoxDeliveryCommand request, CancellationToken cancellationToken)
     {
         var stop = await _db.TripStops
             .Include(s => s.Trip)
@@ -349,7 +366,7 @@ public sealed class DriverDeliveryOrderCommandHandlers
             var hasAssignment = await _db.DriverAssignments
                 .AnyAsync(da => da.TripId == stop.TripId
                     && da.DriverProfileId == driverId.Value
-                    && da.Status == "Active", cancellationToken);
+                    && (da.Status == "Active" || stop.Status == TripStopStatus.Delivered && da.Status == "Completed"), cancellationToken);
             if (!hasAssignment)
             {
                 return Error.Forbidden("Orders.DeliveryForbidden", isAr
@@ -674,7 +691,11 @@ public sealed class DriverDeliveryOrderCommandHandlers
         return null;
     }
 
-    public async Task<Result<Guid>> Handle(ReportDriverIssueCommand request, CancellationToken cancellationToken)
+    public Task<Result<Guid>> Handle(ReportDriverIssueCommand request, CancellationToken cancellationToken)
+        => ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+            token => ReportDriverIssueCoreAsync(request, token), cancellationToken);
+
+    private async Task<Result<Guid>> ReportDriverIssueCoreAsync(ReportDriverIssueCommand request, CancellationToken cancellationToken)
     {
         var isAr = _messages.IsArabic();
 
@@ -809,6 +830,8 @@ public sealed class DriverDeliveryOrderCommandHandlers
             ActorUserId = _currentUser.UserId
         });
 
+        AddDriverSupportIssueEvent(complaint, stop, "created", now);
+
         await _db.SaveChangesAsync(cancellationToken);
 
         // The response identifier is the persisted complaint id — the same id the
@@ -816,7 +839,11 @@ public sealed class DriverDeliveryOrderCommandHandlers
         return Result.Success(complaint.Id);
     }
 
-    public async Task<Result<CustomerArrivalResponseDto>> Handle(ConfirmCustomerArrivalCommand request, CancellationToken cancellationToken)
+    public Task<Result<CustomerArrivalResponseDto>> Handle(ConfirmCustomerArrivalCommand request, CancellationToken cancellationToken)
+        => ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+            token => ConfirmCustomerArrivalCoreAsync(request, token), cancellationToken);
+
+    private async Task<Result<CustomerArrivalResponseDto>> ConfirmCustomerArrivalCoreAsync(ConfirmCustomerArrivalCommand request, CancellationToken cancellationToken)
     {
         var stop = await _db.TripStops
             .FirstOrDefaultAsync(s => s.Id == request.BoxId, cancellationToken);
@@ -949,30 +976,57 @@ public sealed class DriverDeliveryOrderCommandHandlers
         return null;
     }
 
-    public async Task<Result<bool>> Handle(ReportDeliveryDelayCommand request, CancellationToken cancellationToken)
+    public Task<Result<bool>> Handle(ReportDeliveryDelayCommand request, CancellationToken cancellationToken)
+        => ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+            token => ReportDeliveryDelayCoreAsync(request, token), cancellationToken);
+
+    private async Task<Result<bool>> ReportDeliveryDelayCoreAsync(ReportDeliveryDelayCommand request, CancellationToken cancellationToken)
     {
+        if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue)
+        {
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, _messages.GetMessage(MessageCodes.Auth.InvalidCredentials, "Authentication is required."));
+        }
+        var reason = string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim();
+        var descriptionPrefix = $"Delay reported: {request.DelayMinutes} minutes.";
+        var description = reason is null ? descriptionPrefix : $"{descriptionPrefix} Reason: {reason}";
+        if (request.DelayMinutes is < 1 or > 1440 || description.Length > MaxIssueTextLength)
+        {
+            return Error.Validation("DRIVER_DELAY_INVALID", _messages.GetMessage("driver_issue.delay_invalid", "Delay must be between 1 and 1440 minutes and the reason cannot exceed 250 characters."));
+        }
         var stop = await _db.TripStops
+            .Include(s => s.Trip)
             .FirstOrDefaultAsync(s => s.Id == request.BoxId, cancellationToken);
 
         if (stop is null)
         {
             return Error.NotFound(MessageCodes.Orders.NotFound, "لم يتم العثور على الطلب المحدد.");
         }
-
-        _db.AuditLogs.Add(new MealMate.Domain.IdentityAccess.AuditLog
+        var driverId = await _db.DriverProfiles.AsNoTracking()
+            .Where(d => d.UserId == _currentUser.UserId.Value && !d.IsDeleted)
+            .Select(d => (Guid?)d.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!driverId.HasValue || !await _db.DriverAssignments.AsNoTracking().AnyAsync(a =>
+                a.TripId == stop.TripId && a.DriverProfileId == driverId.Value && a.Status == "Active", cancellationToken))
         {
-            Action = "DeliveryDelayReported",
-            EntityType = "TripStop",
-            EntityId = request.BoxId,
-            Reason = $"Delayed {request.DelayMinutes}m: {request.Reason}",
-            ActorUserId = _currentUser.UserId
-        });
+            return Error.Forbidden(MessageCodes.DriverIssues.Report.StopForbidden,
+                _messages.GetMessage(MessageCodes.DriverIssues.Report.StopForbidden, "This stop is not assigned to your active trip."));
+        }
+        if (stop.Status is TripStopStatus.Delivered or TripStopStatus.ReturnedToKitchen)
+        {
+            return Error.Conflict("DRIVER_DELAY_STOP_TERMINAL", _messages.GetMessage("driver_issue.delay_stop_terminal", "A delay cannot be reported for a completed stop."));
+        }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        var complaint = await Handle(new ReportDriverIssueCommand(request.BoxId, "SevereDelay", description,
+            driverId.Value, Severity: "Medium"), cancellationToken);
+        if (complaint.IsFailure) return complaint.Error;
         return Result.Success(true);
     }
 
-    public async Task<Result<FailedDeliveryResponseDto>> Handle(FailDeliveryCommand request, CancellationToken cancellationToken)
+    public Task<Result<FailedDeliveryResponseDto>> Handle(FailDeliveryCommand request, CancellationToken cancellationToken)
+        => ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+            token => FailDeliveryCoreAsync(request, token), cancellationToken);
+
+    private async Task<Result<FailedDeliveryResponseDto>> FailDeliveryCoreAsync(FailDeliveryCommand request, CancellationToken cancellationToken)
     {
         var stop = await _db.TripStops
             .Include(s => s.Trip)
@@ -1044,7 +1098,11 @@ public sealed class DriverDeliveryOrderCommandHandlers
         ));
     }
 
-    public async Task<Result<ReturnBoxResponseDto>> Handle(ReturnBoxToKitchenCommand request, CancellationToken cancellationToken)
+    public Task<Result<ReturnBoxResponseDto>> Handle(ReturnBoxToKitchenCommand request, CancellationToken cancellationToken)
+        => ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+            token => ReturnBoxToKitchenCoreAsync(request, token), cancellationToken);
+
+    private async Task<Result<ReturnBoxResponseDto>> ReturnBoxToKitchenCoreAsync(ReturnBoxToKitchenCommand request, CancellationToken cancellationToken)
     {
         var stop = await _db.TripStops
             .Include(s => s.Trip)
@@ -1115,7 +1173,11 @@ public sealed class DriverDeliveryOrderCommandHandlers
         ));
     }
 
-    public async Task<Result<ReassignmentRequestResponseDto>> Handle(RequestReassignmentCommand request, CancellationToken cancellationToken)
+    public Task<Result<ReassignmentRequestResponseDto>> Handle(RequestReassignmentCommand request, CancellationToken cancellationToken)
+        => ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+            token => RequestReassignmentCoreAsync(request, token), cancellationToken);
+
+    private async Task<Result<ReassignmentRequestResponseDto>> RequestReassignmentCoreAsync(RequestReassignmentCommand request, CancellationToken cancellationToken)
     {
         var isAr = _messages.IsArabic();
 
@@ -1206,20 +1268,7 @@ public sealed class DriverDeliveryOrderCommandHandlers
         var reasonLabel = isAr ? labelAr : labelEn;
         var customerUserId = await ResolveStopCustomerUserIdAsync(stop, cancellationToken);
 
-        stop.Status = TripStopStatus.Pending;
         stop.FailureReason = $"[ReassignmentRequested: {reason}] {notes}".TrimEnd();
-
-        // Handover semantics of this flow (screens 04.13 / E2E-locked): the box
-        // travels with the whole trip, so the dispatcher's replacement assignment
-        // takes over every stop. Open requests are therefore trip-wide by design;
-        // no per-stop assignment table exists to change instead.
-        var driverAssignments = await _db.DriverAssignments
-            .Where(da => da.TripId == stop.TripId && da.Status == "Active")
-            .ToListAsync(cancellationToken);
-        foreach (var da in driverAssignments)
-        {
-            da.Status = "Reassigned";
-        }
 
         // Create the support issue the dispatcher replacement flow (04.13) resolves.
         var complaint = new Complaint
@@ -1251,6 +1300,8 @@ public sealed class DriverDeliveryOrderCommandHandlers
             Reason = stop.FailureReason,
             ActorUserId = _currentUser.UserId
         });
+
+        AddDriverSupportIssueEvent(complaint, stop, "reassignment-requested", now);
 
         try
         {
@@ -1329,30 +1380,71 @@ public sealed class DriverDeliveryOrderCommandHandlers
         return null;
     }
 
-    /// <summary>Resolves the acting driver from the explicit id or the authenticated
-    /// user. A signed-in caller that resolves to no driver profile fails (driver-only
-    /// operations); a background/system context (no authenticated user) returns null
-    /// and callers decide whether that is acceptable.</summary>
+    /// <summary>Resolves only the authenticated driver's persisted profile. A client
+    /// supplied profile ID is a consistency hint and must match that identity.</summary>
     private async Task<Result<Guid?>> ResolveDriverIdentityOrNotFoundAsync(Guid? explicitDriverId, CancellationToken cancellationToken)
     {
-        if (explicitDriverId.HasValue)
+        if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue || _currentUser.UserType != UserType.Driver)
         {
-            return Result.Success<Guid?>(explicitDriverId.Value);
-        }
-
-        if (!_currentUser.UserId.HasValue)
-        {
-            return Result.Success<Guid?>(null);
+            return Result.Failure<Guid?>(Error.Unauthorized(MessageCodes.Auth.InvalidCredentials,
+                _messages.GetMessage(MessageCodes.Auth.InvalidCredentials, "An authenticated driver is required.")));
         }
 
         var driverId = await _db.DriverProfiles
-            .Where(d => d.UserId == _currentUser.UserId.Value)
+            .Where(d => d.UserId == _currentUser.UserId.Value && !d.IsDeleted)
             .Select(d => (Guid?)d.Id)
             .FirstOrDefaultAsync(cancellationToken);
+        if (!driverId.HasValue)
+            return Result.Failure<Guid?>(Error.NotFound(MessageCodes.Orders.NotFound, _messages.GetMessage(MessageCodes.Orders.NotFound, "Driver profile was not found.")));
+        if (explicitDriverId.HasValue && explicitDriverId.Value != driverId.Value)
+            return Result.Failure<Guid?>(Error.Forbidden("DRIVER_IDENTITY_MISMATCH", _messages.GetMessage("driver.identity_mismatch", "The supplied driver ID does not match the authenticated driver.")));
+        var activeAccount = await _db.GetActiveAccountUserIdsAsync(new[] { _currentUser.UserId.Value }, cancellationToken);
+        if (!activeAccount.Contains(_currentUser.UserId.Value))
+            return Result.Failure<Guid?>(Error.Forbidden("DRIVER_ACCOUNT_INACTIVE", _messages.GetMessage("driver.account_inactive", "The driver account is not active.")));
+        return Result.Success<Guid?>(driverId.Value);
+    }
 
-        return driverId.HasValue
-            ? Result.Success<Guid?>(driverId.Value)
-            : Result.Failure<Guid?>(Error.NotFound(MessageCodes.Orders.NotFound, "لم يتم العثور على الطلب المحدد."));
+    private async Task<Result<T>> ExecuteAssignedStopMutationAsync<T>(Guid stopId, Guid? suppliedDriverId,
+        Func<CancellationToken, Task<Result<T>>> mutation, CancellationToken cancellationToken,
+        bool allowDeliveredReplay = false)
+    {
+        if (_transactions is null || _locks is null)
+            return Error.Conflict("DELIVERY_TRANSACTION_UNAVAILABLE", _messages.GetMessage("driver_support_handover.transaction_unavailable", "Delivery mutation requires a transaction and application locks."));
+        async Task<Result<T>> ExecuteAsync(CancellationToken ct)
+        {
+            if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue || _currentUser.UserType != UserType.Driver)
+                return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, _messages.GetMessage(MessageCodes.Auth.InvalidCredentials, "An authenticated driver is required."));
+            var identity = await _db.DriverProfiles.AsNoTracking()
+                .Where(x => x.UserId == _currentUser.UserId.Value && !x.IsDeleted)
+                .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+            if (!identity.HasValue || suppliedDriverId.HasValue && suppliedDriverId.Value != identity.Value)
+                return Error.Forbidden("DRIVER_IDENTITY_MISMATCH", _messages.GetMessage("driver.identity_mismatch", "The supplied driver ID does not match the authenticated driver."));
+            if (!(await _db.GetActiveAccountUserIdsAsync(new[] { _currentUser.UserId.Value }, ct)).Contains(_currentUser.UserId.Value))
+                return Error.Forbidden("DRIVER_ACCOUNT_INACTIVE", _messages.GetMessage("driver.account_inactive", "The driver account is not active."));
+            var tripId = await _db.TripStops.AsNoTracking().Where(x => x.Id == stopId).Select(x => (Guid?)x.TripId).FirstOrDefaultAsync(ct);
+            if (!tripId.HasValue) return Error.NotFound(MessageCodes.Orders.NotFound, _messages.GetMessage(MessageCodes.Orders.NotFound, "Delivery stop was not found."));
+            await _locks.LockTripAsync(tripId.Value, ct);
+            var currentTripId = await _db.TripStops.AsNoTracking().Where(x => x.Id == stopId).Select(x => (Guid?)x.TripId).FirstOrDefaultAsync(ct);
+            if (currentTripId != tripId) return Error.Conflict("DELIVERY_CUSTODY_CHANGED", _messages.GetMessage("driver_support_handover.custody_changed", "The box changed trips while this request was waiting. Reload delivery state."));
+            var tripStatus = await _db.Trips.AsNoTracking().Where(x => x.Id == tripId.Value).Select(x => x.Status).FirstOrDefaultAsync(ct);
+            var stopStatus = await _db.TripStops.AsNoTracking().Where(x => x.Id == stopId).Select(x => x.Status).FirstOrDefaultAsync(ct);
+            var deliveredReplay = allowDeliveredReplay && stopStatus == TripStopStatus.Delivered;
+            if (!deliveredReplay && tripStatus is TripStatus.Completed or TripStatus.Cancelled)
+                return Error.Conflict("TRIP_TERMINAL", _messages.GetMessage("driver_support_handover.trip_terminal", "A terminal trip cannot accept delivery mutations."));
+            var trackedStop = await _db.TripStops.FirstOrDefaultAsync(x => x.Id == stopId, ct);
+            if (trackedStop is not null) await _db.ReloadEntityAsync(trackedStop, ct);
+            await _locks.LockDriverAsync(identity.Value, ct);
+            var ownsTrip = await _db.DriverAssignments.AsNoTracking().AnyAsync(x => x.TripId == tripId.Value
+                && x.DriverProfileId == identity.Value && (x.Status == "Active" || x.Status == "Assigned"
+                    || deliveredReplay && x.Status == "Completed"), ct);
+            if (!ownsTrip) return Error.Forbidden("Orders.DeliveryForbidden", _messages.GetMessage("Orders.DeliveryForbidden", "This stop is not assigned to your active trip."));
+            if (await DriverSupportHandoverMutationGuard.HasActiveHandoverForTripAsync(_db, tripId.Value, ct))
+                return Error.Conflict("HANDOVER_PENDING", _messages.GetMessage("driver_support_handover.pending", "The active support handover must be completed or cancelled first."));
+            if (await DriverSupportHandoverMutationGuard.HasActiveHoldForStopAsync(_db, stopId, ct))
+                return Error.Conflict("DELIVERY_HOLD_ACTIVE", _messages.GetMessage("driver_support_handover.followup_active", "This box has an unresolved support follow-up."));
+            return await mutation(ct);
+        }
+        return await _transactions.ExecuteResultAsync(ExecuteAsync, cancellationToken);
     }
 
     private async Task<Guid> ResolveStopCustomerUserIdAsync(TripStop stop, CancellationToken cancellationToken)
@@ -1460,6 +1552,44 @@ public sealed class DriverDeliveryOrderCommandHandlers
             .Select(r => r.ContentType)
             .FirstOrDefaultAsync(cancellationToken);
         return contentType ?? "application/octet-stream";
+    }
+
+    private void AddDriverSupportIssueEvent(Complaint complaint, TripStop stop, string eventName, DateTime occurredAtUtc)
+    {
+        if (complaint.RestaurantId is not Guid restaurantId) return;
+        var driverId = complaint.DriverProfileId;
+        var titleAr = _messages.GetArabicMessage("driver_support_issue.notification_title", "تحديث بلاغ دعم السائق");
+        var titleEn = _messages.GetEnglishMessage("driver_support_issue.notification_title_en", "Driver support issue update");
+        var bodyAr = _messages.GetArabicMessage("driver_support_issue.notification_created", "تم تسجيل بلاغ دعم جديد للسائق.");
+        var bodyEn = _messages.GetEnglishMessage("driver_support_issue.notification_created_en", "A driver support issue was recorded.");
+        if (driverId.HasValue)
+        {
+            _db.DriverNotifications.Add(new DriverNotification
+            {
+                UserId = _currentUser.UserId!.Value, DriverProfileId = driverId.Value, Type = "driver-support-issue",
+                TitleAr = titleAr, TitleEn = titleEn, BodyAr = bodyAr, BodyEn = bodyEn,
+                Section = "support", SubjectId = complaint.Id, DeepLink = $"/driver/support/issues/{complaint.Id:D}", SentAtUtc = occurredAtUtc
+            });
+        }
+        var managerIds = _db.DeliveryManagerRegistrations
+            .Where(x => x.RestaurantId == restaurantId && x.Status == VerificationStatus.Approved && x.ResultingUserId.HasValue)
+            .Select(x => x.ResultingUserId!.Value).Distinct().ToArray();
+        foreach (var userId in managerIds)
+        {
+            _db.DeliveryManagerNotifications.Add(new DeliveryManagerNotification
+            {
+                UserId = userId, RestaurantId = restaurantId, Type = "driver-support-issue",
+                TitleAr = titleAr, TitleEn = titleEn, BodyAr = bodyAr, BodyEn = bodyEn,
+                Section = "support", SubjectId = complaint.Id, DeepLink = $"/dispatcher/support/issues/{complaint.Id:D}", SentAtUtc = occurredAtUtc
+            });
+        }
+        _db.OutboxMessages.Add(new MealMate.Domain.Common.OutboxMessage
+        {
+            EventType = "driver-support-issue-changed.v1", AggregateType = nameof(Complaint), AggregateId = complaint.Id.ToString("D"),
+            DeduplicationKey = $"driver-support-issue:{complaint.Id:N}:{eventName}",
+            PayloadJson = JsonSerializer.Serialize(new { IssueId = complaint.Id, RestaurantId = restaurantId, DriverProfileId = driverId, Category = complaint.Category, Event = eventName }),
+            CreatedAtUtc = occurredAtUtc
+        });
     }
 
     /// <summary>True when the failure is the partial unique index that guards one

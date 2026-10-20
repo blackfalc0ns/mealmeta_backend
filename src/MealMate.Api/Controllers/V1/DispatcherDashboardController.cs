@@ -627,45 +627,8 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await Sender.Send(new ReassignReplacementDriverCommand(issueId, request.ReplacementDriverId, request.Notes), cancellationToken);
-        if (result.IsSuccess)
-        {
-            try
-            {
-                var kpis = await GetLiveKpisAsync(null, cancellationToken);
-                var isAr = Messages.IsArabic();
-
-                var statusPayload = new
-                {
-                    driverId = result.Value.ReplacementDriverId,
-                    statusCategory = "InDelivery",
-                    statusText = isAr ? "في التوصيل" : "In Delivery",
-                    statusColor = "Green",
-                    topIndicatorColor = "Green",
-                    hasIssue = false,
-                    issueDescription = (string?)null,
-                    kpis = kpis,
-                    timestampUtc = result.Value.ReassignedAtUtc
-                };
-
-                var issuePayload = new
-                {
-                    issueId,
-                    driverId = result.Value.ReplacementDriverId,
-                    resolved = false,
-                    status = "Open",
-                    issueDescription = isAr ? "تم تعيين سائق بديل" : "Replacement driver assigned",
-                    kpis = kpis,
-                    timestampUtc = result.Value.ReassignedAtUtc
-                };
-
-                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverStatusUpdated, statusPayload, cancellationToken);
-                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, issuePayload, cancellationToken);
-            }
-            catch
-            {
-                // Non-fatal broadcast
-            }
-        }
+        // Handover create is durable and emits a scoped outbox event. Do not broadcast
+        // this operation globally from the request node.
         return HandleResult(result);
     }
 
@@ -679,31 +642,6 @@ public sealed class DispatcherDashboardController : ApiControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await Sender.Send(new ResolveSupportIssueCommand(issueId, request.ResolutionNotes), cancellationToken);
-        if (result.IsSuccess)
-        {
-            try
-            {
-                var kpis = await GetLiveKpisAsync(null, cancellationToken);
-                var isAr = Messages.IsArabic();
-
-                var issuePayload = new
-                {
-                    issueId,
-                    driverId = result.Value.DriverId ?? Guid.Empty,
-                    resolved = true,
-                    status = "Resolved",
-                    issueDescription = isAr ? "تم حل المشكلة" : "Issue resolved",
-                    kpis = kpis,
-                    timestampUtc = result.Value.ResolvedAtUtc
-                };
-
-                await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, issuePayload, cancellationToken);
-            }
-            catch
-            {
-                // Non-fatal broadcast
-            }
-        }
         return HandleResult(result);
     }
 

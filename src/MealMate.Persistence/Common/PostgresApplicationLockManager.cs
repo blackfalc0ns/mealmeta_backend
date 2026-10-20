@@ -26,6 +26,41 @@ public sealed class PostgresApplicationLockManager : IApplicationLockManager
         _db = db;
     }
 
+    public async Task LockTripAsync(Guid tripId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT \"Id\" FROM \"Trips\" WHERE \"Id\" = {tripId} FOR UPDATE", cancellationToken);
+    }
+
+    public async Task LockSupportHandoverAsync(Guid handoverId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT \"Id\" FROM \"DriverSupportHandovers\" WHERE \"Id\" = {handoverId} FOR UPDATE", cancellationToken);
+    }
+
+    public async Task LockDriverAsync(Guid driverProfileId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = $"driver-support-driver:{driverProfileId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"DriverProfiles\" WHERE \"Id\" = {driverProfileId} FOR UPDATE", cancellationToken);
+    }
+
+    public async Task LockSupportHandoverKeyAsync(Guid userId, string idempotencyKey, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = $"driver-support-idempotency:{userId:N}:{idempotencyKey}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+    }
+
+    public async Task LockSupportComplaintAsync(Guid complaintId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"Complaints\" WHERE \"Id\" = {complaintId} FOR UPDATE", cancellationToken);
+    }
+
     public async Task LockSubscriptionAsync(Guid subscriptionId, CancellationToken cancellationToken = default)
     {
         if (!_db.Database.IsNpgsql()) return;

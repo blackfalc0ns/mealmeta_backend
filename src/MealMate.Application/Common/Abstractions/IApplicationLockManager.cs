@@ -36,4 +36,9 @@ public interface IApplicationLockManager
     Task LockPromoCodeAsync(Guid promoCodeId, CancellationToken cancellationToken = default) => Task.CompletedTask;
     Task LockCampaignPaymentKeyAsync(Guid customerId, string key, CancellationToken cancellationToken = default);
     Task LockCampaignCheckoutSessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    Task LockTripAsync(Guid tripId, CancellationToken cancellationToken = default);
+    Task LockSupportHandoverAsync(Guid handoverId, CancellationToken cancellationToken = default);
+    Task LockDriverAsync(Guid driverProfileId, CancellationToken cancellationToken = default);
+    Task LockSupportHandoverKeyAsync(Guid userId, string idempotencyKey, CancellationToken cancellationToken = default);
+    Task LockSupportComplaintAsync(Guid complaintId, CancellationToken cancellationToken = default);
 }

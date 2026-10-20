@@ -23,6 +23,7 @@ public class ConfirmPickupIdempotencyTests
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(DriverDeliveryTestConcurrency.ActiveDriverAccounts())
             .Options;
         return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
     }
@@ -148,7 +149,8 @@ public class ConfirmPickupIdempotencyTests
         currentUser.UserId.Returns(driverUserId);
 
         var messages = NullLocalizedMessageProvider.Instance;
-        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, messages);
+        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, messages,
+            transactionExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var idempotencyKey = Guid.NewGuid().ToString();
         var command = new ConfirmPickupBoxCommand(
@@ -219,7 +221,8 @@ public class ConfirmPickupIdempotencyTests
         currentUser.UserId.Returns(driverUserId);
 
         var messages = NullLocalizedMessageProvider.Instance;
-        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, messages);
+        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, messages,
+            transactionExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var command = new ConfirmPickupBoxCommand(
             BoxId: Guid.NewGuid(),

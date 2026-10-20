@@ -27,6 +27,7 @@ public class DeliverySupervisorNotificationTests
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(DriverDeliveryTestConcurrency.ActiveDriverAccounts())
             .Options;
         return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
     }
@@ -169,8 +170,10 @@ public class DeliverySupervisorNotificationTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driver.UserId);
+        currentUser.UserType.Returns(UserType.Driver);
 
-        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance, restaurantNotifier: notifier);
+        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance, restaurantNotifier: notifier,
+            transactionExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // First box: not all boxes received yet → no restaurant notification.
         var first = await handler.Handle(new ConfirmPickupBoxCommand(
@@ -216,6 +219,7 @@ public class DeliverySupervisorNotificationTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driver.UserId);
+        currentUser.UserType.Returns(UserType.Driver);
 
         // Delivery proofs must reference real uploads owned by the delivering driver.
         db.UploadFileRecords.Add(new MealMate.Domain.Common.UploadFileRecord
@@ -238,7 +242,8 @@ public class DeliverySupervisorNotificationTests
         });
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, NullLocalizedMessageProvider.Instance, restaurantNotifier: notifier);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, NullLocalizedMessageProvider.Instance, restaurantNotifier: notifier,
+            transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var stops = await db.TripStops.OrderBy(s => s.OrderCode).ToListAsync();
 

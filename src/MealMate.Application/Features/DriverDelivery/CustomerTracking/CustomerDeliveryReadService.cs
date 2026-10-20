@@ -147,6 +147,28 @@ public sealed class CustomerDeliveryReadService : ICustomerDeliveryReadService
             .GroupBy(h => h.DailyOrderId)
             .ToDictionary(g => g.Key, g => g.Select(x => x.Row).ToList());
 
+        // A support transfer creates a new delivery attempt while preserving the
+        // original kitchen handover as audit evidence. Use only persisted receipt
+        // evidence from a completed transfer for the replacement driver's pickup.
+        var stopIds = stops.Select(s => s.Id).Distinct().ToList();
+        var supportReceipts = stopIds.Count == 0
+            ? new List<SupportReceiptRow>()
+            : await (from box in _db.DriverSupportHandoverBoxes.AsNoTracking()
+                     join handover in _db.DriverSupportHandovers.AsNoTracking()
+                         on box.HandoverId equals handover.Id
+                     where stopIds.Contains(box.TripStopId)
+                           && box.Status == "Received"
+                           && handover.Status == "Completed"
+                           && handover.CompletedAtUtc.HasValue
+                     select new SupportReceiptRow(
+                         box.TripStopId,
+                         handover.ReplacementDriverProfileId,
+                         handover.CompletedAtUtc!.Value))
+                .ToListAsync(cancellationToken);
+        var supportReceiptByStop = supportReceipts
+            .GroupBy(x => x.TripStopId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.ReceivedAtUtc).First());
+
         var result = new Dictionary<Guid, CustomerDeliveryDayProjection>(days.Count);
 
         foreach (var day in days)
@@ -179,6 +201,12 @@ public sealed class CustomerDeliveryReadService : ICustomerDeliveryReadService
                 {
                     var orderId = selection.AttemptIdentifier ?? order?.Id;
                     pickedUpAtUtc = ResolvePickupTime(orderId, selection.Attempt, handoversByOrder, driverProfileId.Value, ref ambiguity);
+                    if (supportReceiptByStop.TryGetValue(selection.Attempt.TripStopId, out var receipt)
+                        && receipt.ReplacementDriverProfileId == driverProfileId.Value)
+                    {
+                        pickedUpAtUtc = receipt.ReceivedAtUtc;
+                        ambiguity = null;
+                    }
                 }
             }
 
@@ -347,4 +375,6 @@ public sealed class CustomerDeliveryReadService : ICustomerDeliveryReadService
         Guid? TripId,
         Guid? DriverProfileId,
         DateTime? HandedOverAtUtc);
+
+    private sealed record SupportReceiptRow(Guid TripStopId, Guid ReplacementDriverProfileId, DateTime ReceivedAtUtc);
 }

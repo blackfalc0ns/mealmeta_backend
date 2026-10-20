@@ -1172,4 +1172,248 @@
   <data name="campaign.option_incomplete" xml:space="preserve"><value>Provide both bundleId and durationDays to address a specific option.</value></data>
   <data name="campaign.option_not_found" xml:space="preserve"><value>The requested campaign option does not exist for this campaign.</value></data>
   <data name="campaign.option_capacity_unavailable" xml:space="preserve"><value>The requested campaign option no longer has enough capacity for a full duration.</value></data>
+  <data name="driver_issue.delay_invalid" xml:space="preserve">
+    <value>Delay must be between 1 and 1440 minutes and the complete report must not exceed 250 characters.</value>
+  </data>
+  <data name="driver_issue.delay_stop_terminal" xml:space="preserve">
+    <value>A delay cannot be reported for a completed stop.</value>
+  </data>
+  <data name="dispatcher_support.stop_ambiguous" xml:space="preserve">
+    <value>The support issue is linked to multiple delivery attempts.</value>
+  </data>
+  <data name="driver_support_handover.terminal_box_cannot_transfer" xml:space="preserve">
+    <value>لا يمكن نقل صندوق تم تسليمه أو إرجاعه للمطبخ.</value>
+  </data>
+  <data name="driver_support_handover.idempotency_key_reused" xml:space="preserve">
+    <value>استُخدم مفتاح منع التكرار لطلب نقل عهدة آخر.</value>
+  </data>
+  <data name="driver_support_handover.invalid_handover_request" xml:space="preserve">
+    <value>طلب نقل العهدة غير صالح.</value>
+  </data>
+  <data name="driver_support_handover.issue_already_resolved" xml:space="preserve">
+    <value>تم حل بلاغ الدعم مسبقاً.</value>
+  </data>
+  <data name="driver_support_handover.delivery_hold_active" xml:space="preserve">
+    <value>لهذا الصندوق متابعة دعم لم تُحسم بعد.</value>
+  </data>
+  <data name="driver_support_handover.notification_box_missing" xml:space="preserve">
+    <value>يحتاج الصندوق المفقود إلى متابعة التوزيع.</value>
+  </data>
+  <data name="driver_support_handover.manifest_barcode_ambiguous" xml:space="preserve">
+    <value>يطابق هذا الباركود أكثر من صندوق في نقل العهدة.</value>
+  </data>
+  <data name="driver_support_handover.notification_dispatch_followup_en" xml:space="preserve">
+    <value>يتطلب نقل العهدة متابعة فريق التوزيع.</value>
+  </data>
+  <data name="driver_support_handover.handover_pending" xml:space="preserve">
+    <value>أكمل نقل العهدة النشط أو ألغِه قبل تغيير عهدة التوصيل.</value>
+  </data>
+  <data name="driver_support_handover.handover_already_active" xml:space="preserve">
+    <value>يوجد نقل عهدة نشط لهذه الرحلة.</value>
+  </data>
+  <data name="driver_support_handover.notes_too_long" xml:space="preserve">
+    <value>يجب ألا تتجاوز الملاحظات 500 حرف.</value>
+  </data>
+  <data name="driver_support_handover.handover_trip_ambiguous" xml:space="preserve">
+    <value>يرتبط البلاغ بأكثر من رحلة توصيل نشطة.</value>
+  </data>
+  <data name="driver_support_handover.invalid_replacement_driver" xml:space="preserve">
+    <value>اختر سائقاً بديلاً صالحاً.</value>
+  </data>
+  <data name="driver_support_handover.delivery_custody_changed" xml:space="preserve">
+    <value>تغيرت الرحلة المرتبطة بالصندوق أثناء الانتظار. أعد تحميل بيانات التوصيل.</value>
+  </data>
+  <data name="driver_support_handover.original_driver_not_assigned" xml:space="preserve">
+    <value>لا يوجد سائق معين حالياً لهذه الرحلة.</value>
+  </data>
+  <data name="driver_support_handover.handover_not_assignable" xml:space="preserve">
+    <value>لا يمكن تنفيذ الإجراء على نقل العهدة في حالته الحالية.</value>
+  </data>
+  <data name="driver_support_handover.replacement_driver_busy" xml:space="preserve">
+    <value>لدى السائق البديل مهمة نشطة حالياً.</value>
+  </data>
+  <data name="driver_support_handover.receipt_status_invalid" xml:space="preserve">
+    <value>يجب أن تكون حالة الاستلام: مستلم أو مفقود أو تالف.</value>
+  </data>
+  <data name="driver_support_handover.handover_manifest_empty" xml:space="preserve">
+    <value>لا توجد صناديق متبقية في عهدة هذه الرحلة.</value>
+  </data>
+  <data name="driver_support_handover.replacement_restaurant_mismatch" xml:space="preserve">
+    <value>السائق البديل غير مرتبط بهذا المطعم.</value>
+  </data>
+  <data name="driver_support_handover.handover_forbidden" xml:space="preserve">
+    <value>لا تملك صلاحية الوصول إلى نقل العهدة هذا.</value>
+  </data>
+  <data name="driver_support_handover.scan_method_invalid" xml:space="preserve">
+    <value>يجب أن تكون طريقة المسح باركود أو رمزاً يدوياً.</value>
+  </data>
+  <data name="driver_support_handover.follow_up_required" xml:space="preserve">
+    <value>تتطلب الصناديق المفقودة أو التالفة ملاحظة متابعة.</value>
+  </data>
+  <data name="driver_support_handover.follow_up_already_resolved" xml:space="preserve">
+    <value>This follow-up was resolved with different evidence.</value>
+  </data>
+  <data name="driver_support_handover.follow_up_code_mismatch" xml:space="preserve">
+    <value>The code does not match the persisted barcode or exact manifest code for this box.</value>
+  </data>
+  <data name="driver_support_handover.follow_up_custody_changed" xml:space="preserve">
+    <value>The box moved outside this handover's original trip.</value>
+  </data>
+  <data name="driver_support_handover.follow_up_not_required" xml:space="preserve">
+    <value>Only a recorded missing or damaged box has a support follow-up.</value>
+  </data>
+  <data name="driver_support_handover.follow_up_record_not_found" xml:space="preserve">
+    <value>The persisted support follow-up record is missing.</value>
+  </data>
+  <data name="driver_support_handover.follow_up_resolution_invalid" xml:space="preserve">
+    <value>Provide an exact manifest code and a resolution note between 5 and 500 characters.</value>
+  </data>
+  <data name="driver_support_handover.follow_up_stop_terminal" xml:space="preserve">
+    <value>A delivered or already-returned box cannot be returned again.</value>
+  </data>
+  <data name="driver_support_handover.handover_not_completed" xml:space="preserve">
+    <value>Follow-up can be resolved only after handover completion.</value>
+  </data>
+  <data name="driver_support_handover.delivery_transaction_unavailable" xml:space="preserve">
+    <value>يتطلب تعديل التوصيل معاملة وقفل تطبيق.</value>
+  </data>
+  <data name="driver_support_handover.trip_terminal" xml:space="preserve">
+    <value>لا يمكن نقل عهدة رحلة مكتملة أو ملغاة.</value>
+  </data>
+  <data name="driver_support_handover.handover_trip_not_found" xml:space="preserve">
+    <value>البلاغ غير مرتبط برحلة توصيل نشطة.</value>
+  </data>
+  <data name="driver_support_handover.notification_title_en" xml:space="preserve">
+    <value>نقل عهدة دعم السائق</value>
+  </data>
+  <data name="driver_support_handover.scan_invalid" xml:space="preserve">
+    <value>رمز المسح وحالة الاستلام وطريقته مطلوبة.</value>
+  </data>
+  <data name="driver_support_handover.notification_box_received" xml:space="preserve">
+    <value>تم تسجيل صندوق كمستلم.</value>
+  </data>
+  <data name="driver_support_handover.handover_receipts_incomplete" xml:space="preserve">
+    <value>سجّل كل صندوق كمستلم أو مفقود أو تالف.</value>
+  </data>
+  <data name="driver_support_handover.pickup_location_unavailable" xml:space="preserve">
+    <value>موقع نقل العهدة الموثق غير متوفر.</value>
+  </data>
+  <data name="driver_support_handover.manifest_box_not_found" xml:space="preserve">
+    <value>لا يطابق الرمز صندوقاً في قائمة نقل العهدة.</value>
+  </data>
+  <data name="driver_support_handover.box_already_recorded" xml:space="preserve">
+    <value>تم تسجيل نتيجة استلام هذا الصندوق مسبقاً.</value>
+  </data>
+  <data name="driver_support_handover.manifest_code_ambiguous" xml:space="preserve">
+    <value>يطابق رمز القائمة أكثر من صندوق؛ استخدم الباركود الدقيق.</value>
+  </data>
+  <data name="driver_support_handover.notification_dispatch_followup" xml:space="preserve">
+    <value>يتطلب نقل العهدة متابعة فريق التوزيع.</value>
+  </data>
+  <data name="driver_support_handover.notification_box_damaged" xml:space="preserve">
+    <value>يحتاج الصندوق التالف إلى متابعة التوزيع.</value>
+  </data>
+  <data name="driver_support_handover.location_invalid" xml:space="preserve">
+    <value>إحداثيات الموقع غير صالحة.</value>
+  </data>
+  <data name="driver_support_handover.handover_not_found" xml:space="preserve">
+    <value>لم يتم العثور على بلاغ الدعم أو نقل العهدة.</value>
+  </data>
+  <data name="driver_support_handover.handover_infrastructure_unavailable" xml:space="preserve">
+    <value>معاملة نقل العهدة وأقفالها غير متاحة.</value>
+  </data>
+  <data name="driver_support_handover.barcode_not_assigned" xml:space="preserve">
+    <value>لا يوجد باركود محفوظ ونشط لهذا الصندوق.</value>
+  </data>
+  <data name="driver_support_handover.handover_customer_unavailable" xml:space="preserve">
+    <value>لا يوجد حساب عميل محفوظ لمحطة الدعم.</value>
+  </data>
+  <data name="driver_support_handover.barcodes_invalid" xml:space="preserve">
+    <value>الباركود غير صالح أو غير مرتبط بصندوق في هذه القائمة.</value>
+  </data>
+  <data name="driver_support_handover.handover_box_missing" xml:space="preserve">
+    <value>لم تعد محطة من قائمة الرحلة موجودة.</value>
+  </data>
+  <data name="driver_support_handover.cancellation_reason_too_long" xml:space="preserve">
+    <value>يجب ألا يتجاوز سبب الإلغاء 500 حرف.</value>
+  </data>
+  <data name="driver_support_handover.notification_completed" xml:space="preserve">
+    <value>Driver support handover completed.</value>
+  </data>
+  <data name="driver_support_handover.notification_completed_en" xml:space="preserve"><value>Driver support handover completed.</value></data>
+  <data name="driver_support_handover.notification_arrived" xml:space="preserve">
+    <value>The replacement driver arrived for custody receipt.</value>
+  </data>
+  <data name="driver_support_handover.notification_arrived_en" xml:space="preserve"><value>The replacement driver arrived for custody receipt.</value></data>
+  <data name="driver_support_handover.handover_arrival_required" xml:space="preserve">
+    <value>يجب تسجيل وصول السائق البديل قبل تسجيل الاستلام أو إكمال النقل.</value>
+  </data>
+  <data name="driver_support_handover.original_custody_changed" xml:space="preserve">
+    <value>لم يعد السائق الأصلي مسؤولاً عن الرحلة؛ يجب على التوزيع تسوية العهدة.</value>
+  </data>
+  <data name="driver_support_handover.notification_cancelled" xml:space="preserve">
+    <value>Driver support handover cancelled.</value>
+  </data>
+  <data name="driver_support_handover.notification_cancelled_en" xml:space="preserve"><value>Driver support handover cancelled.</value></data>
+  <data name="driver_support_handover.replacement_account_inactive" xml:space="preserve">
+    <value>حساب السائق البديل غير نشط.</value>
+  </data>
+  <data name="driver_support_handover.handover_already_completed" xml:space="preserve">
+    <value>لا يمكن إلغاء نقل عهدة مكتمل.</value>
+  </data>
+  <data name="driver_support_handover.notification_title" xml:space="preserve">
+    <value>نقل عهدة دعم السائق</value>
+  </data>
+  <data name="driver_support_handover.handover_receipt_exists" xml:space="preserve">
+    <value>لا يمكن إلغاء نقل يتضمن دليل استلام؛ سجّل نتيجة كل صندوق.</value>
+  </data>
+  <data name="driver_support_handover.notification_assigned" xml:space="preserve">
+    <value>A driver support handover has been assigned to you.</value>
+  </data>
+  <data name="driver_support_handover.notification_assigned_en" xml:space="preserve"><value>A driver support handover has been assigned to you.</value></data>
+  <data name="driver_support_handover.cannot_reassign_to_same_driver" xml:space="preserve">
+    <value>اختر سائقاً بديلاً مختلفاً.</value>
+  </data>
+  <data name="driver_support_handover.replacement_driver_unavailable" xml:space="preserve">
+    <value>السائق البديل غير معتمد أو غير متاح.</value>
+  </data>
+  <data name="driver_support_handover.original_custody_ambiguous" xml:space="preserve">
+    <value>للرحلة تعيينات سائق متعددة؛ يجب حسم العهدة أولاً.</value>
+  </data>
+  <data name="driver_issue.category.AddressIssue" xml:space="preserve">
+    <value>Address issue</value>
+  </data>
+  <data name="driver_issue.category.TrafficAccident" xml:space="preserve">
+    <value>Traffic accident</value>
+  </data>
+  <data name="driver_issue.category.SevereWeather" xml:space="preserve">
+    <value>Severe weather</value>
+  </data>
+  <data name="driver_issue.category.CustomerUnavailable" xml:space="preserve">
+    <value>Customer unavailable</value>
+  </data>
+  <data name="driver_issue.category.RoadIssue" xml:space="preserve">
+    <value>Road issue</value>
+  </data>
+  <data name="driver_issue.category.SevereDelay" xml:space="preserve">
+    <value>Severe delay</value>
+  </data>
+  <data name="driver_issue.category.DeliveryIssue" xml:space="preserve">
+    <value>Delivery issue</value>
+  </data>
+  <data name="driver_issue.category.CustomerRefusal" xml:space="preserve">
+    <value>Customer refusal</value>
+  </data>
+  <data name="dispatcher_support.time_now" xml:space="preserve">
+    <value>Just now</value>
+  </data>
+  <data name="driver_issue.category.VehicleBreakdown" xml:space="preserve">
+    <value>Vehicle breakdown</value>
+  </data>
+  <data name="driver_issue.category.DamagedBox" xml:space="preserve">
+    <value>Damaged box</value>
+  </data>
+  <data name="driver_support_handover.barcode_invalid" xml:space="preserve">
+    <value>The barcode is invalid or does not belong to a box in this handover.</value>
+  </data>
 </root>

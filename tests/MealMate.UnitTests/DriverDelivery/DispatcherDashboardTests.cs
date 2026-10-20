@@ -29,8 +29,35 @@ public class DispatcherDashboardTests
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(DriverDeliveryTestConcurrency.ActiveDriverAccounts())
             .Options;
         return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
+    }
+
+    private static ICurrentUser AdminUser()
+    {
+        var user = Substitute.For<ICurrentUser>();
+        user.IsAuthenticated.Returns(true);
+        user.UserId.Returns(Guid.NewGuid());
+        user.UserType.Returns(UserType.Admin);
+        return user;
+    }
+
+    private static ICurrentUser DeliveryManagerUser(Guid restaurantId)
+    {
+        var user = Substitute.For<ICurrentUser>();
+        user.IsAuthenticated.Returns(true);
+        user.UserId.Returns(Guid.NewGuid());
+        user.UserType.Returns(UserType.DeliveryManager);
+        user.RestaurantId.Returns(restaurantId);
+        return user;
+    }
+
+    private static IDateTimeProvider TestClock()
+    {
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        return clock;
     }
 
     [Fact]
@@ -492,8 +519,7 @@ public class DispatcherDashboardTests
 
         await db.SaveChangesAsync();
 
-        var currentUser = Substitute.For<ICurrentUser>();
-        currentUser.RestaurantId.Returns(restaurant.Id);
+        var currentUser = DeliveryManagerUser(restaurant.Id);
 
         var messages = NullLocalizedMessageProvider.Instance;
         var handler = new GetDispatcherDashboardOverviewQueryHandler(db, currentUser, messages);
@@ -537,8 +563,7 @@ public class DispatcherDashboardTests
         db.RestaurantProfiles.Add(restaurant);
         await db.SaveChangesAsync();
 
-        var currentUser = Substitute.For<ICurrentUser>();
-        currentUser.RestaurantId.Returns(restaurant.Id);
+        var currentUser = DeliveryManagerUser(restaurant.Id);
 
         var messages = NullLocalizedMessageProvider.Instance;
         var handler = new GetDispatcherDashboardOverviewQueryHandler(db, currentUser, messages);
@@ -1024,8 +1049,7 @@ public class DispatcherDashboardTests
         db.RestaurantProfiles.Add(restaurant);
         await db.SaveChangesAsync();
 
-        var currentUser = Substitute.For<ICurrentUser>();
-        currentUser.RestaurantId.Returns(restaurant.Id);
+        var currentUser = DeliveryManagerUser(restaurant.Id);
 
         var messages = NullLocalizedMessageProvider.Instance;
         var recommendationEngine = new DispatchRecommendationEngine(
@@ -1087,7 +1111,7 @@ public class DispatcherDashboardTests
         db.TripStops.AddRange(stop1, stop2);
         await db.SaveChangesAsync();
 
-        var currentUser = Substitute.For<ICurrentUser>();
+        var currentUser = AdminUser();
         currentUser.RestaurantId.Returns(restaurantId);
         var messages = NullLocalizedMessageProvider.Instance;
         var recommendationEngine = Substitute.For<IDispatchRecommendationEngine>();
@@ -1192,7 +1216,8 @@ public class DispatcherDashboardTests
         await db.SaveChangesAsync();
 
         var messages = NullLocalizedMessageProvider.Instance;
-        var handler = new AssignBoxToDriverCommandHandler(db, messages);
+        var handler = new AssignBoxToDriverCommandHandler(db, messages, currentUser: AdminUser(),
+            txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new AssignBoxToDriverCommand(stop.Id, driver.Id, "إسناد سريع"), CancellationToken.None);
@@ -2223,8 +2248,7 @@ public class DispatcherDashboardTests
 
         await db.SaveChangesAsync();
 
-        var currentUser = Substitute.For<ICurrentUser>();
-        currentUser.RestaurantId.Returns(restaurant.Id);
+        var currentUser = DeliveryManagerUser(restaurant.Id);
         var messages = new ArabicTestMessageProvider();
 
         var handler = new GetDispatcherSupportIssuesQueryHandler(db, currentUser, messages);
@@ -2288,8 +2312,7 @@ public class DispatcherDashboardTests
 
         await db.SaveChangesAsync();
 
-        var currentUser = Substitute.For<ICurrentUser>();
-        currentUser.RestaurantId.Returns(restaurant.Id);
+        var currentUser = DeliveryManagerUser(restaurant.Id);
         var messages = new ArabicTestMessageProvider();
         var handler = new GetDispatcherSupportIssuesQueryHandler(db, currentUser, messages);
 
@@ -2458,7 +2481,7 @@ public class DispatcherDashboardTests
         await db.SaveChangesAsync();
 
         var messages = new ArabicTestMessageProvider();
-        var handler = new GetDispatcherProblemDetailsQueryHandler(db, messages);
+        var handler = new GetDispatcherProblemDetailsQueryHandler(db, messages, AdminUser());
 
         // Act
         var result = await handler.Handle(new GetDispatcherProblemDetailsQuery(complaint.Id), CancellationToken.None);
@@ -2501,7 +2524,7 @@ public class DispatcherDashboardTests
         db.Complaints.Add(complaint);
         await db.SaveChangesAsync();
 
-        var handler = new GetDispatcherProblemDetailsQueryHandler(db, new ArabicTestMessageProvider());
+        var handler = new GetDispatcherProblemDetailsQueryHandler(db, new ArabicTestMessageProvider(), AdminUser());
         var result = await handler.Handle(new GetDispatcherProblemDetailsQuery(complaint.Id), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
@@ -2555,8 +2578,7 @@ public class DispatcherDashboardTests
         db.Complaints.Add(complaint);
         await db.SaveChangesAsync();
 
-        var currentUser = Substitute.For<ICurrentUser>();
-        currentUser.RestaurantId.Returns(restaurant.Id);
+        var currentUser = DeliveryManagerUser(restaurant.Id);
         var handler = new GetDispatcherSupportIssuesQueryHandler(db, currentUser, new ArabicTestMessageProvider());
         var result = await handler.Handle(new GetDispatcherSupportIssuesQuery(restaurant.Id, Status: "All"), CancellationToken.None);
 
@@ -2578,7 +2600,7 @@ public class DispatcherDashboardTests
     }
 
     [Fact]
-    public async Task ReassignReplacementDriver_DoesNotInventCodeOrVehicle_WhenReplacementFieldsAreMissing()
+    public async Task ReassignReplacementDriver_RequiresPersistedTripInsteadOfInventingMissingFields()
     {
         await using var db = CreateDb();
         var replacementDriver = new DriverProfile
@@ -2604,21 +2626,14 @@ public class DispatcherDashboardTests
         var handler = new ReassignReplacementDriverCommandHandler(
             db,
             new ArabicTestMessageProvider(),
-            Substitute.For<IAuditLogger>());
+            Substitute.For<IAuditLogger>(), AdminUser(), TestClock(),
+            DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
         var result = await handler.Handle(
             new ReassignReplacementDriverCommand(complaint.Id, replacementDriver.Id),
             CancellationToken.None);
 
-        result.IsSuccess.Should().BeTrue();
-        using (new AssertionScope())
-        {
-            result.Value.ReplacementDriverCode.Should().BeNull();
-            result.Value.ReplacementDriver.DriverCode.Should().BeNull();
-            result.Value.ReplacementDriver.AvatarUrl.Should().BeNull();
-            result.Value.ReplacementDriver.PhoneNumber.Should().BeNull();
-            result.Value.ReplacementDriver.VehicleInfo.Should().BeNull();
-            result.Value.ReplacementDriver.Vehicle.Should().BeNull();
-        }
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("HANDOVER_TRIP_NOT_FOUND");
     }
 
     [Fact]
@@ -2657,7 +2672,8 @@ public class DispatcherDashboardTests
             FullNameEn = "Fahad Al-Dosari",
             NationalId = "290010101235",
             LicenseNumber = "DR-1012",
-            IsAvailable = true
+            IsAvailable = true,
+            VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(cand1);
 
@@ -2670,23 +2686,34 @@ public class DispatcherDashboardTests
             FullNameEn = "Jassim Al-Mutairi",
             NationalId = "290010101236",
             LicenseNumber = "DR-1038",
-            IsAvailable = true
+            IsAvailable = true,
+            VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(cand2);
 
         var trip1 = new Trip { RestaurantId = restaurant.Id, Code = "T-C1", Status = TripStatus.InProgress, PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
-        trip1.Stops.Add(new TripStop { TripId = trip1.Id, OrderCode = "BX-S1", CustomerMaskedId = "C1", ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "12:00", Status = TripStopStatus.Pending });
+        var sourceStop = new TripStop { TripId = trip1.Id, OrderCode = "BX-S1", CustomerMaskedId = "C1", ZoneNameAr = "السالمية", ZoneNameEn = "Salmiya", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "12:00", Status = TripStopStatus.PickedUp };
+        trip1.Stops.Add(sourceStop);
         db.Trips.Add(trip1);
-        db.DriverAssignments.Add(new DriverAssignment { TripId = trip1.Id, DriverProfileId = cand1.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow });
+        db.DriverAssignments.Add(new DriverAssignment { TripId = trip1.Id, DriverProfileId = currentDriver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow });
+        db.DriverWorkSessions.AddRange(
+            new DriverWorkSession { DriverProfileId = cand1.Id, RestaurantId = restaurant.Id, StartedAtUtc = DateTime.UtcNow.AddHours(-1), Status = "Active" },
+            new DriverWorkSession { DriverProfileId = cand2.Id, RestaurantId = restaurant.Id, StartedAtUtc = DateTime.UtcNow.AddHours(-1), Status = "Active" });
+        db.DeliveryTrackingPoints.AddRange(
+            new DeliveryTrackingPoint { DriverProfileId = cand1.Id, Latitude = 29.301m, Longitude = 47.901m, RecordedAtUtc = DateTime.UtcNow },
+            new DeliveryTrackingPoint { DriverProfileId = cand2.Id, Latitude = 29.5m, Longitude = 48.2m, RecordedAtUtc = DateTime.UtcNow });
 
         var complaint = new Complaint
         {
             RestaurantId = restaurant.Id,
             DriverProfileId = currentDriver.Id,
+            OrderId = sourceStop.Id,
             CustomerUserId = Guid.NewGuid(),
             Title = "تعطل المركبة",
             Description = "المركبة معطلة في السالمية",
             Category = "VehicleBreakdown",
+            Latitude = 29.3m,
+            Longitude = 47.9m,
             Status = ComplaintStatus.Submitted
         };
         db.Complaints.Add(complaint);
@@ -2694,7 +2721,7 @@ public class DispatcherDashboardTests
         await db.SaveChangesAsync();
 
         var messages = new ArabicTestMessageProvider();
-        var handler = new GetDispatcherReplacementCandidatesQueryHandler(db, messages);
+        var handler = new GetDispatcherReplacementCandidatesQueryHandler(db, messages, AdminUser());
 
         // Act
         var result = await handler.Handle(new GetDispatcherReplacementCandidatesQuery(complaint.Id), CancellationToken.None);
@@ -2747,7 +2774,8 @@ public class DispatcherDashboardTests
             VehicleModel = "هيونداي النترا",
             VehicleColor = "أبيض",
             VehiclePlate = "12-34567",
-            IsAvailable = true
+            IsAvailable = true,
+            VerificationStatus = VerificationStatus.Approved
         };
         db.DriverProfiles.Add(newDriver);
 
@@ -2770,7 +2798,8 @@ public class DispatcherDashboardTests
             MealSummaryAr = "وجبتين",
             MealSummaryEn = "2 Meals",
             SlotLabel = "12:30",
-            Status = TripStopStatus.Pending
+            Status = TripStopStatus.Failed,
+            FailureReason = "VehicleBreakdown"
         };
         db.TripStops.Add(stop);
         trip.Stops.Add(stop);
@@ -2784,6 +2813,16 @@ public class DispatcherDashboardTests
         };
         db.DriverAssignments.Add(oldAssignment);
         trip.DriverAssignments.Add(oldAssignment);
+        db.DriverWorkSessions.Add(new DriverWorkSession
+        {
+            DriverProfileId = newDriver.Id, RestaurantId = restaurant.Id,
+            StartedAtUtc = DateTime.UtcNow.AddHours(-1), Status = "Active"
+        });
+        db.OrderHandovers.Add(new MealMate.Domain.RestaurantOperations.OrderHandover
+        {
+            DailyOrderId = Guid.NewGuid(), TripId = trip.Id, TripStopId = stop.Id,
+            DriverProfileId = oldDriver.Id, HandedOverAtUtc = DateTime.UtcNow.AddHours(-1), Status = "Completed"
+        });
 
         var complaint = new Complaint
         {
@@ -2791,6 +2830,8 @@ public class DispatcherDashboardTests
             DriverProfileId = oldDriver.Id,
             CustomerUserId = Guid.NewGuid(),
             OrderId = stop.Id,
+            Latitude = 29.3m,
+            Longitude = 47.9m,
             Title = "تعطل المركبة",
             Description = "عطل مفاجئ",
             Category = "DeliveryIssue",
@@ -2803,7 +2844,8 @@ public class DispatcherDashboardTests
         var auditLogger = Substitute.For<IAuditLogger>();
         var messages = new ArabicTestMessageProvider();
 
-        var handler = new ReassignReplacementDriverCommandHandler(db, messages, auditLogger);
+        var handler = new ReassignReplacementDriverCommandHandler(db, messages, auditLogger, AdminUser(), TestClock(),
+            DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var command = new ReassignReplacementDriverCommand(
@@ -2819,22 +2861,23 @@ public class DispatcherDashboardTests
         result.Value.PreviousDriverId.Should().Be(oldDriver.Id);
         result.Value.ReplacementDriverId.Should().Be(newDriver.Id);
         result.Value.DriverName.Should().Be("فهد الدوسري");
-        result.Value.IssueStatus.Should().Be("InProgress");
+        result.Value.IssueStatus.Should().Be("Assigned");
         result.Value.Message.Should().NotBeNullOrWhiteSpace();
         result.Value.ReplacementDriver.Should().NotBeNull();
         result.Value.ReplacementDriver.FullName.Should().Be("فهد الدوسري");
-        result.Value.ReplacementDriver.Status.Should().Be("OnTask");
+        result.Value.ReplacementDriver.Status.Should().Be("Available");
         result.Value.ReplacementDriver.VehicleInfo.Should().Contain("هيونداي النترا");
         result.Value.ReplacementDriver.Vehicle.Should().NotBeNull();
         result.Value.ReplacementDriver.Vehicle!.Model.Should().Be("هيونداي النترا");
 
         var updatedComplaint = await db.Complaints.FindAsync(complaint.Id);
-        updatedComplaint!.DriverProfileId.Should().Be(newDriver.Id);
+        updatedComplaint!.DriverProfileId.Should().Be(oldDriver.Id);
         updatedComplaint.Status.Should().Be(ComplaintStatus.UnderReview);
 
         var newAssignment = await db.DriverAssignments.FirstOrDefaultAsync(a => a.DriverProfileId == newDriver.Id && a.TripId == trip.Id);
-        newAssignment.Should().NotBeNull();
-        newAssignment!.Status.Should().Be("Active");
+        newAssignment.Should().BeNull("driver assignment and box custody change only after receipt completion");
+        (await db.DriverAssignments.SingleAsync(a => a.DriverProfileId == oldDriver.Id && a.TripId == trip.Id)).Status.Should().Be("Active");
+        stop.Status.Should().Be(TripStopStatus.Failed);
         (await db.DriverProfiles.AsNoTracking().SingleAsync(d => d.Id == oldDriver.Id)).IsAvailable.Should().BeTrue("reassigning an order must not change the supervisor-managed availability");
 
         await auditLogger.Received(1).LogAsync(
@@ -2883,7 +2926,7 @@ public class DispatcherDashboardTests
         await db.SaveChangesAsync();
 
         var messages = new ArabicTestMessageProvider();
-        var handler = new GetDispatcherReplacementCandidatesQueryHandler(db, messages);
+        var handler = new GetDispatcherReplacementCandidatesQueryHandler(db, messages, AdminUser());
 
         // Act
         var result = await handler.Handle(new GetDispatcherReplacementCandidatesQuery(complaint.Id, PageNumber: 1, PageSize: 20), CancellationToken.None);
@@ -2939,11 +2982,19 @@ public class DispatcherDashboardTests
         };
         db.DriverProfiles.Add(busyDriver);
 
+        var sourceTrip = new Trip { RestaurantId = restaurant.Id, Code = "T-UNAVAILABLE", Status = TripStatus.InProgress, PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        var sourceStop = new TripStop { TripId = sourceTrip.Id, OrderCode = "BX-UNAVAILABLE", CustomerMaskedId = "C1", ZoneNameAr = "منطقة", ZoneNameEn = "Area", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "AM", Status = TripStopStatus.PickedUp };
+        db.Trips.Add(sourceTrip); db.TripStops.Add(sourceStop);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = sourceTrip.Id, DriverProfileId = oldDriver.Id, Status = "Active" });
+
         var complaint = new Complaint
         {
             RestaurantId = restaurant.Id,
             DriverProfileId = oldDriver.Id,
             CustomerUserId = Guid.NewGuid(),
+            OrderId = sourceStop.Id,
+            Latitude = 29.3m,
+            Longitude = 47.9m,
             Title = "تعطل المركبة",
             Description = "عطل مفاجئ",
             Category = "DeliveryIssue",
@@ -2954,7 +3005,8 @@ public class DispatcherDashboardTests
 
         var auditLogger = Substitute.For<IAuditLogger>();
         var messages = new ArabicTestMessageProvider();
-        var handler = new ReassignReplacementDriverCommandHandler(db, messages, auditLogger);
+        var handler = new ReassignReplacementDriverCommandHandler(db, messages, auditLogger, AdminUser(), TestClock(),
+            DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(
@@ -2963,7 +3015,7 @@ public class DispatcherDashboardTests
 
         // Assert
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("REPLACEMENT_DRIVER_NO_LONGER_AVAILABLE");
+        result.Error.Code.Should().Be("REPLACEMENT_DRIVER_UNAVAILABLE");
         result.Error.Type.Should().Be(ErrorType.Conflict);
     }
 
@@ -2994,11 +3046,19 @@ public class DispatcherDashboardTests
         };
         db.DriverProfiles.Add(currentDriver);
 
+        var sourceTrip = new Trip { RestaurantId = restaurant.Id, Code = "T-SAME", Status = TripStatus.InProgress, PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        var sourceStop = new TripStop { TripId = sourceTrip.Id, OrderCode = "BX-SAME", CustomerMaskedId = "C1", ZoneNameAr = "منطقة", ZoneNameEn = "Area", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "AM", Status = TripStopStatus.PickedUp };
+        db.Trips.Add(sourceTrip); db.TripStops.Add(sourceStop);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = sourceTrip.Id, DriverProfileId = currentDriver.Id, Status = "Active" });
+
         var complaint = new Complaint
         {
             RestaurantId = restaurant.Id,
             DriverProfileId = currentDriver.Id,
             CustomerUserId = Guid.NewGuid(),
+            OrderId = sourceStop.Id,
+            Latitude = 29.3m,
+            Longitude = 47.9m,
             Title = "تعطل المركبة",
             Description = "عطل مفاجئ",
             Category = "DeliveryIssue",
@@ -3009,7 +3069,8 @@ public class DispatcherDashboardTests
 
         var auditLogger = Substitute.For<IAuditLogger>();
         var messages = new ArabicTestMessageProvider();
-        var handler = new ReassignReplacementDriverCommandHandler(db, messages, auditLogger);
+        var handler = new ReassignReplacementDriverCommandHandler(db, messages, auditLogger, AdminUser(), TestClock(),
+            DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(
@@ -3052,7 +3113,8 @@ public class DispatcherDashboardTests
         var auditLogger = Substitute.For<IAuditLogger>();
         var messages = new ArabicTestMessageProvider();
 
-        var handler = new ResolveSupportIssueCommandHandler(db, messages, auditLogger);
+        var handler = new ResolveSupportIssueCommandHandler(db, messages, auditLogger, AdminUser(),
+            DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var command = new ResolveSupportIssueCommand(
@@ -3087,7 +3149,7 @@ public class DispatcherDashboardTests
         });
         await db.SaveChangesAsync();
 
-        var queryHandler = new GetDispatcherProblemDetailsQueryHandler(db, messages);
+        var queryHandler = new GetDispatcherProblemDetailsQueryHandler(db, messages, AdminUser());
         var detailsResult = await queryHandler.Handle(new GetDispatcherProblemDetailsQuery(complaint.Id), CancellationToken.None);
         detailsResult.IsSuccess.Should().BeTrue();
         detailsResult.Value.Status.Should().Be("Resolved");
@@ -3125,7 +3187,8 @@ public class DispatcherDashboardTests
 
         var auditLogger = Substitute.For<IAuditLogger>();
         var messages = new ArabicTestMessageProvider();
-        var handler = new ResolveSupportIssueCommandHandler(db, messages, auditLogger);
+        var handler = new ResolveSupportIssueCommandHandler(db, messages, auditLogger, AdminUser(),
+            DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act - empty notes
         var resultEmpty = await handler.Handle(new ResolveSupportIssueCommand(complaint.Id, "   "), CancellationToken.None);
@@ -3168,7 +3231,8 @@ public class DispatcherDashboardTests
 
         var auditLogger = Substitute.For<IAuditLogger>();
         var messages = new ArabicTestMessageProvider();
-        var handler = new ResolveSupportIssueCommandHandler(db, messages, auditLogger);
+        var handler = new ResolveSupportIssueCommandHandler(db, messages, auditLogger, AdminUser(),
+            DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(
@@ -3187,7 +3251,7 @@ public class DispatcherDashboardTests
         // Arrange
         await using var db = CreateDb();
         var messages = new ArabicTestMessageProvider();
-        var currentUser = Substitute.For<ICurrentUser>();
+        var currentUser = AdminUser();
 
         // Act - 1. Run Seeder
         await MealMate.Persistence.Seeding.SupportIssuesSeeder.SeedAsync(db, NullLogger.Instance);
@@ -3236,7 +3300,7 @@ public class DispatcherDashboardTests
 
         // Act - 5. Fetch Problem Details for one of the seeded issues
         var firstIssue = response.Issues.First();
-        var detailsHandler = new GetDispatcherProblemDetailsQueryHandler(db, messages);
+        var detailsHandler = new GetDispatcherProblemDetailsQueryHandler(db, messages, AdminUser());
         var detailsResult = await detailsHandler.Handle(new GetDispatcherProblemDetailsQuery(firstIssue.Id), CancellationToken.None);
 
         // Assert - 6. Problem details are fully populated

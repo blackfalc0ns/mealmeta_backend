@@ -5031,6 +5031,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("DeletedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("DriverSupportHandoverBoxId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("FirstAttemptCallId")
                         .HasColumnType("uuid");
 
@@ -5084,6 +5087,8 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DriverSupportHandoverBoxId");
 
                     b.HasIndex("HeldAtUtc");
 
@@ -5393,6 +5398,219 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("DriverRatings", null, t =>
                         {
                             t.HasCheckConstraint("CK_DriverRatings_Score", "\"Score\" >= 1 AND \"Score\" <= 5");
+                        });
+                });
+
+            modelBuilder.Entity("MealMate.Domain.DriverDelivery.DriverSupportHandover", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("ArrivalLatitude")
+                        .HasPrecision(10, 7)
+                        .HasColumnType("numeric(10,7)");
+
+                    b.Property<decimal?>("ArrivalLongitude")
+                        .HasPrecision(10, 7)
+                        .HasColumnType("numeric(10,7)");
+
+                    b.Property<DateTime?>("ArrivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("AssignedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ComplaintId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RequestedIssueId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("OriginalDriverProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("PickupLatitude")
+                        .HasPrecision(10, 7)
+                        .HasColumnType("numeric(10,7)");
+
+                    b.Property<DateTime?>("PickupLocationRecordedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PickupLocationSource")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<decimal>("PickupLongitude")
+                        .HasPrecision(10, 7)
+                        .HasColumnType("numeric(10,7)");
+
+                    b.Property<Guid>("ReplacementDriverProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReplacementTripId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ComplaintId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DriverSupportHandovers_ActiveComplaint")
+                        .HasFilter("\"Status\" IN ('Assigned','Arrived','Receiving')");
+
+                    b.HasIndex("OriginalDriverProfileId");
+
+                    b.HasIndex("ReplacementDriverProfileId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DriverSupportHandovers_ActiveReplacement")
+                        .HasFilter("\"Status\" IN ('Assigned','Arrived','Receiving')");
+
+                    b.HasIndex("TripId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DriverSupportHandovers_ActiveTrip")
+                        .HasFilter("\"Status\" IN ('Assigned','Arrived','Receiving')");
+
+                    b.HasIndex("ComplaintId", "Status");
+
+                    b.HasIndex("RequestedByUserId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("TripId", "Status");
+
+                    b.ToTable("DriverSupportHandovers", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_DriverSupportHandovers_DifferentDrivers", "\"OriginalDriverProfileId\" <> \"ReplacementDriverProfileId\"");
+
+                            t.HasCheckConstraint("CK_DriverSupportHandovers_Location", "\"PickupLatitude\" BETWEEN -90 AND 90 AND \"PickupLongitude\" BETWEEN -180 AND 180");
+
+                            t.HasCheckConstraint("CK_DriverSupportHandovers_Status", "\"Status\" IN ('Assigned','Arrived','Receiving','Completed','Cancelled')");
+                        });
+                });
+
+            modelBuilder.Entity("MealMate.Domain.DriverDelivery.DriverSupportHandoverBox", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("FollowUpId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FollowUpNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("HandoverId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ManifestCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ScanMethod")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime?>("ScannedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("TripStopId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FollowUpId");
+
+                    b.HasIndex("TripStopId");
+
+                    b.HasIndex("HandoverId", "TripStopId")
+                        .IsUnique();
+
+                    b.ToTable("DriverSupportHandoverBoxes", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_DriverSupportHandoverBoxes_Status", "\"Status\" IN ('Pending','Received','Missing','Damaged')");
                         });
                 });
 
@@ -18756,6 +18974,57 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("Trip");
                 });
 
+            modelBuilder.Entity("MealMate.Domain.DriverDelivery.DriverSupportHandover", b =>
+                {
+                    b.HasOne("MealMate.Domain.ComplaintsSupport.Complaint", null)
+                        .WithMany()
+                        .HasForeignKey("ComplaintId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.IdentityAccess.DriverProfile", null)
+                        .WithMany()
+                        .HasForeignKey("OriginalDriverProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.IdentityAccess.DriverProfile", null)
+                        .WithMany()
+                        .HasForeignKey("ReplacementDriverProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.DriverDelivery.Trip", null)
+                        .WithMany()
+                        .HasForeignKey("TripId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("MealMate.Domain.DriverDelivery.DriverSupportHandoverBox", b =>
+                {
+                    b.HasOne("MealMate.Domain.DriverDelivery.DeliveryHold", "FollowUp")
+                        .WithMany()
+                        .HasForeignKey("FollowUpId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MealMate.Domain.DriverDelivery.DriverSupportHandover", "Handover")
+                        .WithMany("Boxes")
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.DriverDelivery.TripStop", null)
+                        .WithMany()
+                        .HasForeignKey("TripStopId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("FollowUp");
+
+                    b.Navigation("Handover");
+                });
+
             modelBuilder.Entity("MealMate.Domain.DriverDelivery.PickupScan", b =>
                 {
                     b.HasOne("MealMate.Domain.DriverDelivery.Trip", "Trip")
@@ -20884,6 +21153,11 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("FeeRecords");
 
                     b.Navigation("RefundCalculations");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.DriverDelivery.DriverSupportHandover", b =>
+                {
+                    b.Navigation("Boxes");
                 });
 
             modelBuilder.Entity("MealMate.Domain.DriverDelivery.Trip", b =>

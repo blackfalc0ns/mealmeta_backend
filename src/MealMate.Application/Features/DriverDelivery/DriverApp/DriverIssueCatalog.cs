@@ -24,6 +24,7 @@ public static class DriverIssueCatalog
         new("CustomerRefusal", "العميل رفض الاستلام", "Customer refused to receive"),
         new("VehicleBreakdown", "عطل بالمركبة", "Vehicle breakdown"),
         new("TrafficAccident", "حادث سير / طارئ", "Traffic accident / emergency"),
+        new("RoadIssue", "مشكلة في الطريق", "Road issue"),
         new("SevereWeather", "سوء الأحوال الجوية", "Severe weather"),
         new("Other", "مشكلة أخرى", "Other issue"),
     ];

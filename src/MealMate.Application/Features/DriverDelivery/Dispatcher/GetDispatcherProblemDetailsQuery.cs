@@ -16,13 +16,16 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
 {
     private readonly IAppDbContext _db;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly ICurrentUser _currentUser;
 
     public GetDispatcherProblemDetailsQueryHandler(
         IAppDbContext db,
-        ILocalizedMessageProvider messages)
+        ILocalizedMessageProvider messages,
+        ICurrentUser currentUser)
     {
         _db = db;
         _messages = messages;
+        _currentUser = currentUser;
     }
 
     public async Task<Result<SupportProblemDetailsDto>> Handle(
@@ -30,6 +33,12 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         CancellationToken cancellationToken)
     {
         var isAr = _messages.IsArabic();
+        if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue
+            || _currentUser.UserType is not (UserType.DeliveryManager or UserType.Admin)
+            || (_currentUser.UserType == UserType.DeliveryManager && !_currentUser.RestaurantId.HasValue))
+        {
+            return Error.Forbidden("DISPATCHER_SCOPE_REQUIRED", _messages.GetMessage("dispatcher_support.forbidden", "Dispatcher access is required."));
+        }
 
         // 1. Try finding in Complaints
         var complaint = await _db.Complaints
@@ -37,7 +46,8 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
             .Include(c => c.EvidencePhotos)
             .Include(c => c.Classifications)
             .Include(c => c.AdminReviews)
-            .FirstOrDefaultAsync(c => c.Id == request.IssueId, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == request.IssueId
+                && (_currentUser.UserType == UserType.Admin || c.RestaurantId == _currentUser.RestaurantId), cancellationToken);
 
         TripStop? stop = null;
 
@@ -48,7 +58,8 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
                 .AsNoTracking()
                 .Include(s => s.Trip)
                     .ThenInclude(t => t.DriverAssignments)
-                .FirstOrDefaultAsync(s => s.Id == request.IssueId, cancellationToken);
+                .FirstOrDefaultAsync(s => s.Id == request.IssueId
+                    && (_currentUser.UserType == UserType.Admin || s.Trip.RestaurantId == _currentUser.RestaurantId), cancellationToken);
 
             if (stop is null)
             {
@@ -61,12 +72,18 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         {
             if (complaint.OrderId.HasValue || complaint.SubscriptionDayId.HasValue)
             {
-                var boxId = complaint.OrderId ?? complaint.SubscriptionDayId;
-                stop = await _db.TripStops
+                var matches = await _db.TripStops
                     .AsNoTracking()
                     .Include(s => s.Trip)
                         .ThenInclude(t => t.DriverAssignments)
-                    .FirstOrDefaultAsync(s => s.Id == boxId || s.SubscriptionDayId == boxId || s.DailyOrderId == boxId, cancellationToken);
+                    .Where(s => ((complaint.OrderId.HasValue && s.Id == complaint.OrderId.Value)
+                                 || (complaint.SubscriptionDayId.HasValue && s.SubscriptionDayId == complaint.SubscriptionDayId.Value)
+                                 || (complaint.OrderId.HasValue && s.DailyOrderId == complaint.OrderId.Value))
+                        && (_currentUser.UserType == UserType.Admin || s.Trip.RestaurantId == _currentUser.RestaurantId))
+                    .ToListAsync(cancellationToken);
+                if (matches.Count == 1) stop = matches[0];
+                else if (matches.Count > 1)
+                    return Error.Conflict("DISPATCHER_SUPPORT_STOP_AMBIGUOUS", _messages.GetMessage("dispatcher_support.stop_ambiguous", "The support issue is linked to multiple delivery attempts."));
             }
         }
 
@@ -74,7 +91,7 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         Guid? driverId = complaint?.DriverProfileId;
         if (!driverId.HasValue && stop?.Trip?.DriverAssignments != null)
         {
-            driverId = stop.Trip.DriverAssignments.OrderByDescending(da => da.AssignedAtUtc).FirstOrDefault()?.DriverProfileId;
+            driverId = stop.Trip.DriverAssignments.Where(da => da.Status == "Active" || da.Status == "Assigned").OrderByDescending(da => da.AssignedAtUtc).FirstOrDefault()?.DriverProfileId;
         }
 
         var driver = driverId.HasValue
@@ -175,8 +192,15 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         var category = !string.IsNullOrWhiteSpace(complaint?.Category) ? complaint.Category : "DeliveryIssue";
         var categoryLabel = category switch
         {
+            "AddressIssue" => isAr ? "مشكلة في العنوان" : "Address issue",
+            "SevereDelay" => isAr ? "تأخير شديد" : "Severe delay",
+            "TrafficAccident" => isAr ? "حادث مروري" : "Traffic accident",
+            "RoadIssue" => isAr ? "مشكلة في الطريق" : "Road issue",
             "VehicleBreakdown" => isAr ? "تعطل المركبة" : "Vehicle breakdown",
+            "SevereWeather" => isAr ? "سوء الأحوال الجوية" : "Severe weather",
             "CustomerUnavailable" => isAr ? "العميل غير متاح" : "Customer unavailable",
+            "DamagedBox" => isAr ? "بوكس تالف" : "Damaged box",
+            "CustomerRefusal" => isAr ? "رفض العميل الاستلام" : "Customer refusal",
             _ => isAr ? "مشكلة توصيل" : "Delivery issue"
         };
         var categoryColor = category switch
@@ -190,7 +214,9 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         var description = NonBlank(complaint?.Description)
             ?? _messages.GetMessage("dispatcher_support.data_unavailable", isAr ? "غير متوفر" : "Unavailable");
 
-        var status = complaint != null
+        var stopResolved = complaint is null && stop is not null && await _db.AuditLogs.AsNoTracking()
+            .AnyAsync(a => a.EntityId == stop.Id && a.Action == "SupportIssueResolved", cancellationToken);
+        var status = stopResolved ? "Resolved" : complaint != null
             ? (complaint.Status switch
             {
                 ComplaintStatus.Resolved or ComplaintStatus.Closed => "Resolved",
@@ -245,7 +271,9 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
             var resNotes = NonBlank(auditLog?.Reason) ?? unavailableText;
             var resolvedTime = auditLog?.OccurredAtUtc ?? complaint?.ModifiedAtUtc ?? stop?.ModifiedAtUtc ?? default;
             var resolvedById = auditLog?.ActorUserId;
-            string? resolvedByName = null;
+            var resolvedByName = resolvedById.HasValue
+                ? await _db.GetUserDisplayNameAsync(resolvedById.Value, cancellationToken)
+                : null;
 
             resolution = new SupportProblemResolutionDto(
                 Notes: resNotes,

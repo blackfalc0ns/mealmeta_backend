@@ -1158,6 +1158,16 @@ public sealed class FamilyCheckoutPaymentConcurrencyTests : IAsyncLifetime
             => inner.LockCampaignPaymentKeyAsync(customerId, key, cancellationToken);
         public Task LockCampaignCheckoutSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
             => inner.LockCampaignCheckoutSessionAsync(sessionId, cancellationToken);
+        public Task LockTripAsync(Guid tripId, CancellationToken cancellationToken = default)
+            => inner.LockTripAsync(tripId, cancellationToken);
+        public Task LockSupportHandoverAsync(Guid handoverId, CancellationToken cancellationToken = default)
+            => inner.LockSupportHandoverAsync(handoverId, cancellationToken);
+        public Task LockDriverAsync(Guid driverProfileId, CancellationToken cancellationToken = default)
+            => inner.LockDriverAsync(driverProfileId, cancellationToken);
+        public Task LockSupportHandoverKeyAsync(Guid userId, string idempotencyKey, CancellationToken cancellationToken = default)
+            => inner.LockSupportHandoverKeyAsync(userId, idempotencyKey, cancellationToken);
+        public Task LockSupportComplaintAsync(Guid complaintId, CancellationToken cancellationToken = default)
+            => inner.LockSupportComplaintAsync(complaintId, cancellationToken);
         public Task LockPickupBoxAsync(Guid subscriptionDayId, CancellationToken cancellationToken = default)
             => inner.LockPickupBoxAsync(subscriptionDayId, cancellationToken);
         public Task LockRestaurantCapacityAsync(Guid restaurantId, DateOnly serviceDate, CancellationToken cancellationToken = default)

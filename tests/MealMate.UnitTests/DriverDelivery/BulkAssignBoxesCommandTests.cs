@@ -62,7 +62,7 @@ public class BulkAssignBoxesCommandTests
         await using var db = CreateDb();
         var messages = NullLocalizedMessageProvider.Instance;
         var pushNotifier = Substitute.For<IDriverPushNotifier>();
-        var handler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier);
+        var handler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var result = await handler.Handle(
             new BulkAssignBoxesCommand([Guid.NewGuid()], Guid.NewGuid()),
@@ -127,7 +127,7 @@ public class BulkAssignBoxesCommandTests
 
         var messages = NullLocalizedMessageProvider.Instance;
         var pushNotifier = Substitute.For<IDriverPushNotifier>();
-        var handler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier);
+        var handler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(
@@ -226,7 +226,7 @@ public class BulkAssignBoxesCommandTests
 
         var messages = NullLocalizedMessageProvider.Instance;
         var pushNotifier = Substitute.For<IDriverPushNotifier>();
-        var handler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier);
+        var handler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act: Assign 2 stops (total 6 boxes) to motorcycle (max 5)
         var result = await handler.Handle(

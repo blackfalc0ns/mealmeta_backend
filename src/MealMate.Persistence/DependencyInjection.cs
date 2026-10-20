@@ -54,6 +54,10 @@ public static class DependencyInjection
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
         services.AddScoped<ICustomerDeliveryChangeTransport>(_ =>
             new CustomerTracking.PostgresCustomerDeliveryChangeTransport(connectionString));
+        services.AddScoped<IDriverSupportHandoverNotifier>(_ =>
+            new DriverDelivery.PostgresDriverSupportHandoverTransport(connectionString));
+        services.AddScoped<IDriverSupportIssueNotifier>(_ =>
+            new DriverDelivery.PostgresDriverSupportIssueTransport(connectionString));
         services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallParticipantLockService, VoiceCalls.PostgresVoiceCallParticipantLockService>();
         services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallRecoveryCoordinator, VoiceCalls.PostgresVoiceCallRecoveryCoordinator>();
 

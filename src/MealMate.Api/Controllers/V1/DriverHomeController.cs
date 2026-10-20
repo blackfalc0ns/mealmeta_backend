@@ -271,26 +271,6 @@ public sealed class DriverHomeController : ApiControllerBase
             return HandleResult(result);
         }
 
-        try
-        {
-            var issuePayload = new
-            {
-                issueId = result.Value,
-                boxId,
-                driverId,
-                issueType = request.IssueType,
-                description = request.Description,
-                severity = request.Severity,
-                reportedAtUtc = DateTime.UtcNow
-            };
-
-            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, issuePayload, cancellationToken);
-        }
-        catch
-        {
-            // Non-fatal broadcast
-        }
-
         return HandleResult(result);
     }
 
@@ -368,24 +348,6 @@ public sealed class DriverHomeController : ApiControllerBase
         if (!result.IsSuccess)
         {
             return HandleResult(result);
-        }
-
-        try
-        {
-            var payload = new
-            {
-                boxId,
-                driverId,
-                delayMinutes = request.DelayMinutes,
-                reason = request.Reason,
-                reportedAtUtc = DateTime.UtcNow
-            };
-
-            await _dispatcherHub.Clients.All.SendAsync("delivery-delay-reported", payload, cancellationToken);
-        }
-        catch
-        {
-            // Non-fatal broadcast
         }
 
         return HandleResult(result);
@@ -509,27 +471,6 @@ public sealed class DriverHomeController : ApiControllerBase
         if (!result.IsSuccess)
         {
             return HandleResult(result);
-        }
-
-        try
-        {
-            var payload = new
-            {
-                requestId = result.Value.RequestId,
-                boxId,
-                driverId,
-                reason = request.Reason,
-                notes = request.Notes,
-                status = "ReassignmentRequested",
-                requestedAtUtc = DateTime.UtcNow
-            };
-
-            await _dispatcherHub.Clients.All.SendAsync(DispatcherHub.EventDriverIssueUpdated, payload, cancellationToken);
-            await _dispatcherHub.Clients.All.SendAsync("driver-requested-reassignment", payload, cancellationToken);
-        }
-        catch
-        {
-            // Non-fatal broadcast
         }
 
         return HandleResult(result);

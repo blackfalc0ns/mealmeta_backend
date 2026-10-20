@@ -113,7 +113,7 @@ public sealed record SupportProblemDetailsDto(
     string Title,
     string Category,
     string CategoryLabel,
-    string CategoryColor,
+    string? CategoryColor,
     DateTime CreatedAtUtc,
     string ReportedTimeText,
     SupportProblemMetadataDto Metadata,
@@ -132,46 +132,46 @@ public sealed record SupportIssueSummaryBannerDto(
     string Category,
     string CategoryLabel,
     string CategoryColor,
-    DateTime CreatedAtUtc,
+    DateTime? CreatedAtUtc,
     string ReportedTimeText,
-    string BoxCode,
-    string Area,
-    int AffectedBoxesCount,
+    string? BoxCode,
+    string? Area,
+    int? AffectedBoxesCount,
     string AffectedBoxesText,
-    string Priority,
+    string? Priority,
     string PriorityText,
-    string PriorityColor,
+    string? PriorityColor,
     string Status);
 
 public sealed record CurrentDriverUnavailableDto(
-    Guid DriverId,
-    string DriverCode,
-    string FullName,
+    Guid? DriverId,
+    string? DriverCode,
+    string? FullName,
     string? AvatarUrl,
     string Status,
     string StatusText,
     string StatusColor,
-    string UnavailabilityReason,
-    string UnavailabilityReasonText);
+    string? UnavailabilityReason,
+    string? UnavailabilityReasonText);
 
 public sealed record ReplacementDriverCandidateDto(
     Guid DriverId,
-    string DriverCode,
-    string FullName,
+    string? DriverCode,
+    string? FullName,
     string? AvatarUrl,
     string Status,
     string StatusText,
     string StatusColor,
-    decimal Rating,
+    decimal? Rating,
     int ActiveOrdersCount,
-    string Area,
-    bool IsSameArea,
-    decimal DistanceKm,
-    string DistanceText,
-    int EstimatedArrivalMinutes,
-    string EstimatedArrivalText,
-    string VehicleInfo,
-    DateTime LastLocationUpdatedAtUtc,
+    string? Area,
+    bool? IsSameArea,
+    decimal? DistanceKm,
+    string? DistanceText,
+    int? EstimatedArrivalMinutes,
+    string? EstimatedArrivalText,
+    string? VehicleInfo,
+    DateTime? LastLocationUpdatedAtUtc,
     int RecommendationRank);
 
 public sealed record CandidatePaginationDto(
@@ -185,7 +185,7 @@ public sealed record CandidatePaginationDto(
 public sealed record DispatcherReplacementCandidatesResponseDto(
     SupportIssueSummaryBannerDto Summary,
     SupportIssueSummaryBannerDto Issue,
-    CurrentDriverUnavailableDto CurrentDriver,
+    CurrentDriverUnavailableDto? CurrentDriver,
     IReadOnlyList<ReplacementDriverCandidateDto> Candidates,
     CandidatePaginationDto Pagination);
 
@@ -203,7 +203,9 @@ public sealed record ReassignReplacementDriverResponseDto(
     string Message,
     Guid ReplacementDriverId,
     string? ReplacementDriverCode,
-    string? DriverName);
+    string? DriverName,
+    Guid? HandoverId = null,
+    string? HandoverStatus = null);
 
 public sealed record ResolveSupportIssueRequest(
     string? ResolutionNotes = null);

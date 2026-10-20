@@ -25,6 +25,7 @@ public class EndToEndSubscriptionToDeliveryFlowTests
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(DriverDeliveryTestConcurrency.ActiveDriverAccounts())
             .Options;
         return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
     }
@@ -130,7 +131,7 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         // =========================================================================
         var messages = NullLocalizedMessageProvider.Instance;
         var pushNotifier = Substitute.For<IDriverPushNotifier>();
-        var assignHandler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier);
+        var assignHandler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var assignResult = await assignHandler.Handle(
             new AssignBoxToDriverCommand(subDay.Id, driver.Id, "إسناد أولوية الوردية الصباحية"),
@@ -154,8 +155,11 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         // Step 5: Driver App - Pickup Scan at Restaurant Kitchen (PickupBoxCommand)
         // =========================================================================
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driverUserId);
-        var deliveryHandler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        currentUser.UserType.Returns(UserType.Driver);
+        var deliveryHandler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages,
+            transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Validation: Manual entry without photo MUST FAIL
         var invalidManualPickup = await deliveryHandler.Handle(new PickupBoxCommand(
@@ -357,7 +361,7 @@ public class EndToEndSubscriptionToDeliveryFlowTests
 
         var messages = NullLocalizedMessageProvider.Instance;
         var pushNotifier = Substitute.For<IDriverPushNotifier>();
-        var bulkAssignHandler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier);
+        var bulkAssignHandler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // 1. Bulk Assign all 3 boxes to driver
         var bulkResult = await bulkAssignHandler.Handle(
@@ -370,7 +374,9 @@ public class EndToEndSubscriptionToDeliveryFlowTests
 
         // 2. Query Driver Pickup Point & Manifest
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driverUserId);
+        currentUser.UserType.Returns(UserType.Driver);
         var pickupQueryHandler = new DriverPickupQueryHandlers(db, currentUser, messages);
 
         var pickupPointResult = await pickupQueryHandler.Handle(
@@ -393,7 +399,7 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         manifestResult.Value.AllBoxesScanned.Should().BeFalse();
 
         // 2.1 Kitchen Arrival and Barcode Scanning (OrderCode & Raw Guid)
-        var pickupCommandHandler = new DriverPickupCommandHandlers(db, currentUser, messages);
+        var pickupCommandHandler = new DriverPickupCommandHandlers(db, currentUser, messages, DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
         var arriveResult = await pickupCommandHandler.Handle(new ArriveAtKitchenCommand(driver.Id, 29.3375, 47.9780), CancellationToken.None);
         arriveResult.IsSuccess.Should().BeTrue();
 
@@ -413,7 +419,8 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         valUnknown.Error.Code.Should().Be("Orders.InvalidBarcode");
 
         // 3. Driver picks up Box 1
-        var deliveryHandler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var deliveryHandler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages,
+            transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var pickupBox1 = await deliveryHandler.Handle(new PickupBoxCommand(
             BoxId: box1StopId,
@@ -557,12 +564,24 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         };
         db.DriverAssignments.Add(assignmentA);
         trip.DriverAssignments.Add(assignmentA);
+        db.DriverWorkSessions.Add(new DriverWorkSession
+        {
+            DriverProfileId = driverB.Id, RestaurantId = restaurant.Id,
+            StartedAtUtc = DateTime.UtcNow.AddHours(-1), Status = "Active"
+        });
+        db.DeliveryTrackingPoints.Add(new DeliveryTrackingPoint
+        {
+            TripId = trip.Id, DriverProfileId = driverA.Id, Latitude = 29.3m, Longitude = 47.9m, RecordedAtUtc = DateTime.UtcNow
+        });
         await db.SaveChangesAsync();
 
         var messages = NullLocalizedMessageProvider.Instance;
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driverA.UserId);
-        var deliveryHandler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        currentUser.UserType.Returns(UserType.Driver);
+        var deliveryHandler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages,
+            transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // 1. Driver A's car breaks down and Driver A requests reassignment
         var reassignRequest = await deliveryHandler.Handle(new RequestReassignmentCommand(
@@ -575,14 +594,19 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         reassignRequest.Value.RequestId.Should().NotBeEmpty();
 
         var updatedStop = await db.TripStops.FindAsync(stop.Id);
-        updatedStop!.Status.Should().Be(TripStopStatus.Pending, "Stop goes back to Pending for dispatcher re-routing");
+        updatedStop!.Status.Should().Be(TripStopStatus.PickedUp, "the original driver retains custody until the replacement records receipt");
 
         var updatedAssignmentA = await db.DriverAssignments.FindAsync(assignmentA.Id);
-        updatedAssignmentA!.Status.Should().Be("Reassigned");
+        updatedAssignmentA!.Status.Should().Be("Active");
 
         // 2. Dispatcher reassigns to Driver B
         var audit = Substitute.For<IAuditLogger>();
-        var reassignHandler = new ReassignReplacementDriverCommandHandler(db, messages, audit);
+        var dispatcher = Substitute.For<ICurrentUser>();
+        dispatcher.IsAuthenticated.Returns(true); dispatcher.UserId.Returns(Guid.NewGuid());
+        dispatcher.UserType.Returns(UserType.DeliveryManager); dispatcher.RestaurantId.Returns(restaurant.Id);
+        var clock = Substitute.For<IDateTimeProvider>(); clock.UtcNow.Returns(DateTime.UtcNow);
+        var reassignHandler = new ReassignReplacementDriverCommandHandler(db, messages, audit, dispatcher, clock,
+            DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         var reassignResult = await reassignHandler.Handle(new ReassignReplacementDriverCommand(
             IssueId: reassignRequest.Value.RequestId,
@@ -592,13 +616,26 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         reassignResult.IsSuccess.Should().BeTrue();
         reassignResult.Value.ReplacementDriverId.Should().Be(driverB.Id);
         reassignResult.Value.ReplacementDriver.FullName.Should().Be("Bader Replacement Driver");
+        reassignResult.Value.IssueStatus.Should().Be("Assigned");
+        reassignResult.Value.HandoverId.Should().NotBeNull();
 
         var driverAPost = await db.DriverProfiles.FindAsync(driverA.Id);
         driverAPost!.IsAvailable.Should().BeTrue("replacement must preserve supervisor-managed availability; marking a driver unavailable requires an explicit status command");
 
-        var activeAssignmentB = await db.DriverAssignments.FirstOrDefaultAsync(a => a.TripId == trip.Id && a.DriverProfileId == driverB.Id);
-        activeAssignmentB.Should().NotBeNull();
-        activeAssignmentB!.Status.Should().Be("Active");
+        (await db.DriverAssignments.AnyAsync(a => a.TripId == trip.Id && a.DriverProfileId == driverB.Id && a.Status == "Active")).Should().BeFalse();
+        var replacementUser = Substitute.For<ICurrentUser>();
+        replacementUser.IsAuthenticated.Returns(true); replacementUser.UserId.Returns(driverB.UserId); replacementUser.UserType.Returns(UserType.Driver);
+        var handoverClock = Substitute.For<IDateTimeProvider>(); handoverClock.UtcNow.Returns(DateTime.UtcNow);
+        var handoverHandler = new DriverSupportHandoverHandlers(db, replacementUser, messages, handoverClock,
+            DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
+        var handoverId = reassignResult.Value.HandoverId!.Value;
+        (await handoverHandler.Handle(new ArriveDriverSupportHandoverCommand(handoverId, 29.3m, 47.9m), CancellationToken.None)).IsSuccess.Should().BeTrue();
+        (await handoverHandler.Handle(new ScanDriverSupportHandoverBoxCommand(handoverId, stop.OrderCode!, "Received", ScanMethod: "ManualCode"), CancellationToken.None)).IsSuccess.Should().BeTrue();
+        var completedHandover = await handoverHandler.Handle(new CompleteDriverSupportHandoverCommand(handoverId), CancellationToken.None);
+        completedHandover.IsSuccess.Should().BeTrue("because the box's exact manifest code was accepted");
+        completedHandover.Value.ReplacementTripId.Should().NotBeNull();
+        var activeAssignmentB = await db.DriverAssignments.FirstOrDefaultAsync(a => a.TripId == completedHandover.Value.ReplacementTripId && a.DriverProfileId == driverB.Id);
+        activeAssignmentB.Should().NotBeNull(); activeAssignmentB!.Status.Should().Be("Active");
     }
 
     [Fact]
@@ -659,12 +696,16 @@ public class EndToEndSubscriptionToDeliveryFlowTests
             Status = TripStopStatus.PickedUp
         };
         db.TripStops.Add(stop);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = trip.Id, DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = DateTime.UtcNow.AddHours(-1) });
         await db.SaveChangesAsync();
 
         var messages = NullLocalizedMessageProvider.Instance;
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driverUserId);
-        var deliveryHandler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        currentUser.UserType.Returns(UserType.Driver);
+        var deliveryHandler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages,
+            transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // 1. Delivery Fails: Customer unreachable
         var failResult = await deliveryHandler.Handle(new FailDeliveryCommand(
@@ -772,7 +813,7 @@ public class EndToEndSubscriptionToDeliveryFlowTests
 
         var messages = NullLocalizedMessageProvider.Instance;
         var pushNotifier = Substitute.For<IDriverPushNotifier>();
-        var handler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier);
+        var handler = new BulkAssignBoxesCommandHandler(db, messages, pushNotifier, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Test 1: Capacity Limit Violation (6 boxes on motorcycle max 5)
         var capacityError = await handler.Handle(

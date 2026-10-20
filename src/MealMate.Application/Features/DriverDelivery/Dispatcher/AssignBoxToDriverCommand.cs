@@ -7,6 +7,7 @@ using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
+using MealMate.Application.Features.DriverDelivery.DriverApp;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.DriverDelivery.Dispatcher;
@@ -23,6 +24,7 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
     private readonly IDriverPushNotifier? _driverPushNotifier;
     private readonly ICurrentUser? _currentUser;
     private readonly IApplicationTransactionExecutor? _txExecutor;
+    private readonly IApplicationLockManager? _locks;
     private readonly IUserAccountService? _users;
 
     public AssignBoxToDriverCommandHandler(
@@ -31,17 +33,52 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
         IDriverPushNotifier? driverPushNotifier = null,
         ICurrentUser? currentUser = null,
         IApplicationTransactionExecutor? txExecutor = null,
-        IUserAccountService? users = null)
+        IUserAccountService? users = null,
+        IApplicationLockManager? locks = null)
     {
         _db = db;
         _messages = messages;
         _driverPushNotifier = driverPushNotifier;
         _currentUser = currentUser;
         _txExecutor = txExecutor;
+        _locks = locks;
         _users = users;
     }
 
-    public async Task<Result<AssignBoxResponse>> Handle(
+    public Task<Result<AssignBoxResponse>> Handle(
+        AssignBoxToDriverCommand request,
+        CancellationToken cancellationToken)
+    {
+        if (_txExecutor is null || _locks is null) return Task.FromResult<Result<AssignBoxResponse>>(Error.Conflict("TRIP_LOCK_UNAVAILABLE", _messages.GetMessage("driver_support_handover.transaction_unavailable", "Assignment requires transactional locks.")));
+        return _txExecutor.ExecuteResultAsync(async ct =>
+        {
+            var tripIds = await _db.TripStops.AsNoTracking().Where(s => s.Id == request.BoxId || s.SubscriptionDayId == request.BoxId)
+                .Select(s => s.TripId).Distinct().OrderBy(id => id).ToListAsync(ct);
+            var targetTripIds = await _db.DriverAssignments.AsNoTracking()
+                .Where(x => x.DriverProfileId == request.DriverId && (x.Status == "Active" || x.Status == "Assigned"))
+                .Select(x => x.TripId).Distinct().ToListAsync(ct);
+            tripIds = tripIds.Concat(targetTripIds).Distinct().OrderBy(id => id).ToList();
+            foreach (var tripId in tripIds) await _locks.LockTripAsync(tripId, ct);
+            await _locks.LockDriverAsync(request.DriverId, ct);
+            foreach (var tripId in tripIds)
+            {
+                var status = await _db.Trips.AsNoTracking().Where(x => x.Id == tripId).Select(x => (TripStatus?)x.Status).FirstOrDefaultAsync(ct);
+                if (status is TripStatus.Completed or TripStatus.Cancelled)
+                    return Error.Conflict("TRIP_TERMINAL", _messages.GetMessage("driver_support_handover.trip_terminal", "A terminal trip cannot be reopened by assignment."));
+                if (await DriverSupportHandoverMutationGuard.HasActiveHandoverAsync(_db, tripId, ct))
+                    return Error.Conflict("HANDOVER_PENDING", _messages.GetMessage("driver_support_handover.pending", "Complete or cancel the active handover before changing assignments."));
+            }
+            if (await DriverSupportHandoverMutationGuard.IsReservedReplacementAsync(_db, request.DriverId, ct))
+                return Error.Conflict("REPLACEMENT_DRIVER_RESERVED", _messages.GetMessage("driver_support_handover.replacement_driver_busy", "This driver is reserved for an active support handover."));
+            var stopId = await _db.TripStops.AsNoTracking().Where(s => s.Id == request.BoxId || s.SubscriptionDayId == request.BoxId)
+                .Select(s => (Guid?)s.Id).FirstOrDefaultAsync(ct);
+            if (stopId.HasValue && await DriverSupportHandoverMutationGuard.HasActiveHoldForStopAsync(_db, stopId.Value, ct))
+                return Error.Conflict("DELIVERY_HOLD_ACTIVE", _messages.GetMessage("driver_support_handover.followup_active", "This box has an unresolved support follow-up."));
+            return await HandleCoreAsync(request, ct);
+        }, cancellationToken);
+    }
+
+    private async Task<Result<AssignBoxResponse>> HandleCoreAsync(
         AssignBoxToDriverCommand request,
         CancellationToken cancellationToken)
     {
@@ -89,6 +126,8 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
                     ? "لم يتم العثور على الصندوق أو اليوم المطلوب للإسناد."
                     : "Requested box or subscription day was not found.");
         }
+        if (stop?.Status is TripStopStatus.Delivered or TripStopStatus.ReturnedToKitchen)
+            return Error.Conflict("DELIVERY_STOP_TERMINAL", _messages.GetMessage("driver_support_handover.terminal_stop", "Delivered or returned stops cannot be assigned again; create a new delivery attempt."));
 
         // Vehicle Capacity Check
         var vehicleType = driver.VehicleType?.Trim().ToLowerInvariant() ?? "car";
@@ -330,7 +369,8 @@ public sealed class AssignBoxToDriverCommandHandler : ICommandHandler<AssignBoxT
             var existingStop = await _db.TripStops
                 .Include(s => s.Trip)
                     .ThenInclude(t => t.DriverAssignments)
-                .FirstOrDefaultAsync(s => s.SubscriptionDayId == day.Id && s.Status != TripStopStatus.Delivered && s.Status != TripStopStatus.Failed, cancellationToken);
+                .FirstOrDefaultAsync(s => s.SubscriptionDayId == day.Id && s.Status != TripStopStatus.Delivered
+                    && s.Status != TripStopStatus.ReturnedToKitchen && s.Status != TripStopStatus.Failed, cancellationToken);
 
             if (existingStop is not null)
             {

@@ -26,6 +26,7 @@ public interface IAppDbContext
 
     /// <summary>Stored phone number for a user id, or null when absent/unconfirmed.</summary>
     Task<string?> GetUserPhoneAsync(Guid userId, CancellationToken cancellationToken);
+    Task<string?> GetUserDisplayNameAsync(Guid userId, CancellationToken cancellationToken);
 
     DbSet<Tenant> Tenants { get; }
     DbSet<Country> Countries { get; }
@@ -189,6 +190,8 @@ public interface IAppDbContext
     DbSet<Trip> Trips { get; }
     DbSet<TripStop> TripStops { get; }
     DbSet<DriverAssignment> DriverAssignments { get; }
+    DbSet<DriverSupportHandover> DriverSupportHandovers { get; }
+    DbSet<DriverSupportHandoverBox> DriverSupportHandoverBoxes { get; }
     DbSet<DeliveryTrackingPoint> DeliveryTrackingPoints { get; }
     DbSet<DriverPerformanceStat> DriverPerformanceStats { get; }
     DbSet<DriverRating> DriverRatings { get; }

@@ -31,6 +31,7 @@ public sealed class ConfirmPickupBoxCommandHandler
     private readonly ICurrentUser _currentUser;
     private readonly ILocalizedMessageProvider _messages;
     private readonly IApplicationTransactionExecutor? _transactionExecutor;
+    private readonly IApplicationLockManager? _locks;
     private readonly IOrderLifecycleFailureInjector _failureInjector;
     private readonly IRestaurantDeliveryNotifier? _restaurantNotifier;
 
@@ -40,12 +41,14 @@ public sealed class ConfirmPickupBoxCommandHandler
         ILocalizedMessageProvider messages,
         IApplicationTransactionExecutor? transactionExecutor = null,
         IOrderLifecycleFailureInjector? failureInjector = null,
-        IRestaurantDeliveryNotifier? restaurantNotifier = null)
+        IRestaurantDeliveryNotifier? restaurantNotifier = null,
+        IApplicationLockManager? locks = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
         _transactionExecutor = transactionExecutor;
+        _locks = locks;
         _failureInjector = failureInjector ?? NullOrderLifecycleFailureInjector.Instance;
         _restaurantNotifier = restaurantNotifier;
     }
@@ -69,6 +72,11 @@ public sealed class ConfirmPickupBoxCommandHandler
         {
             return Error.NotFound("DRIVER_NOT_FOUND", _messages.GetMessage("DRIVER_NOT_FOUND", "Driver profile not found."));
         }
+
+        if (_locks is null || _transactionExecutor is null)
+            return Error.Conflict("PICKUP_INFRASTRUCTURE_UNAVAILABLE", _messages.GetMessage("driver_support_handover.transaction_unavailable", "Pickup requires a transaction and application locks."));
+        if (!(await _db.GetActiveAccountUserIdsAsync(new[] { driver.UserId }, cancellationToken)).Contains(driver.UserId))
+            return Error.Forbidden("DRIVER_ACCOUNT_INACTIVE", _messages.GetMessage("driver.account_inactive", "The driver account is not active."));
 
         if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
         {
@@ -95,6 +103,28 @@ public sealed class ConfirmPickupBoxCommandHandler
                 if (cached != null) return Result.Success(cached);
             }
         }
+
+        var requestedTripId = await _db.TripStops.AsNoTracking()
+            .Where(s => s.Id == request.BoxId || s.SubscriptionDayId == request.BoxId)
+            .Select(s => (Guid?)s.TripId).FirstOrDefaultAsync(cancellationToken);
+        if (!requestedTripId.HasValue) return Error.NotFound("BOX_NOT_FOUND", _messages.GetMessage("Orders.NotFound", "Stop record not found."));
+        await _locks.LockTripAsync(requestedTripId.Value, cancellationToken);
+        await _locks.LockDriverAsync(driver.Id, cancellationToken);
+        var currentTripId = await _db.TripStops.AsNoTracking()
+            .Where(s => s.Id == request.BoxId || s.SubscriptionDayId == request.BoxId)
+            .Select(s => (Guid?)s.TripId).FirstOrDefaultAsync(cancellationToken);
+        if (currentTripId != requestedTripId) return Error.Conflict("DELIVERY_CUSTODY_CHANGED", _messages.GetMessage("driver_support_handover.custody_changed", "The box changed trips while this request was waiting. Reload delivery state."));
+        var requestedTripStatus = await _db.Trips.AsNoTracking().Where(x => x.Id == requestedTripId.Value).Select(x => x.Status).FirstOrDefaultAsync(cancellationToken);
+        if (requestedTripStatus is TripStatus.Completed or TripStatus.Cancelled)
+            return Error.Conflict("TRIP_TERMINAL", _messages.GetMessage("driver_support_handover.trip_terminal", "A terminal trip cannot accept pickup mutations."));
+        if (await DriverSupportHandoverMutationGuard.HasActiveHandoverForTripAsync(_db, requestedTripId.Value, cancellationToken))
+            return Error.Conflict("HANDOVER_PENDING", _messages.GetMessage("driver_support_handover.pending", "The active support handover must be completed or cancelled first."));
+        var canonicalStopId = await _db.TripStops.AsNoTracking().Where(x => x.TripId == requestedTripId.Value
+                && (x.Id == request.BoxId || x.SubscriptionDayId == request.BoxId))
+            .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
+        if (!canonicalStopId.HasValue) return Error.NotFound("BOX_NOT_FOUND", _messages.GetMessage("Orders.NotFound", "Stop record not found."));
+        if (await DriverSupportHandoverMutationGuard.HasActiveHoldForStopAsync(_db, canonicalStopId.Value, cancellationToken))
+            return Error.Conflict("DELIVERY_HOLD_ACTIVE", _messages.GetMessage("driver_support_handover.followup_active", "This box has an unresolved support follow-up."));
 
         if (request.Latitude == 0 && request.Longitude == 0)
         {

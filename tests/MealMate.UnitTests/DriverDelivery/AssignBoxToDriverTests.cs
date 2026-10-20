@@ -68,7 +68,7 @@ public class AssignBoxToDriverTests
 
         var messages = NullLocalizedMessageProvider.Instance;
         var pushNotifier = Substitute.For<IDriverPushNotifier>();
-        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier);
+        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new AssignBoxToDriverCommand(stop.Id, driver.Id, "توصيل سريع"), CancellationToken.None);
@@ -135,7 +135,7 @@ public class AssignBoxToDriverTests
 
         var messages = NullLocalizedMessageProvider.Instance;
         var pushNotifier = Substitute.For<IDriverPushNotifier>();
-        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier);
+        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new AssignBoxToDriverCommand(day.Id, driver.Id, "إسناد مباشر"), CancellationToken.None);
@@ -248,7 +248,7 @@ public class AssignBoxToDriverTests
 
         var messages = NullLocalizedMessageProvider.Instance;
         var pushNotifier = Substitute.For<IDriverPushNotifier>();
-        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier, users: users);
+        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier, txExecutor: DriverDeliveryTestConcurrency.Transactions(), users: users, locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new AssignBoxToDriverCommand(day.Id, driver.Id, "إسناد مباشر"), CancellationToken.None);
@@ -348,7 +348,7 @@ public class AssignBoxToDriverTests
 
         var messages = NullLocalizedMessageProvider.Instance;
         var pushNotifier = Substitute.For<IDriverPushNotifier>();
-        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier);
+        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act: Assign newDay (2 boxes) to driver who already has 4 boxes (total 6 > max 5)
         var result = await handler.Handle(new AssignBoxToDriverCommand(newDay.Id, driver.Id), CancellationToken.None);
@@ -407,7 +407,7 @@ public class AssignBoxToDriverTests
 
         var messages = NullLocalizedMessageProvider.Instance;
         var pushNotifier = Substitute.For<IDriverPushNotifier>();
-        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier);
+        var handler = new AssignBoxToDriverCommandHandler(db, messages, pushNotifier, txExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new AssignBoxToDriverCommand(day.Id, driver.Id), CancellationToken.None);

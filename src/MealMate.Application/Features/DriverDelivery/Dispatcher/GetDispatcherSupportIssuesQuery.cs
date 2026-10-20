@@ -44,14 +44,13 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
         var isAr = _messages.IsArabic();
         var nowUtc = DateTime.UtcNow;
 
-        var restaurantId = request.RestaurantId ?? _currentUser.RestaurantId;
-        if (!restaurantId.HasValue || restaurantId.Value == Guid.Empty)
-        {
-            restaurantId = await _db.RestaurantProfiles
-                .AsNoTracking()
-                .Select(r => r.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
+        if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue || _currentUser.UserType is not (UserType.DeliveryManager or UserType.Admin))
+            return Error.Forbidden("DISPATCHER_SCOPE_REQUIRED", _messages.GetMessage("dispatcher_support.forbidden", "Dispatcher access is required."));
+        if (_currentUser.UserType == UserType.DeliveryManager && !_currentUser.RestaurantId.HasValue)
+            return Error.Forbidden("DISPATCHER_SCOPE_REQUIRED", _messages.GetMessage("dispatcher_support.restaurant_scope_required", "A restaurant scope is required."));
+        if (_currentUser.UserType == UserType.DeliveryManager && request.RestaurantId.HasValue && request.RestaurantId != _currentUser.RestaurantId)
+            return Error.Forbidden("DISPATCHER_SCOPE_FORBIDDEN", _messages.GetMessage("dispatcher_support.forbidden", "You cannot access this restaurant."));
+        var restaurantId = _currentUser.UserType == UserType.Admin ? request.RestaurantId : _currentUser.RestaurantId;
 
         // 1. Fetch complaints
         var complaints = await _db.Complaints
@@ -70,8 +69,16 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
             .Where(s => !restaurantId.HasValue || s.Trip.RestaurantId == restaurantId.Value)
             .ToListAsync(cancellationToken);
 
+        var stopIds = allStops.Select(s => s.Id).ToList();
+        var resolvedStopIds = stopIds.Count == 0 ? new HashSet<Guid>() : await _db.AuditLogs.AsNoTracking()
+            .Where(a => a.EntityId.HasValue && stopIds.Contains(a.EntityId.Value) && a.Action == "SupportIssueResolved")
+            .Select(a => a.EntityId!.Value).Distinct().ToHashSetAsync(cancellationToken);
+
         var stopsWithFailures = allStops
-            .Where(s => !string.IsNullOrEmpty(s.FailureReason))
+            .Where(s => (!string.IsNullOrEmpty(s.FailureReason) || resolvedStopIds.Contains(s.Id))
+                && !complaints.Any(c => c.DriverProfileId.HasValue && c.OrderId == (s.DailyOrderId ?? s.Id)
+                    && c.SubscriptionDayId == s.SubscriptionDayId
+                    && c.Category is "AddressIssue" or "SevereDelay" or "RoadIssue" or "VehicleBreakdown" or "TrafficAccident" or "SevereWeather" or "DeliveryIssue" or "DriverReassignmentRequested"))
             .ToList();
 
         var stopById = allStops.ToDictionary(s => s.Id);
@@ -104,6 +111,7 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
 
         // 4. Combine into standard issues list
         var allIssueCards = new List<SupportIssueCardDto>();
+        var areaInfoByIssueId = new Dictionary<Guid, (string Key, string Name)>();
 
         foreach (var c in complaints)
         {
@@ -125,6 +133,8 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
             {
                 stop = s3;
             }
+            if (stop is not null)
+                areaInfoByIssueId[c.Id] = (StableAreaKey(stop.ZoneNameEn, stop.ZoneNameAr), NonBlank(isAr ? stop.ZoneNameAr : stop.ZoneNameEn) ?? NonBlank(stop.ZoneNameEn) ?? NonBlank(stop.ZoneNameAr) ?? string.Empty);
 
             var driver = c.DriverProfileId.HasValue && driverById.TryGetValue(c.DriverProfileId.Value, out var d)
                 ? d
@@ -211,12 +221,14 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
             var areaName = NonBlank(isAr ? stop.ZoneNameAr : stop.ZoneNameEn)
                 ?? NonBlank(isAr ? stop.ZoneNameEn : stop.ZoneNameAr);
             if (string.IsNullOrWhiteSpace(areaName)) areaName = null;
+            if (areaName is not null) areaInfoByIssueId[stop.Id] = (StableAreaKey(stop.ZoneNameEn, stop.ZoneNameAr), areaName);
 
             var (badgeText, badgeColor) = MapCategoryToBadge(stop.FailureReason ?? "", stop.FailureReason ?? "", isAr);
             var timeDiffMinutes = (int)Math.Max(1, (nowUtc - createdAtUtc).TotalMinutes);
             var timeText = isAr ? $"منذ {timeDiffMinutes} دقيقة" : $"{timeDiffMinutes} mins ago";
             var title = stop.FailureReason ?? (isAr ? "مشكلة في تسليم الطلب" : "Delivery stop issue");
-            var statusStr = string.IsNullOrWhiteSpace(stop.FailureReason) ? "Resolved" : (stop.Trip?.Status == TripStatus.InProgress ? "InProgress" : "Open");
+            var statusStr = resolvedStopIds.Contains(stop.Id) ? "Resolved"
+                : string.IsNullOrWhiteSpace(stop.FailureReason) ? "Resolved" : (stop.Trip?.Status == TripStatus.InProgress ? "InProgress" : "Open");
             var statusLabel = MapStatusLabel(statusStr, isAr);
             var categoryColor = badgeColor == "Red" ? "#EF4444" : "#F59E0B";
             var priority = (string?)null;
@@ -321,47 +333,18 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
         // 8. Area Chips (Rule: areaChips NOT affected by selected area)
         var areaChips = new List<SupportAreaChipDto>
         {
-            new(
-                AreaKey: "all",
-                Name: isAr ? "كل المناطق" : "All Areas",
-                Count: dateFilteredList.Count,
-                IsSelected: string.IsNullOrWhiteSpace(request.Area) || request.Area.Equals("all", StringComparison.OrdinalIgnoreCase) || request.Area.Equals("كل المناطق", StringComparison.OrdinalIgnoreCase),
-                AreaName: isAr ? "كل المناطق" : "All Areas",
-                IssueCount: dateFilteredList.Count),
-
-            new(
-                AreaKey: "salmiya",
-                Name: isAr ? "السالمية" : "Salmiya",
-                Count: dateFilteredList.Count(i => AreaMatches(i.Area, "salmiya")),
-                IsSelected: AreaMatches(request.Area ?? "", "salmiya") && !string.IsNullOrWhiteSpace(request.Area) && !request.Area.Equals("all", StringComparison.OrdinalIgnoreCase),
-                AreaName: isAr ? "السالمية" : "Salmiya",
-                IssueCount: dateFilteredList.Count(i => AreaMatches(i.Area, "salmiya"))),
-
-            new(
-                AreaKey: "hawally",
-                Name: isAr ? "حولي" : "Hawally",
-                Count: dateFilteredList.Count(i => AreaMatches(i.Area, "hawally")),
-                IsSelected: AreaMatches(request.Area ?? "", "hawally") && !string.IsNullOrWhiteSpace(request.Area) && !request.Area.Equals("all", StringComparison.OrdinalIgnoreCase),
-                AreaName: isAr ? "حولي" : "Hawally",
-                IssueCount: dateFilteredList.Count(i => AreaMatches(i.Area, "hawally"))),
-
-            new(
-                AreaKey: "farwaniya",
-                Name: isAr ? "الفروانية" : "Farwaniya",
-                Count: dateFilteredList.Count(i => AreaMatches(i.Area, "farwaniya")),
-                IsSelected: AreaMatches(request.Area ?? "", "farwaniya") && !string.IsNullOrWhiteSpace(request.Area) && !request.Area.Equals("all", StringComparison.OrdinalIgnoreCase),
-                AreaName: isAr ? "الفروانية" : "Farwaniya",
-                IssueCount: dateFilteredList.Count(i => AreaMatches(i.Area, "farwaniya"))),
-
-            new(
-                AreaKey: "capital",
-                Name: isAr ? "العاصمة" : "Capital",
-                Count: dateFilteredList.Count(i => AreaMatches(i.Area, "capital")),
-                IsSelected: AreaMatches(request.Area ?? "", "capital") && !string.IsNullOrWhiteSpace(request.Area) && !request.Area.Equals("all", StringComparison.OrdinalIgnoreCase),
-                AreaName: isAr ? "العاصمة" : "Capital",
-                IssueCount: dateFilteredList.Count(i => AreaMatches(i.Area, "capital")))
+            new("all", isAr ? "كل المناطق" : "All Areas", dateFilteredList.Count,
+                string.IsNullOrWhiteSpace(request.Area) || request.Area.Equals("all", StringComparison.OrdinalIgnoreCase) || request.Area.Equals("كل المناطق", StringComparison.OrdinalIgnoreCase),
+                isAr ? "كل المناطق" : "All Areas", dateFilteredList.Count)
         };
-
+        areaChips.AddRange(dateFilteredList.Where(i => areaInfoByIssueId.ContainsKey(i.Id))
+            .GroupBy(i => areaInfoByIssueId[i.Id].Key, StringComparer.OrdinalIgnoreCase).Select(group =>
+            {
+                var name = areaInfoByIssueId[group.First().Id].Name;
+                return new SupportAreaChipDto(AreaKey: group.Key, Name: name, Count: group.Count(),
+                    IsSelected: string.Equals(request.Area, group.Key, StringComparison.OrdinalIgnoreCase),
+                    AreaName: name, IssueCount: group.Count());
+            }));
         // 9. Filter Issues (Rule: issues affected by status, area, search, date)
         var filteredIssues = dateFilteredList.AsEnumerable();
 
@@ -372,7 +355,9 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
 
         if (!string.IsNullOrWhiteSpace(request.Area) && !request.Area.Equals("all", StringComparison.OrdinalIgnoreCase) && !request.Area.Equals("كل المناطق", StringComparison.OrdinalIgnoreCase))
         {
-            filteredIssues = filteredIssues.Where(i => AreaMatches(i.Area, request.Area));
+            filteredIssues = filteredIssues.Where(i => areaInfoByIssueId.TryGetValue(i.Id, out var area)
+                && (string.Equals(area.Key, request.Area, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(area.Name, request.Area, StringComparison.OrdinalIgnoreCase)));
         }
 
         if (!string.IsNullOrWhiteSpace(request.Search))
@@ -485,82 +470,26 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
             _ => null
         };
 
-    private static bool AreaMatches(string? issueArea, string? filterArea)
+    private static string StableAreaKey(string? englishName, string? arabicName)
     {
-        if (string.IsNullOrWhiteSpace(filterArea) || filterArea.Equals("all", StringComparison.OrdinalIgnoreCase) || filterArea.Equals("كل المناطق", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (string.IsNullOrWhiteSpace(issueArea))
-        {
-            return false;
-        }
-
-        if (issueArea.Contains(filterArea, StringComparison.OrdinalIgnoreCase) || filterArea.Contains(issueArea, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var key = NormalizeAreaKey(filterArea);
-        var issueKey = NormalizeAreaKey(issueArea);
-
-        return key == issueKey;
-    }
-
-    private static string NormalizeAreaKey(string area)
-    {
-        var a = area.ToLowerInvariant();
-        if (a.Contains("سالمية") || a.Contains("salmiya") || a.Contains("البدع") || a.Contains("البلاجات")) return "salmiya";
-        if (a.Contains("حولي") || a.Contains("hawally") || a.Contains("الجابرية") || a.Contains("تونس") || a.Contains("بيان") || a.Contains("مشرف")) return "hawally";
-        if (a.Contains("فروانية") || a.Contains("farwaniya") || a.Contains("خيطان") || a.Contains("العارضية") || a.Contains("الرحاب")) return "farwaniya";
-        if (a.Contains("عاصمة") || a.Contains("capital") || a.Contains("شرق") || a.Contains("دسمان") || a.Contains("المرقاب") || a.Contains("القبلة") || a.Contains("مدينة الكويت") || a.Contains("الحمراء") || a.Contains("الراية")) return "capital";
-        return a;
-    }
-
-    private static string ResolveAreaFromText(string text, bool isAr)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return isAr ? "العاصمة" : "Capital";
-        }
-
-        var key = NormalizeAreaKey(text);
-        return key switch
-        {
-            "salmiya" => isAr ? "السالمية" : "Salmiya",
-            "hawally" => isAr ? "حولي" : "Hawally",
-            "farwaniya" => isAr ? "الفروانية" : "Farwaniya",
-            _ => isAr ? "العاصمة" : "Capital"
-        };
+        var source = NonBlank(englishName) ?? NonBlank(arabicName) ?? "";
+        return string.Join('-', source.Trim().ToLowerInvariant().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     }
 
     private static (string text, string color) MapCategoryToBadge(string category, string title, bool isAr)
     {
-        var combined = $"{category} {title}".ToLowerInvariant();
-
-        if (combined.Contains("delay") || combined.Contains("تأخير"))
+        return category switch
         {
-            return (isAr ? "تأخير شديد" : "Severe Delay", "Red");
-        }
-        if (combined.Contains("damaged") || combined.Contains("تالف") || combined.Contains("انكسار"))
-        {
-            return (isAr ? "بوكس تالف" : "Damaged Box", "Orange");
-        }
-        if (combined.Contains("unreachable") || combined.Contains("متاح") || combined.Contains("اتصال"))
-        {
-            return (isAr ? "العميل غير متاح" : "Customer Unreachable", "Orange");
-        }
-        if (combined.Contains("address") || combined.Contains("عنوان"))
-        {
-            return (isAr ? "مشكلة في العنوان" : "Address Issue", "Red");
-        }
-        if (combined.Contains("bike") || combined.Contains("دراجة") || combined.Contains("مركبة") || combined.Contains("breakdown") || combined.Contains("عطل"))
-        {
-            return (isAr ? "تعطل الدراجة" : "Vehicle Breakdown", "Red");
-        }
-
-        return (isAr ? "مشكلة تشغيلية" : "Operational Issue", "Orange");
+            "AddressIssue" => (isAr ? "مشكلة في العنوان" : "Address issue", "Red"),
+            "SevereDelay" => (isAr ? "تأخير شديد" : "Severe delay", "Red"),
+            "TrafficAccident" => (isAr ? "حادث مروري" : "Traffic accident", "Red"),
+            "RoadIssue" => (isAr ? "مشكلة في الطريق" : "Road issue", "Red"),
+            "VehicleBreakdown" => (isAr ? "تعطل المركبة" : "Vehicle breakdown", "Red"),
+            "SevereWeather" => (isAr ? "سوء الأحوال الجوية" : "Severe weather", "Orange"),
+            "CustomerUnavailable" or "CustomerRefusal" => (isAr ? "العميل غير متاح" : "Customer unavailable", "Orange"),
+            "DamagedBox" => (isAr ? "بوكس تالف" : "Damaged box", "Orange"),
+            _ => (isAr ? "مشكلة توصيل" : "Delivery issue", "Orange")
+        };
     }
 
     private static string MapComplaintStatus(ComplaintStatus status)

@@ -17,6 +17,7 @@ public class SecureDriverPickupUnitTests
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(DriverDeliveryTestConcurrency.ActiveDriverAccounts())
             .Options;
         return new AppDbContext(options, Substitute.For<MealMate.Application.Common.Abstractions.IDomainEventDispatcher>());
     }
@@ -407,7 +408,8 @@ public class SecureDriverPickupUnitTests
         currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driverUserId);
 
-        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance,
+            transactionExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var command = new ConfirmPickupBoxCommand(
             BoxId: stop1.Id,
@@ -498,7 +500,8 @@ public class SecureDriverPickupUnitTests
         currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driverUserId);
 
-        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance,
+            transactionExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var idempotencyKey = Guid.NewGuid().ToString();
         var command = new ConfirmPickupBoxCommand(
@@ -597,7 +600,7 @@ public class SecureDriverPickupUnitTests
         currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driverUserId);
 
-        var handler = new StartTripCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+        var handler = new StartTripCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance, DriverDeliveryTestConcurrency.Locks(), DriverDeliveryTestConcurrency.Transactions());
 
         var command = new StartTripCommand(trip.Id, 29.3375m, 48.0280m, Guid.NewGuid().ToString());
         var result = await handler.Handle(command, CancellationToken.None);
@@ -641,7 +644,7 @@ public class SecureDriverPickupUnitTests
         currentUser.IsAuthenticated.Returns(true);
         currentUser.UserId.Returns(driverUserId);
 
-        var handler = new StartTripCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance);
+        var handler = new StartTripCommandHandler(db, currentUser, NullLocalizedMessageProvider.Instance, DriverDeliveryTestConcurrency.Locks(), DriverDeliveryTestConcurrency.Transactions());
 
         var command = new StartTripCommand(trip.Id, 29.3375m, 48.0280m, Guid.NewGuid().ToString());
         var result = await handler.Handle(command, CancellationToken.None);

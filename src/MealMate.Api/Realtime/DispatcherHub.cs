@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using MealMate.Domain.Enums;
 
 namespace MealMate.Api.Realtime;
 
@@ -10,7 +11,7 @@ namespace MealMate.Api.Realtime;
 /// Supports both JWT authentication and development fallback.
 /// Emits live driver locations, trip state changes, and urgent operational alerts.
 /// </summary>
-[AllowAnonymous]
+[Authorize(Policy = "DispatcherPolicy")]
 public sealed class DispatcherHub : Hub
 {
     public const string HubPath = "/hubs/dispatcher-hub";
@@ -23,20 +24,17 @@ public sealed class DispatcherHub : Hub
     public const string EventDriverStatusUpdated = "driver-status-updated";
     public const string EventDriverAvailabilityUpdated = "driver-availability-updated";
     public const string EventDriverIssueUpdated = "driver-issue-updated";
+    public const string EventDriverSupportHandoverUpdated = "driver-support-handover-updated";
     public const string EventDriverMonitoringUpdated = "driver-monitoring-updated";
     public const string EventBoxAssigned = "box-assigned";
 
     public override async Task OnConnectedAsync()
     {
-        var httpContext = Context.GetHttpContext();
-
-        // 1. Resolve Restaurant ID from JWT claims, query parameters, or headers
+        // Restaurant scope must come from the authenticated principal. Client supplied
+        // query strings and headers are never authorization sources.
         var restaurantClaim = Context.User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.RestaurantId)
                               ?? Context.User?.FindFirstValue("restaurant_id")
-                              ?? Context.User?.FindFirstValue("RestaurantId")
-                              ?? httpContext?.Request.Query["restaurantId"].FirstOrDefault()
-                              ?? httpContext?.Request.Query["restaurant_id"].FirstOrDefault()
-                              ?? httpContext?.Request.Headers["X-Restaurant-Id"].FirstOrDefault();
+                              ?? Context.User?.FindFirstValue("RestaurantId");
 
         if (!string.IsNullOrEmpty(restaurantClaim))
         {
@@ -44,8 +42,14 @@ public sealed class DispatcherHub : Hub
         }
         else
         {
-            // If no specific restaurant ID is bound, join universal group so dev/test/admin still receives broadcasts
-            await Groups.AddToGroupAsync(Context.ConnectionId, UniversalDispatcherGroup);
+            var userType = Context.User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.UserType);
+            if (string.Equals(userType, nameof(UserType.Admin), StringComparison.OrdinalIgnoreCase))
+                await Groups.AddToGroupAsync(Context.ConnectionId, UniversalDispatcherGroup);
+            else
+            {
+                Context.Abort();
+                return;
+            }
         }
 
         // Send an immediate handshake/confirmation event so the client knows connection succeeded
@@ -63,7 +67,11 @@ public sealed class DispatcherHub : Hub
 
     public async Task JoinRestaurantDispatcherGroup(string restaurantId)
     {
-        if (!string.IsNullOrWhiteSpace(restaurantId))
+        var scope = Context.User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.RestaurantId)
+                    ?? Context.User?.FindFirstValue("restaurant_id")
+                    ?? Context.User?.FindFirstValue("RestaurantId");
+        var isAdmin = string.Equals(Context.User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.UserType), nameof(UserType.Admin), StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(restaurantId) && (isAdmin || string.Equals(scope, restaurantId, StringComparison.OrdinalIgnoreCase)))
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, GroupForRestaurant(restaurantId));
         }
@@ -76,7 +84,11 @@ public sealed class DispatcherHub : Hub
 
     public async Task LeaveRestaurantDispatcherGroup(string restaurantId)
     {
-        if (!string.IsNullOrWhiteSpace(restaurantId))
+        var scope = Context.User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.RestaurantId)
+                    ?? Context.User?.FindFirstValue("restaurant_id")
+                    ?? Context.User?.FindFirstValue("RestaurantId");
+        var isAdmin = string.Equals(Context.User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.UserType), nameof(UserType.Admin), StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(restaurantId) && (isAdmin || string.Equals(scope, restaurantId, StringComparison.OrdinalIgnoreCase)))
         {
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupForRestaurant(restaurantId));
         }

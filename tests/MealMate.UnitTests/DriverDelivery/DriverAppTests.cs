@@ -22,10 +22,12 @@ namespace MealMate.UnitTests.DriverDelivery;
 
 public class DriverAppTests
 {
+    private static readonly Guid TestDriverUserId = Guid.NewGuid();
     private static AppDbContext CreateDb()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(DriverDeliveryTestConcurrency.ActiveDriverAccounts())
             .Options;
         return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
     }
@@ -33,9 +35,20 @@ public class DriverAppTests
     private static (ICurrentUser, ILocalizedMessageProvider) CreateMocks()
     {
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(TestDriverUserId);
+        currentUser.UserType.Returns(UserType.Driver);
         var messages = Substitute.For<ILocalizedMessageProvider>();
         messages.CurrentCulture.Returns(new System.Globalization.CultureInfo("ar"));
         return (currentUser, messages);
+    }
+
+    private static DriverProfile AddAssignedDriver(AppDbContext db, Trip trip)
+    {
+        var driver = new DriverProfile { UserId = TestDriverUserId, RestaurantId = trip.RestaurantId, FullNameAr = "السائق", FullNameEn = "Driver" };
+        db.DriverProfiles.Add(driver);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = trip.Id, DriverProfileId = driver.Id, Status = "Active" });
+        return driver;
     }
 
     private static (DriverDeliveryMapQueryHandler Handler, IGoogleRoutingService Routing) CreateMapHandler(
@@ -86,7 +99,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = false,
@@ -127,7 +140,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = true
@@ -185,7 +198,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = true
@@ -231,7 +244,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = true
@@ -277,6 +290,8 @@ public class DriverAppTests
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
         db.Trips.Add(trip);
+        AddAssignedDriver(db, trip);
+        AddAssignedDriver(db, trip);
 
         var stop = new TripStop
         {
@@ -293,7 +308,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act - Missing Barcode
         var result = await handler.Handle(new PickupBoxCommand(stop.Id, "", "photos/condition_1.jpg"), CancellationToken.None);
@@ -312,6 +327,8 @@ public class DriverAppTests
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
         db.Trips.Add(trip);
+        AddAssignedDriver(db, trip);
+        AddAssignedDriver(db, trip);
 
         var stop = new TripStop
         {
@@ -328,7 +345,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act - Missing Condition Photo
         var result = await handler.Handle(new PickupBoxCommand(stop.Id, "BX-458722", null), CancellationToken.None);
@@ -347,6 +364,8 @@ public class DriverAppTests
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
         db.Trips.Add(trip);
+        AddAssignedDriver(db, trip);
+        AddAssignedDriver(db, trip);
 
         var stop = new TripStop
         {
@@ -363,7 +382,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act - Mismatched Barcode
         var result = await handler.Handle(new PickupBoxCommand(stop.Id, "BX-999999", "photos/condition_1.jpg"), CancellationToken.None);
@@ -388,6 +407,8 @@ public class DriverAppTests
             Status = TripStatus.Assigned
         };
         db.Trips.Add(trip);
+        AddAssignedDriver(db, trip);
+        AddAssignedDriver(db, trip);
 
         var stop = new TripStop
         {
@@ -404,7 +425,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act - Valid Barcode and Condition Photo
         var result = await handler.Handle(new PickupBoxCommand(
@@ -440,6 +461,8 @@ public class DriverAppTests
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
         db.Trips.Add(trip);
+        AddAssignedDriver(db, trip);
+        AddAssignedDriver(db, trip);
 
         var stop = new TripStop
         {
@@ -456,7 +479,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act - Manual Entry with empty code
         var result = await handler.Handle(new PickupBoxCommand(
@@ -479,6 +502,8 @@ public class DriverAppTests
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
         db.Trips.Add(trip);
+        AddAssignedDriver(db, trip);
+        AddAssignedDriver(db, trip);
 
         var stop = new TripStop
         {
@@ -495,7 +520,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act - Manual Entry with code but without mandatory condition/label photo
         var result = await handler.Handle(new PickupBoxCommand(
@@ -518,6 +543,8 @@ public class DriverAppTests
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
         db.Trips.Add(trip);
+        AddAssignedDriver(db, trip);
+        AddAssignedDriver(db, trip);
 
         var stop = new TripStop
         {
@@ -534,7 +561,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act - Manual Entry with mismatched code
         var result = await handler.Handle(new PickupBoxCommand(
@@ -563,6 +590,8 @@ public class DriverAppTests
             Status = TripStatus.Assigned
         };
         db.Trips.Add(trip);
+        AddAssignedDriver(db, trip);
+        AddAssignedDriver(db, trip);
 
         var stop = new TripStop
         {
@@ -579,7 +608,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act - Manual Entry with valid code and mandatory condition/label photo
         var result = await handler.Handle(new PickupBoxCommand(
@@ -617,6 +646,8 @@ public class DriverAppTests
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
         db.Trips.Add(trip);
+        AddAssignedDriver(db, trip);
+        AddAssignedDriver(db, trip);
 
         var stop = new TripStop
         {
@@ -641,12 +672,12 @@ public class DriverAppTests
             FileName = "door.jpg",
             ContentType = "image/jpeg",
             SizeBytes = 512,
-            UploadedByUserId = Guid.NewGuid(),
+            UploadedByUserId = TestDriverUserId,
             UploadedAtUtc = DateTime.UtcNow
         });
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act 1 - Mismatched Barcode fails
         var result1 = await handler.Handle(new CompleteBoxDeliveryCommand(stop.Id, BarcodeValue: "BX-999999", ProofPhotoStorageKey: "photos/door.jpg"), CancellationToken.None);
@@ -673,7 +704,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = true
@@ -732,7 +763,7 @@ public class DriverAppTests
         });
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act - Complete Delivery with Barcode and Proof Photo
         var result = await handler.Handle(new CompleteBoxDeliveryCommand(
@@ -776,7 +807,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = true
@@ -895,7 +926,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = true
@@ -959,7 +990,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var olderTrip = new Trip
@@ -1022,7 +1053,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-701", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow), Status = TripStatus.InProgress };
@@ -1058,7 +1089,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
         await db.SaveChangesAsync();
 
@@ -1164,7 +1195,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var olderTrip = new Trip
@@ -1222,7 +1253,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-901", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow), Status = TripStatus.InProgress };
@@ -1270,7 +1301,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-110", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow), Status = TripStatus.InProgress };
@@ -1326,7 +1357,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var olderTrip = new Trip
@@ -1379,7 +1410,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var myDriver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var myDriver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         var otherDriver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "سائق آخر", FullNameEn = "Other Driver", IsAvailable = true };
         db.DriverProfiles.AddRange(myDriver, otherDriver);
 
@@ -1431,7 +1462,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
@@ -1441,7 +1472,7 @@ public class DriverAppTests
         db.DriverAssignments.Add(assignment);
         await db.SaveChangesAsync();
 
-        var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
+        var handler = new DriverPickupCommandHandlers(db, currentUser, messages, DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new ArriveAtKitchenCommand(driver.Id, 29.3375, 48.0280), CancellationToken.None);
@@ -1461,11 +1492,11 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
         await db.SaveChangesAsync();
 
-        var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
+        var handler = new DriverPickupCommandHandlers(db, currentUser, messages, DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new LegacyValidatePickupBarcodeCommand("UNKNOWN-999", driver.Id), CancellationToken.None);
@@ -1482,7 +1513,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driverA = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد إبراهيم", FullNameEn = "Ahmed", IsAvailable = true };
+        var driverA = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد إبراهيم", FullNameEn = "Ahmed", IsAvailable = true };
         var driverB = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "خالد محمود", FullNameEn = "Khaled", IsAvailable = true };
         db.DriverProfiles.AddRange(driverA, driverB);
 
@@ -1509,7 +1540,7 @@ public class DriverAppTests
         db.TripStops.Add(stopB);
         await db.SaveChangesAsync();
 
-        var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
+        var handler = new DriverPickupCommandHandlers(db, currentUser, messages, DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act - Driver A scans box belonging to Driver B
         var result = await handler.Handle(new LegacyValidatePickupBarcodeCommand("BX-B-100", driverA.Id), CancellationToken.None);
@@ -1527,7 +1558,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
@@ -1551,7 +1582,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
+        var handler = new DriverPickupCommandHandlers(db, currentUser, messages, DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new LegacyValidatePickupBarcodeCommand("480K-1234", driver.Id), CancellationToken.None);
@@ -1571,7 +1602,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
@@ -1594,7 +1625,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
+        var handler = new DriverPickupCommandHandlers(db, currentUser, messages, DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new StartTripDeliveryCommand(driver.Id), CancellationToken.None);
@@ -1611,7 +1642,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow), Status = TripStatus.Assigned };
@@ -1634,7 +1665,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
+        var handler = new DriverPickupCommandHandlers(db, currentUser, messages, DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new StartTripDeliveryCommand(driver.Id), CancellationToken.None);
@@ -1656,7 +1687,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
@@ -1712,7 +1743,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var olderTrip = new Trip
@@ -1777,7 +1808,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var completedTrip = new Trip
@@ -1829,7 +1860,7 @@ public class DriverAppTests
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "أحمد", FullNameEn = "Ahmed", IsAvailable = true };
         db.DriverProfiles.Add(driver);
 
         var restaurantId = Guid.NewGuid();
@@ -1904,7 +1935,7 @@ public class DriverAppTests
         // Arrival state belongs to the assigned driver: profile + active trip assignment.
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "سائق الاختبار",
             FullNameEn = "Test Driver",
             IsAvailable = true
@@ -1919,7 +1950,7 @@ public class DriverAppTests
         await db.SaveChangesAsync();
 
         currentUser.UserId.Returns(driver.UserId);
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new ConfirmCustomerArrivalCommand(stop.Id), CancellationToken.None);
@@ -1966,14 +1997,14 @@ public class DriverAppTests
         // The caller is not a driver with an active assignment on this stop's trip:
         // no driver profile resolves for the random user id, so arrival is denied.
         currentUser.UserId.Returns(Guid.NewGuid());
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new ConfirmCustomerArrivalCommand(stop.Id), CancellationToken.None);
 
-        // Assert: an unauthenticated-to-this-stop caller gets NotFound with no data.
+        // Assert: callers without a persisted driver identity fail closed.
         result.IsSuccess.Should().BeFalse();
-        result.Error!.Code.Should().Be(MessageCodes.Orders.NotFound);
+        result.Error!.Code.Should().Be("DRIVER_IDENTITY_MISMATCH");
     }
 
     [Fact]
@@ -1985,6 +2016,7 @@ public class DriverAppTests
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-202", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
         db.Trips.Add(trip);
+        AddAssignedDriver(db, trip);
 
         var stop = new TripStop
         {
@@ -2002,7 +2034,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act 1: Fail Delivery
         var failResult = await handler.Handle(new FailDeliveryCommand(
@@ -2039,7 +2071,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "سائق الاختبار",
             FullNameEn = "Test Driver",
             IsAvailable = true
@@ -2072,7 +2104,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new RequestReassignmentCommand(
@@ -2119,7 +2151,7 @@ public class DriverAppTests
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         // Act
         var result = await handler.Handle(new GetCustomerCallProxyQuery(stop.Id), CancellationToken.None);
@@ -2161,7 +2193,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = true
@@ -2186,7 +2218,7 @@ public class DriverAppTests
         });
         await db.SaveChangesAsync();
 
-        var handler = new DriverPickupCommandHandlers(db, currentUser, messages);
+        var handler = new DriverPickupCommandHandlers(db, currentUser, messages, DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         // Act - Scan the Kitchen printed barcode MM-...
         var result = await handler.Handle(new LegacyValidatePickupBarcodeCommand(kitchenBarcode, driver.Id), CancellationToken.None);
@@ -2226,7 +2258,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "خالد العازمي",
             FullNameEn = "Khaled Al-Azmi",
             IsAvailable = true
@@ -2350,7 +2382,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "سالم محمد",
             FullNameEn = "Salem Mohammed",
             VehicleType = "سيارة",
@@ -2455,11 +2487,12 @@ public class DriverAppTests
         };
         db.TripStops.Add(stop);
 
-        var driver = new DriverProfile { UserId = Guid.NewGuid(), FullNameAr = "حمد جابر", FullNameEn = "Hamad Jaber" };
+        var driver = new DriverProfile { UserId = TestDriverUserId, FullNameAr = "حمد جابر", FullNameEn = "Hamad Jaber" };
         db.DriverProfiles.Add(driver);
+        db.DriverAssignments.Add(new DriverAssignment { TripId = trip.Id, DriverProfileId = driver.Id, Status = "Active" });
         await db.SaveChangesAsync();
 
-        var handler = new DriverOfflineSyncCommandHandler(db, currentUser, messages);
+        var handler = new DriverOfflineSyncCommandHandler(db, currentUser, messages, DriverDeliveryTestConcurrency.Transactions(), DriverDeliveryTestConcurrency.Locks());
 
         var queue = new List<OfflineQueueItemDto>
         {
@@ -2509,7 +2542,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = false
@@ -2565,7 +2598,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = true
@@ -2606,7 +2639,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = false
@@ -2670,7 +2703,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = true
@@ -2721,7 +2754,7 @@ public class DriverAppTests
 
         var driver = new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "أحمد إبراهيم",
             FullNameEn = "Ahmed Ibrahim",
             IsAvailable = false
@@ -2791,7 +2824,7 @@ public class DriverAppTests
     {
         var driver = existingDriver ?? new DriverProfile
         {
-            UserId = Guid.NewGuid(),
+            UserId = TestDriverUserId,
             FullNameAr = "سائق الاختبار",
             FullNameEn = "Test Driver",
             IsAvailable = true
@@ -2911,7 +2944,7 @@ public class DriverAppTests
         await db.SaveChangesAsync();
 
         var customerPush = Substitute.For<ICustomerPushNotifier>();
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, customerPushNotifier: customerPush);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, customerPushNotifier: customerPush, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var first = await handler.Handle(new ConfirmCustomerArrivalCommand(stop.Id, DriverId: driver.Id), CancellationToken.None);
 
@@ -2959,12 +2992,12 @@ public class DriverAppTests
         await db.SaveChangesAsync();
 
         currentUser.UserId.Returns(foreignDriver.UserId);
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var result = await handler.Handle(new ConfirmCustomerArrivalCommand(stop.Id, DriverId: foreignDriver.Id), CancellationToken.None);
 
         result.IsSuccess.Should().BeFalse();
-        result.Error.Code.Should().Be(MessageCodes.Orders.NotFound);
+        result.Error.Code.Should().Be("Orders.DeliveryForbidden");
 
         var savedStop = await db.TripStops.FindAsync(stop.Id);
         savedStop!.ArrivedAtUtc.Should().BeNull("a rejected arrival request must not persist any state");
@@ -2978,7 +3011,7 @@ public class DriverAppTests
         var (driver, _, _) = SeedActiveTrip(db);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var result = await handler.Handle(new ConfirmCustomerArrivalCommand(Guid.NewGuid(), DriverId: driver.Id), CancellationToken.None);
 
@@ -3030,7 +3063,7 @@ public class DriverAppTests
         await db.SaveChangesAsync();
 
         var customerPush = Substitute.For<ICustomerPushNotifier>();
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, customerPushNotifier: customerPush);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, customerPushNotifier: customerPush, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var command = new CompleteBoxDeliveryCommand(
             BoxId: stop.Id,
@@ -3083,7 +3116,7 @@ public class DriverAppTests
         SeedProofForDriver(db, driver);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var first = await handler.Handle(new CompleteBoxDeliveryCommand(
             BoxId: stopA1.Id, ProofPhotoStorageKey: "uploads/drivers/delivery/proof.jpg", DriverId: driver.Id), CancellationToken.None);
@@ -3131,7 +3164,7 @@ public class DriverAppTests
         SeedProofForDriver(db, foreignDriver);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var result = await handler.Handle(new CompleteBoxDeliveryCommand(
             BoxId: stop.Id,
@@ -3139,7 +3172,7 @@ public class DriverAppTests
             DriverId: foreignDriver.Id), CancellationToken.None);
 
         result.IsSuccess.Should().BeFalse();
-        result.Error.Code.Should().Be("Orders.DeliveryForbidden");
+        result.Error.Code.Should().Be("DRIVER_IDENTITY_MISMATCH");
 
         var savedStop = await db.TripStops.FindAsync(stop.Id);
         savedStop!.Status.Should().Be(TripStopStatus.PickedUp, "a rejected delivery must not change any state");
@@ -3156,7 +3189,7 @@ public class DriverAppTests
         SeedProofForDriver(db, driver);
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var halfPair = await handler.Handle(new CompleteBoxDeliveryCommand(
             BoxId: stop.Id,
@@ -3196,7 +3229,7 @@ public class DriverAppTests
         db.UploadFileRecords.Add(SeedUploadRecord(driver.UserId, "uploads/drivers/delivery/proof.pdf", "application/pdf"));
         await db.SaveChangesAsync();
 
-        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages);
+        var handler = new DriverDeliveryOrderCommandHandlers(db, currentUser, messages, transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var foreign = await handler.Handle(new CompleteBoxDeliveryCommand(
             BoxId: stop.Id,

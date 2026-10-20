@@ -41,6 +41,8 @@ public sealed class DriverHub : Hub
     public const string EventDriverStatusUpdated = "driver-status-updated";
     public const string EventDispatcherMessage = "dispatcher-message";
     public const string EventDeliveryCompleted = "delivery-completed";
+    public const string EventSupportHandoverUpdated = "support-handover-updated";
+    public const string EventDriverIssueUpdated = "driver-support-issue-updated";
 
     public static string GroupForDriver(Guid driverId) => $"driver:{driverId:D}";
     public static string GroupForDriver(string driverId) => $"driver:{driverId}";

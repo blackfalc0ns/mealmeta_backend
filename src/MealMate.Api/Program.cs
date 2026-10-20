@@ -37,6 +37,7 @@ builder.Services.AddMemoryCache();
 builder.Services.AddSignalR().AddHubOptions<VoiceCallV2Hub>(options =>
     options.MaximumReceiveMessageSize = VoiceCallV2Hub.MaximumReceiveMessageSize);
 builder.Services.AddScoped<SignalRCustomerDeliveryChangeNotifier>();
+builder.Services.AddScoped<SignalRDriverSupportHandoverNotifier>();
 var customerDeliveryListenerConnectionString =
     Environment.GetEnvironmentVariable("MEALMATE_DB_CONNECTION")
     ?? builder.Configuration.GetConnectionString(MealMate.Persistence.DependencyInjection.ConnectionStringName)
@@ -46,6 +47,16 @@ builder.Services.AddSingleton(sp => new CustomerDeliveryPostgresNotificationList
     sp.GetRequiredService<IServiceScopeFactory>(),
     sp.GetRequiredService<ILogger<CustomerDeliveryPostgresNotificationListener>>()));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CustomerDeliveryPostgresNotificationListener>());
+builder.Services.AddSingleton(sp => new DriverSupportHandoverPostgresListener(
+    customerDeliveryListenerConnectionString,
+    sp.GetRequiredService<IServiceScopeFactory>(),
+    sp.GetRequiredService<ILogger<DriverSupportHandoverPostgresListener>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DriverSupportHandoverPostgresListener>());
+builder.Services.AddSingleton(sp => new DriverSupportIssuePostgresListener(
+    customerDeliveryListenerConnectionString,
+    sp.GetRequiredService<IServiceScopeFactory>(),
+    sp.GetRequiredService<ILogger<DriverSupportIssuePostgresListener>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DriverSupportIssuePostgresListener>());
 builder.Services.AddSingleton<VoiceCallV2ConnectionRegistry>();
 builder.Services.AddScoped<MealMate.Application.Features.VoiceCalls.Abstractions.IVoiceCallV2RealtimeTransport, VoiceCallV2RealtimeTransport>();
 builder.Services.AddScoped<IRegistrationReviewNotifier, SignalRRegistrationReviewNotifier>();

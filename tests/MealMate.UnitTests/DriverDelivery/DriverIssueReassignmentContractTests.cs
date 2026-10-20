@@ -10,6 +10,7 @@ using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Persistence;
+using MealMate.Persistence.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using NSubstitute;
@@ -39,6 +40,8 @@ public class DriverIssueReassignmentContractTests
     private static (ICurrentUser CurrentUser, ILocalizedMessageProvider Messages) CreateMocks()
     {
         var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserType.Returns(UserType.Driver);
         var messages = Substitute.For<ILocalizedMessageProvider>();
         messages.CurrentCulture.Returns(new CultureInfo("ar"));
         return (currentUser, messages);
@@ -61,6 +64,7 @@ public class DriverIssueReassignmentContractTests
             IsAvailable = true
         };
         db.DriverProfiles.Add(driver);
+        db.Users.Add(new ApplicationUser { Id = driver.UserId, UserType = UserType.Driver, AccountStatus = AccountStatus.Active });
         currentUser.UserId.Returns(driver.UserId);
         return driver;
     }
@@ -117,7 +121,8 @@ public class DriverIssueReassignmentContractTests
 
     private static DriverDeliveryOrderCommandHandlers CreateHandler(
         AppDbContext db, ICurrentUser currentUser, ILocalizedMessageProvider messages, IFileStorage? storage = null)
-        => new(db, currentUser, messages, fileStorage: storage);
+        => new(db, currentUser, messages, fileStorage: storage,
+            transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
     #region 08.01 Report issue
 
@@ -141,7 +146,7 @@ public class DriverIssueReassignmentContractTests
     }
 
     [Fact]
-    public async Task ReportIssue_AuthenticatedNonDriver_ReturnsNotFound()
+    public async Task ReportIssue_AuthenticatedCallerWithoutDriverProfile_IsRejected()
     {
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
@@ -156,7 +161,7 @@ public class DriverIssueReassignmentContractTests
             stop.Id, IssueType: "DamagedBox", Description: "بوكس تالف"), CancellationToken.None);
 
         result.IsSuccess.Should().BeFalse();
-        result.Error!.Code.Should().Be("order.not_found");
+        result.Error!.Code.Should().Be("DRIVER_IDENTITY_MISMATCH");
         db.Complaints.Should().BeEmpty();
     }
 
@@ -175,6 +180,7 @@ public class DriverIssueReassignmentContractTests
             IsAvailable = true
         };
         db.DriverProfiles.Add(foreign);
+        db.Users.Add(new ApplicationUser { Id = foreign.UserId, UserType = UserType.Driver, AccountStatus = AccountStatus.Active });
         await db.SaveChangesAsync();
 
         currentUser.UserId.Returns(foreign.UserId);
@@ -184,7 +190,7 @@ public class DriverIssueReassignmentContractTests
             stop.Id, IssueType: "DamagedBox", Description: "بوكس تالف"), CancellationToken.None);
 
         result.IsSuccess.Should().BeFalse();
-        result.Error!.Code.Should().Be("driver.issue.stop_forbidden");
+        result.Error!.Code.Should().Be("Orders.DeliveryForbidden");
         db.Complaints.Should().BeEmpty();
     }
 
@@ -567,6 +573,7 @@ public class DriverIssueReassignmentContractTests
             FullNameEn = "Other Driver",
             IsAvailable = true
         });
+        db.Users.Add(new ApplicationUser { Id = foreignAuthUserId, UserType = UserType.Driver, AccountStatus = AccountStatus.Active });
         await db.SaveChangesAsync();
         currentUser.UserId.Returns(foreignAuthUserId);
         var handler = CreateHandler(db, currentUser, messages);
@@ -575,7 +582,7 @@ public class DriverIssueReassignmentContractTests
             stop.Id, Reason: "VehicleBreakdown"), CancellationToken.None);
 
         result.IsSuccess.Should().BeFalse();
-        result.Error!.Code.Should().Be("driver.reassignment.stop_forbidden");
+        result.Error!.Code.Should().Be("Orders.DeliveryForbidden");
         db.Complaints.Should().BeEmpty();
     }
 
@@ -749,11 +756,11 @@ public class DriverIssueReassignmentContractTests
         saved.Description.Should().Contain("المركبة متوقفة أمام مجمع الأفنيوز");
 
         var updatedStop = await db.TripStops.FindAsync(stop.Id);
-        updatedStop!.Status.Should().Be(TripStopStatus.Pending);
+        updatedStop!.Status.Should().Be(TripStopStatus.PickedUp, "requesting reassignment preserves the original driver's custody until receipt completion");
         updatedStop.FailureReason.Should().Contain("VehicleBreakdown");
 
         var assignment = await db.DriverAssignments.SingleAsync();
-        assignment.Status.Should().Be("Reassigned");
+        assignment.Status.Should().Be("Active", "the reporter remains the custodian while dispatch arranges handover");
 
         db.AuditLogs.Should().Contain(a => a.Action == "DriverRequestedReassignment" && a.EntityId == stop.Id);
     }

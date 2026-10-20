@@ -23,18 +23,33 @@ public sealed class StartTripCommandHandler
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly IApplicationLockManager? _locks;
+    private readonly IApplicationTransactionExecutor? _transactions;
 
     public StartTripCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
-        ILocalizedMessageProvider messages)
+        ILocalizedMessageProvider messages,
+        IApplicationLockManager? locks = null,
+        IApplicationTransactionExecutor? transactions = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
+        _locks = locks;
+        _transactions = transactions;
     }
 
     public async Task<Result<StartTripResponseDto>> Handle(
+        StartTripCommand request,
+        CancellationToken cancellationToken)
+    {
+        if (_transactions is null || _locks is null)
+            return Error.Conflict("TRIP_TRANSACTION_UNAVAILABLE", _messages.GetMessage("driver_support_handover.transaction_unavailable", "Trip start requires transactional locks."));
+        return await _transactions.ExecuteResultAsync(ct => HandleCoreAsync(request, ct), cancellationToken);
+    }
+
+    private async Task<Result<StartTripResponseDto>> HandleCoreAsync(
         StartTripCommand request,
         CancellationToken cancellationToken)
     {
@@ -46,8 +61,7 @@ public sealed class StartTripCommandHandler
         }
 
         var driver = await _db.DriverProfiles
-            .AsNoTracking()
-            .FirstOrDefaultAsync(d => d.UserId == _currentUser.UserId.Value, cancellationToken);
+            .FirstOrDefaultAsync(d => d.UserId == _currentUser.UserId.Value && !d.IsDeleted, cancellationToken);
 
         if (driver is null)
         {
@@ -87,22 +101,34 @@ public sealed class StartTripCommandHandler
             }
         }
 
+        await _locks.LockTripAsync(request.TripId, cancellationToken);
+        await _locks.LockDriverAsync(driver.Id, cancellationToken);
+        await _db.ReloadEntityAsync(driver, cancellationToken);
+        if (await DriverSupportHandoverMutationGuard.HasActiveHandoverForTripAsync(_db, request.TripId, cancellationToken))
+            return Error.Conflict("HANDOVER_PENDING", _messages.GetMessage("driver_support_handover.pending", "The active support handover must be completed or cancelled first."));
+        if (!(await _db.GetActiveAccountUserIdsAsync(new[] { driver.UserId }, cancellationToken)).Contains(driver.UserId))
+            return Error.Forbidden("DRIVER_ACCOUNT_INACTIVE", _messages.GetMessage("driver.account_inactive", "The driver account is not active."));
+
         if (request.Latitude == 0 && request.Longitude == 0)
         {
             return Error.Validation("LOCATION_REQUIRED", "Driver GPS coordinates are required to start trip.");
         }
 
-        var trip = await _db.Trips
-            .Include(t => t.Stops)
-            .Include(t => t.DriverAssignments)
-            .FirstOrDefaultAsync(t => t.Id == request.TripId, cancellationToken);
+        var trip = await _db.Trips.FirstOrDefaultAsync(t => t.Id == request.TripId, cancellationToken);
 
         if (trip is null)
         {
             return Error.NotFound("TRIP_NOT_FOUND", "Trip was not found.");
         }
 
-        var isAssignedToDriver = trip.DriverAssignments.Any(da => da.DriverProfileId == driver.Id && da.Status == "Active");
+        await _db.ReloadEntityAsync(trip, cancellationToken);
+        var stops = await _db.TripStops.Where(s => s.TripId == request.TripId).ToListAsync(cancellationToken);
+        foreach (var stop in stops)
+            if (await DriverSupportHandoverMutationGuard.HasActiveHoldForStopAsync(_db, stop.Id, cancellationToken))
+                return Error.Conflict("DELIVERY_HOLD_ACTIVE", _messages.GetMessage("driver_support_handover.hold_active", "A delivery hold blocks trip start."));
+        var assignments = await _db.DriverAssignments.Where(a => a.TripId == request.TripId).ToListAsync(cancellationToken);
+
+        var isAssignedToDriver = assignments.Any(da => da.DriverProfileId == driver.Id && (da.Status == "Active" || da.Status == "Assigned"));
         if (!isAssignedToDriver)
         {
             return Error.Forbidden("DRIVER_NOT_AUTHORIZED", "This trip is not assigned to you.");
@@ -119,7 +145,7 @@ public sealed class StartTripCommandHandler
             return Error.Validation("TRIP_NOT_READY", "Trip cannot be started from its current status.");
         }
 
-        var pendingStops = trip.Stops.Where(s => s.Status != TripStopStatus.PickedUp && s.Status != TripStopStatus.Delivered).ToList();
+        var pendingStops = stops.Where(s => s.Status != TripStopStatus.PickedUp && s.Status != TripStopStatus.Delivered).ToList();
         if (!alreadyStarted && pendingStops.Count > 0)
         {
             return Error.Validation("UNSCANNED_BOXES_EXIST", $"{pendingStops.Count} boxes have not been scanned and verified yet.");
@@ -136,19 +162,19 @@ public sealed class StartTripCommandHandler
                 .FirstOrDefaultAsync(s => s.DriverProfileId == driver.Id && s.Status == "Active", cancellationToken);
             if (activeSession != null)
             {
-                activeSession.InDeliveryOrdersCount = trip.Stops.Count;
+                activeSession.InDeliveryOrdersCount = stops.Count;
             }
 
             await _db.SaveChangesAsync(cancellationToken);
         }
 
-        var msg = _messages.GetMessage(MessageCodes.DriverTrip.Started, arguments: new object[] { trip.Stops.Count });
+        var msg = _messages.GetMessage(MessageCodes.DriverTrip.Started, arguments: new object[] { stops.Count });
 
         var response = new StartTripResponseDto(
             TripId: trip.Id,
             TripCode: trip.Code,
             Status: "InProgress",
-            DispatchedBoxesCount: trip.Stops.Count,
+            DispatchedBoxesCount: stops.Count,
             Message: msg,
             StartedAtUtc: trip.StartedAtUtc!.Value);
 

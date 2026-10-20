@@ -187,6 +187,7 @@ public sealed class DeliveryHoldConfiguration : IEntityTypeConfiguration<Deliver
         builder.HasIndex(x => x.TripId);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.HeldAtUtc);
+        builder.HasIndex(x => x.DriverSupportHandoverBoxId);
 
         builder.HasOne(x => x.Trip)
             .WithMany()

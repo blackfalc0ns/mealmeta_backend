@@ -74,6 +74,7 @@ public class ConfirmPickupFailureInjectionTests
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(DriverDeliveryTestConcurrency.ActiveDriverAccounts())
             .Options;
         return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
     }
@@ -216,7 +217,8 @@ public class ConfirmPickupFailureInjectionTests
             currentUser,
             messages,
             txExecutor,
-            failureInjector);
+            failureInjector,
+            locks: DriverDeliveryTestConcurrency.Locks());
 
         var command = new ConfirmPickupBoxCommand(
             BoxId: day.Id,

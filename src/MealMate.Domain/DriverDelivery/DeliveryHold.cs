@@ -27,6 +27,9 @@ public sealed class DeliveryHold : AuditableEntity
 
     public Guid? ContactCaseId { get; set; }
 
+    /// <summary>Optional source handover manifest box for an unresolved receipt follow-up.</summary>
+    public Guid? DriverSupportHandoverBoxId { get; set; }
+
     /// <summary>Authenticated actor who created the hold.</summary>
     public Guid? ActorUserId { get; set; }
 

@@ -22,6 +22,7 @@ public class ConfirmPickupBoxAtomicTests
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(DriverDeliveryTestConcurrency.ActiveDriverAccounts())
             .Options;
         return new AppDbContext(options, Substitute.For<IDomainEventDispatcher>());
     }
@@ -147,7 +148,8 @@ public class ConfirmPickupBoxAtomicTests
         currentUser.UserId.Returns(driverUserId);
 
         var messages = NullLocalizedMessageProvider.Instance;
-        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, messages);
+        var handler = new ConfirmPickupBoxCommandHandler(db, currentUser, messages,
+            transactionExecutor: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
         var command = new ConfirmPickupBoxCommand(
             BoxId: day.Id,

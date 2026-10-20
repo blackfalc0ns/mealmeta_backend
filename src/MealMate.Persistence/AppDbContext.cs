@@ -64,6 +64,12 @@ public sealed class AppDbContext
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<string?> GetUserDisplayNameAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return await Users.AsNoTracking().Where(user => user.Id == userId)
+            .Select(user => user.FullName).FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlySet<Guid>> GetActiveAccountUserIdsAsync(
         IReadOnlyCollection<Guid> userIds,
         CancellationToken cancellationToken)
@@ -218,6 +224,8 @@ public sealed class AppDbContext
     public DbSet<Trip> Trips => Set<Trip>();
     public DbSet<TripStop> TripStops => Set<TripStop>();
     public DbSet<DriverAssignment> DriverAssignments => Set<DriverAssignment>();
+    public DbSet<DriverSupportHandover> DriverSupportHandovers => Set<DriverSupportHandover>();
+    public DbSet<DriverSupportHandoverBox> DriverSupportHandoverBoxes => Set<DriverSupportHandoverBox>();
     public DbSet<PickupScan> PickupScans => Set<PickupScan>();
     public DbSet<DeliveryTrackingPoint> DeliveryTrackingPoints => Set<DeliveryTrackingPoint>();
     public DbSet<SafeContactLog> SafeContactLogs => Set<SafeContactLog>();

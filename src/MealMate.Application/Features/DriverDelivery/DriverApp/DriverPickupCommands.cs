@@ -34,15 +34,21 @@ public sealed class DriverPickupCommandHandlers
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly IApplicationTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
 
     public DriverPickupCommandHandlers(
         IAppDbContext db,
         ICurrentUser currentUser,
-        ILocalizedMessageProvider messages)
+        ILocalizedMessageProvider messages,
+        IApplicationTransactionExecutor? transactions = null,
+        IApplicationLockManager? locks = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
+        _transactions = transactions;
+        _locks = locks;
     }
 
     public async Task<Result<ArriveAtKitchenResponse>> Handle(
@@ -222,6 +228,16 @@ public sealed class DriverPickupCommandHandlers
         StartTripDeliveryCommand request,
         CancellationToken cancellationToken)
     {
+        if (_transactions is null || _locks is null)
+            return Error.Conflict("TRIP_TRANSACTION_UNAVAILABLE", _messages.GetMessage("driver_support_handover.transaction_unavailable", "Trip start requires transactional locks."));
+        if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue)
+            return Error.Unauthorized("auth.invalid_credentials", _messages.GetMessage("auth.invalid_credentials", "Authentication is required."));
+        return await _transactions.ExecuteResultAsync(ct => StartTripDeliveryCoreAsync(request, ct), cancellationToken);
+    }
+
+    private async Task<Result<StartTripDeliveryResponse>> StartTripDeliveryCoreAsync(
+        StartTripDeliveryCommand request, CancellationToken cancellationToken)
+    {
         var driver = await ResolveDriverAsync(request.DriverId, cancellationToken);
         if (driver is null)
         {
@@ -230,20 +246,37 @@ public sealed class DriverPickupCommandHandlers
 
         var isAr = _messages.IsArabic();
 
-        var trip = await (
+        var tripId = await (
             from da in _db.DriverAssignments
             join t in _db.Trips on da.TripId equals t.Id
             where da.DriverProfileId == driver.Id && da.Status == "Active"
             orderby t.CreatedAtUtc descending
-            select t
+            select (Guid?)t.Id
         ).FirstOrDefaultAsync(cancellationToken);
 
-        if (trip is null)
+        if (!tripId.HasValue)
         {
             return Error.NotFound("Trip.NotFound", isAr
                 ? "لا توجد رحلة مسندة إليك حالياً."
                 : "No trip is currently assigned to you.");
         }
+
+        await _locks!.LockTripAsync(tripId.Value, cancellationToken);
+        await _locks.LockDriverAsync(driver.Id, cancellationToken);
+        var trip = await _db.Trips.FirstOrDefaultAsync(t => t.Id == tripId.Value, cancellationToken);
+        if (trip is null) return Error.NotFound("Trip.NotFound", _messages.GetMessage("common.not_found", "Trip was not found."));
+        await _db.ReloadEntityAsync(trip, cancellationToken);
+        var stillAssigned = await _db.DriverAssignments.AnyAsync(a => a.TripId == trip.Id && a.DriverProfileId == driver.Id
+            && (a.Status == "Active" || a.Status == "Assigned"), cancellationToken);
+        if (!stillAssigned) return Error.Forbidden("DRIVER_NOT_AUTHORIZED", _messages.GetMessage("driver.not_assigned", "This trip is not assigned to you."));
+        if (trip.Status is TripStatus.Completed or TripStatus.Cancelled)
+            return Error.Conflict("TRIP_TERMINAL", _messages.GetMessage("driver_support_handover.trip_terminal", "A terminal trip cannot be started again."));
+        if (await DriverSupportHandoverMutationGuard.HasActiveHandoverForTripAsync(_db, trip.Id, cancellationToken))
+            return Error.Conflict("HANDOVER_PENDING", _messages.GetMessage("driver_support_handover.pending", "The active support handover must be completed first."));
+        var stopIds = await _db.TripStops.Where(s => s.TripId == trip.Id).Select(s => s.Id).ToListAsync(cancellationToken);
+        foreach (var stopId in stopIds)
+            if (await DriverSupportHandoverMutationGuard.HasActiveHoldForStopAsync(_db, stopId, cancellationToken))
+                return Error.Conflict("DELIVERY_HOLD_ACTIVE", _messages.GetMessage("driver_support_handover.hold_active", "A delivery hold blocks trip start."));
 
         var stops = await _db.TripStops
             .Where(s => s.TripId == trip.Id)
