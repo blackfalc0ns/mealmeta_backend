@@ -1,7 +1,23 @@
 using MealMate.Domain.Enums;
+using MealMate.Domain.Offers;
 using MealMate.Domain.Offers.Enums;
 
 namespace MealMate.Application.Features.Offers.DTOs;
+
+/// <summary>
+/// How the mobile client may act on an offer in customer lists. DirectPurchase: the id is a
+/// real active offer row addressable by GET /offers/{offerId}/purchase-options. CouponOnly:
+/// the offer is redeemed via its promo code in the subscription flow (or is a campaign
+/// projection whose id is a campaign id, not an offer id).
+/// </summary>
+public static class PurchaseModes
+{
+    public const string DirectPurchase = "DirectPurchase";
+    public const string CouponOnly = "CouponOnly";
+
+    public static string Of(Offer offer) =>
+        string.IsNullOrWhiteSpace(offer.PromoCode) ? DirectPurchase : CouponOnly;
+}
 
 public sealed record OfferPackageTargetDto(
     string SubscriptionType,
@@ -56,8 +72,8 @@ public sealed record OfferDto(
     string? AvailabilityReasonCode = null,
     IReadOnlyList<string>? IneligibilityReasonCodes = null,
     DateTime? EligibilityCheckedAtUtc = null,
-    bool IsSaved = false
-);
+    bool IsSaved = false,
+    string PurchaseMode = PurchaseModes.CouponOnly);
 
 public sealed record OfferRedemptionResultDto(
     Guid RedemptionId,

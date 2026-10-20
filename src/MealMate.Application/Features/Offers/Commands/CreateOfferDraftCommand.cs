@@ -187,7 +187,8 @@ public sealed class CreateOfferDraftCommandHandler : ICommandHandler<CreateOffer
         o.EligibleBundles.Select(b => b.BundleId).Distinct().ToArray(),
         o.EligibleRestaurants.Select(r => r.RestaurantId).Distinct().ToArray(),
         o.CampaignId.HasValue ? "Campaign" : "Offer",
-        o.PackageTargets.Select(MapPackageTarget).ToArray()
+        o.PackageTargets.Select(MapPackageTarget).ToArray(),
+        PurchaseMode: DTOs.PurchaseModes.Of(o)
     );
 
     private static OfferPackageTargetDto MapPackageTarget(OfferPackageTarget target) =>

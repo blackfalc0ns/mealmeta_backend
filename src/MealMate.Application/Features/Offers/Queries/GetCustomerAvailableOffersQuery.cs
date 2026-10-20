@@ -147,8 +147,9 @@ public sealed class GetCustomerAvailableOffersQueryHandler : IQueryHandler<GetCu
             {
                 var dto = CustomerSavedOfferMapping.MapCustomerOffer(offer, savedOfferIds.Contains(offer.Id));
                 // A campaign without a synchronized offer is a read projection, not a new offer identity.
+                // Its id is the campaign id — purchase-options cannot address it, so it is CouponOnly.
                 if (offer.CampaignId is { } campaignId && !existingCampaignIds.Contains(campaignId))
-                    dto = dto with { Id = campaignId };
+                    dto = dto with { Id = campaignId, PurchaseMode = DTOs.PurchaseModes.CouponOnly };
                 eligibleOffers.Add(dto);
             }
         }

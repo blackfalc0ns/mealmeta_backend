@@ -132,6 +132,89 @@ public class OfferQueriesTests
     }
 
     [Fact]
+    public void OfferDto_PurchaseMode_DirectPurchaseWithoutPromoCode_CouponOnlyWithPromoCode()
+    {
+        var direct = MealMate.Application.Features.Offers.Commands.CreateOfferDraftCommandHandler.MapOfferDto(new Offer
+        {
+            NameAr = "عرض مباشر",
+            NameEn = "Direct Offer",
+            Status = OfferStatus.Active
+        });
+        direct.PurchaseMode.Should().Be(MealMate.Application.Features.Offers.DTOs.PurchaseModes.DirectPurchase);
+
+        var coupon = MealMate.Application.Features.Offers.Commands.CreateOfferDraftCommandHandler.MapOfferDto(new Offer
+        {
+            NameAr = "كوبون",
+            NameEn = "Coupon Offer",
+            Status = OfferStatus.Active,
+            PromoCode = "SAVE20"
+        });
+        coupon.PurchaseMode.Should().Be(MealMate.Application.Features.Offers.DTOs.PurchaseModes.CouponOnly);
+    }
+
+    [Fact]
+    public async Task GetCustomerAvailableOffersQuery_ClassifiesPurchaseModes_AndCampaignProjectionsStayCouponOnly()
+    {
+        using var db = CreateDbContext();
+
+        var directOffer = new Offer
+        {
+            NameAr = "عرض مباشر",
+            NameEn = "Direct Offer",
+            Status = OfferStatus.Active,
+            CustomerSegment = CustomerSegmentFilter.All,
+            StartsAtUtc = DateTime.UtcNow.AddDays(-1),
+            EndsAtUtc = DateTime.UtcNow.AddDays(5)
+        };
+        var couponOffer = new Offer
+        {
+            NameAr = "كوبون",
+            NameEn = "Coupon Offer",
+            Status = OfferStatus.Active,
+            CustomerSegment = CustomerSegmentFilter.All,
+            StartsAtUtc = DateTime.UtcNow.AddDays(-1),
+            EndsAtUtc = DateTime.UtcNow.AddDays(5),
+            PromoCode = "SAVE20"
+        };
+        db.Offers.AddRange(directOffer, couponOffer);
+
+        var campaign = new MealMate.Domain.CollaborativeCampaigns.Campaign
+        {
+            NameAr = "حملة",
+            NameEn = "Campaign",
+            Status = MealMate.Domain.Enums.CampaignStatus.Active,
+            StartsAtUtc = DateTime.UtcNow.AddDays(-1),
+            EndsAtUtc = DateTime.UtcNow.AddDays(5),
+            TotalDiscountRate = MealMate.Domain.ValueObjects.Percentage.FromFraction(0.20m),
+            MealMateShareRate = MealMate.Domain.ValueObjects.Percentage.FromFraction(0.10m),
+            RestaurantShareRate = MealMate.Domain.ValueObjects.Percentage.FromFraction(0.10m)
+        };
+        db.Campaigns.Add(campaign);
+        await db.SaveChangesAsync();
+
+        var handler = new GetCustomerAvailableOffersQueryHandler(db, new OfferEligibilityEngine(), Sub_clock());
+        var result = await handler.Handle(new GetCustomerAvailableOffersQuery(Guid.NewGuid()), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var direct = result.Value!.Single(o => o.Id == directOffer.Id);
+        direct.PurchaseMode.Should().Be(MealMate.Application.Features.Offers.DTOs.PurchaseModes.DirectPurchase);
+
+        var coupon = result.Value!.Single(o => o.Id == couponOffer.Id);
+        coupon.PurchaseMode.Should().Be(MealMate.Application.Features.Offers.DTOs.PurchaseModes.CouponOnly);
+
+        // Campaign projection: id is the campaign id (not an offer id) → never DirectPurchase.
+        var campaignProjection = result.Value!.Single(o => o.Id == campaign.Id);
+        campaignProjection.PurchaseMode.Should().Be(MealMate.Application.Features.Offers.DTOs.PurchaseModes.CouponOnly);
+    }
+
+    private static IDateTimeProvider Sub_clock()
+    {
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(DateTime.UtcNow);
+        return clock;
+    }
+
+    [Fact]
     public async Task CustomerDetails_ReturnsScopeAndServerClock_WithoutConsumingCoupon()
     {
         using var db = CreateDbContext();
