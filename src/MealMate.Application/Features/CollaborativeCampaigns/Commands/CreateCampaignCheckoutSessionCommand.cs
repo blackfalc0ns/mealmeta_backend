@@ -150,7 +150,12 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
             if (quote.ExpiresAtUtc <= now)
             {
                 return Result.Failure<CampaignCheckoutSessionDto>(
-                    Error.Gone("Campaign.QuoteExpired", "The saved quote has expired. Request a new quote."));
+                    new Error("Campaign.QuoteExpired",
+                    "The saved quote has expired. Request a new quote.", ErrorType.Gone, null, new Dictionary<string, object?>
+                    {
+                        ["refreshSummary"] = true,
+                        ["refreshAvailability"] = true
+                    }));
             }
 
             if (quote.CampaignId != campaign.Id || quote.CampaignBundleId != request.BundleId)

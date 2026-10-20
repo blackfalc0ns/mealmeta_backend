@@ -6,6 +6,8 @@
 
 For the individual offer-selection screen and direct payment, use [Offer Direct Payment Mobile Contract](OFFER_DIRECT_PAYMENT_MOBILE_CONTRACT.md). It documents `purchase-options`, exact-offer summary, `quoteId`, retry ownership, actual error envelopes and payment polling. That focused contract takes precedence over earlier individual checkout examples here. Code changes still require deployment before mobile can use them on a server.
 
+For the dedicated campaigns tab (separate from ready packages and coupons), use [Campaign Mobile Flow Contract](CAMPAIGN_MOBILE_FLOW_CONTRACT.md): GET campaigns list/details, saved quote, quoteId-driven checkout-session, Payzah payment and polling, 404/410/409 disappearance rules and blocking reasons. Campaigns are never offered through the offers source and coupons never route into this tab.
+
 ## 1. Canonical flow routes
 
 | Flow | Summary | Checkout | Payment status | Resume/retry |

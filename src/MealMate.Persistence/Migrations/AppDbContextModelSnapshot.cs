@@ -2510,6 +2510,9 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("CustomerQuoteId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("DeletedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -3281,6 +3284,116 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("CampaignId");
 
                     b.ToTable("CampaignTierSnapshots");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CollaborativeCampaigns.CustomerCampaignQuote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AddressId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CampaignBundleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CampaignSnapshotVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("CanShowReferencePrice")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("CatalogBundleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("CouponDiscountAmount")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<decimal?>("CustomerDiscountPercent")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("numeric(9,3)");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("DiscountAmount")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<int>("DurationDays")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("FinalPrice")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PricingPolicyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("PricingPolicyVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ProgramId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PromoCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("ReferencePrice")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.PrimitiveCollection<DateOnly[]>("ServiceDates")
+                        .IsRequired()
+                        .HasColumnType("date[]");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("ExpiresAtUtc");
+
+                    b.HasIndex("CustomerId", "CampaignId", "CampaignBundleId", "DurationDays", "StartDate");
+
+                    b.ToTable("CustomerCampaignQuotes", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.Common.InboxProcessedEvent", b =>
@@ -10620,6 +10733,7 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("date");
 
                     b.Property<bool>("StartDateIsAutomatic")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
