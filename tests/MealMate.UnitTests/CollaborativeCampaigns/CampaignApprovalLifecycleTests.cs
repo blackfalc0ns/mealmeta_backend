@@ -3,9 +3,11 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Features.CollaborativeCampaigns.Commands;
 using MealMate.Application.Features.CollaborativeCampaigns.Services;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Domain.CollaborativeCampaigns;
 using MealMate.Domain.CollaborativeCampaigns.Enums;
 using MealMate.Domain.Enums;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -245,7 +247,11 @@ public class CampaignPricingPolicyGateTests
                 DeterministicLockTargets: Array.Empty<CapacityLockTarget>()));
 
         _handler = new CreateCampaignCheckoutSessionCommandHandler(
-            _context, _clock, _eligibilityEngine, _reservationCoordinator);
+            _context, _clock,
+            new CustomerCampaignEvaluationService(
+                _context, _clock, _eligibilityEngine,
+                new CustomerDeliveryAddressService(_context, _clock)),
+            _reservationCoordinator);
     }
 
     private Campaign CreateActiveCampaign()
@@ -263,7 +269,28 @@ public class CampaignPricingPolicyGateTests
         };
         _context.Campaigns.Add(campaign);
 
-        var bundle = new CampaignBundle { Campaign = campaign, BundleId = Guid.NewGuid() };
+        var program = new Program
+        {
+            Code = "P-" + Guid.NewGuid().ToString("N")[..8],
+            NameAr = "برنامج",
+            NameEn = "Program",
+            Status = ProgramStatus.Active,
+            IsActive = true
+        };
+        _context.Programs.Add(program);
+        var catalogBundle = new Bundle
+        {
+            ProgramId = program.Id,
+            Code = "B-" + Guid.NewGuid().ToString("N")[..8],
+            NameAr = "باقة",
+            NameEn = "Bundle",
+            MealsPerDay = 3,
+            Status = ProgramStatus.Active,
+            IsActive = true
+        };
+        _context.Bundles.Add(catalogBundle);
+
+        var bundle = new CampaignBundle { Campaign = campaign, BundleId = catalogBundle.Id };
         _context.CampaignBundles.Add(bundle);
         _context.SaveChanges();
         var priceResult = CampaignBundleDurationPrice.Create(
@@ -334,6 +361,27 @@ public class CampaignPricingPolicyGateTests
         await _context.SaveChangesAsync();
 
         var customerUserId = Guid.NewGuid();
+
+        var address = new MealMate.Domain.IdentityAccess.CustomerAddress
+        {
+            UserId = customerUserId,
+            Label = "المنزل",
+            AddressLine = "شارع 1",
+            RegionId = Guid.NewGuid(),
+            Governorate = "العاصمة",
+            IsDefault = true
+        };
+        _context.CustomerAddresses.Add(address);
+        _context.CustomerProfiles.Add(new MealMate.Domain.IdentityAccess.CustomerProfile
+        {
+            UserId = customerUserId,
+            AllergiesCompletedAtUtc = Now.AddMinutes(-1),
+            DietaryPreferencesCompletedAtUtc = Now.AddMinutes(-1),
+            ActiveDeliveryAddressId = address.Id,
+            ActiveDeliveryRegionId = address.RegionId
+        });
+        await _context.SaveChangesAsync();
+
         var command = BuildCommand(campaign, bundleId) with { CustomerId = customerUserId };
 
         var result = await _handler.Handle(command, CancellationToken.None);

@@ -65,7 +65,15 @@ public sealed class CustomerCollaborativeCampaignsController : ApiControllerBase
     [HttpPost("price-preview")]
     public async Task<IActionResult> GetPricePreview([FromBody] GetCampaignPricePreviewQuery query, CancellationToken cancellationToken)
     {
-        var result = await Sender.Send(query, cancellationToken);
+        // A body-supplied CustomerId is never a trust source: customer-specific evaluation applies
+        // only when the caller is authenticated as that exact customer; otherwise it is stripped.
+        Guid? customerId = CurrentUser.UserType == UserType.Customer
+            && CurrentUser.UserId.HasValue
+            && query.CustomerId == CurrentUser.UserId.Value
+                ? query.CustomerId
+                : null;
+
+        var result = await Sender.Send(query with { CustomerId = customerId }, cancellationToken);
         return HandleResult(result);
     }
 

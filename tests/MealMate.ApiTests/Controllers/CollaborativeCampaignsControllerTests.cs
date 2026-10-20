@@ -224,7 +224,9 @@ public class CollaborativeCampaignsControllerTests
             true,
             Array.Empty<string>());
 
-        _sender.Send(query, Arg.Any<CancellationToken>())
+        // The controller strips a body CustomerId that does not match the (anonymous) caller,
+        // so match any projected query instance rather than the original record.
+        _sender.Send(Arg.Any<GetCampaignPricePreviewQuery>(), Arg.Any<CancellationToken>())
             .Returns(Result.Success(preview));
 
         // Act
@@ -271,7 +273,10 @@ public class CollaborativeCampaignsControllerTests
     public async Task PaymentWebhook_ProcessCallback_WhenSuccess_ReturnsOk()
     {
         // Arrange
+        // Fail-closed webhook: the callback is served only with a configured secret matching the header.
+        _config["PaymentGateways:CampaignWebhookSecret"].Returns("test-secret");
         var controller = InitController(new CampaignPaymentWebhookController());
+        controller.Request.Headers["X-Webhook-Secret"] = "test-secret";
         var command = new ProcessPaymentCallbackCommand(
             Guid.NewGuid(),
             "Payzah",

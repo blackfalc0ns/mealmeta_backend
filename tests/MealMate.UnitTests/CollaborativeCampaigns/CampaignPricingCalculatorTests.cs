@@ -59,6 +59,25 @@ public class CampaignPricingCalculatorTests
     }
 
     [Fact]
+    public void Calculate_156ReferenceWith30Percent_Yields109_200()
+    {
+        // Attachment example: reference 156.000 KWD, headline 30% → discount 46.800, final 109.200.
+        // This pins the current engine policy; a different pricing decision changes this test explicitly.
+        var referencePrice = new Money(156.000m, "KWD");
+        var split = CampaignDiscountSplit.Of(
+            Percentage.FromFraction(0.30m),
+            Percentage.FromFraction(0.15m),
+            Percentage.FromFraction(0.15m));
+
+        var result = _calculator.Calculate(referencePrice, split, 26);
+
+        result.CustomerDiscountAmount.Amount.Should().Be(46.800m);
+        result.CampaignCustomerPrice.Amount.Should().Be(109.200m);
+        (result.RestaurantContributionFunded.Amount + result.PlatformContributionFunded.Amount)
+            .Should().Be(result.CustomerDiscountAmount.Amount);
+    }
+
+    [Fact]
     public void Calculate_Throws_WhenPriceIsZeroOrNegative()
     {
         var zeroPrice = new Money(0m, "KWD");

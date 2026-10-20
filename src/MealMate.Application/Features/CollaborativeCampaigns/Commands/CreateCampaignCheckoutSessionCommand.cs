@@ -21,7 +21,8 @@ public sealed record CreateCampaignCheckoutSessionCommand(
     Guid CustomerId,
     int DurationDays,
     IReadOnlyList<DateOnly> RequestedServiceDates,
-    string? DeliveryGovernorate = null) : ICommand<CampaignCheckoutSessionDto>;
+    string? DeliveryGovernorate = null,
+    Guid? AddressId = null) : ICommand<CampaignCheckoutSessionDto>;
 
 public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandler<CreateCampaignCheckoutSessionCommand, CampaignCheckoutSessionDto>
 {
@@ -29,18 +30,18 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
 
     private readonly IAppDbContext _context;
     private readonly IDateTimeProvider _clock;
-    private readonly ICampaignEligibilityEngine _eligibilityEngine;
+    private readonly ICustomerCampaignEvaluationService _evaluation;
     private readonly ICampaignReservationCoordinator _reservationCoordinator;
 
     public CreateCampaignCheckoutSessionCommandHandler(
         IAppDbContext context,
         IDateTimeProvider clock,
-        ICampaignEligibilityEngine eligibilityEngine,
+        ICustomerCampaignEvaluationService evaluation,
         ICampaignReservationCoordinator reservationCoordinator)
     {
         _context = context;
         _clock = clock;
-        _eligibilityEngine = eligibilityEngine;
+        _evaluation = evaluation;
         _reservationCoordinator = reservationCoordinator;
     }
 
@@ -72,70 +73,48 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
             }
         }
 
-        // 2. Validate Campaign
-        var campaign = await _context.Campaigns
-            .FirstOrDefaultAsync(c => c.Id == request.CampaignId, cancellationToken);
+        // 2. Single pricing/eligibility source: shared evaluation over authorized customer data.
+        var evaluation = await _evaluation.EvaluateAsync(
+            new CustomerCampaignEvaluationRequest(
+                request.CampaignId,
+                request.BundleId,
+                request.DurationDays,
+                request.CustomerId,
+                request.AddressId),
+            cancellationToken);
 
-        if (campaign == null)
+        if (evaluation.IsFailure)
         {
-            return Result.Failure<CampaignCheckoutSessionDto>(
-                Error.NotFound("Campaign.NotFound", $"Campaign with ID '{request.CampaignId}' was not found."));
+            return Result.Failure<CampaignCheckoutSessionDto>(evaluation.Error!);
         }
 
-        // 3. Validate Bundle Duration Pricing
-        var pricing = await _context.CampaignBundleDurationPrices
-            .FirstOrDefaultAsync(p => p.CampaignBundleId == request.BundleId && p.DurationDays == request.DurationDays, cancellationToken);
+        var e = evaluation.Value;
 
-        if (pricing == null)
-        {
-            return Result.Failure<CampaignCheckoutSessionDto>(
-                Error.NotFound("Campaign.PricingNotFound", $"No reference price found for Bundle '{request.BundleId}' with duration {request.DurationDays} days."));
-        }
-
-        // 3b. Pricing requires an explicitly approved policy covering the bundle currency.
-        //     No approved policy means checkout is unavailable — never a silent fallback price.
-        var policy = await _context.CampaignPricingPolicies
-            .Where(p => p.ApprovedByUserId != null && p.CurrencyCode == pricing.ReferenceCustomerPrice.CurrencyCode)
-            .OrderByDescending(p => p.Version)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (policy == null)
+        // 2b. Pricing requires an explicitly approved policy; never a silent fallback price.
+        if (e.Policy is null)
         {
             return Result.Failure<CampaignCheckoutSessionDto>(
                 Error.Validation(MessageCodes.Campaign.PricingPolicyNotApproved,
                     "No approved campaign pricing policy exists for this currency."));
         }
 
-        // 3c. Single pricing source: the campaign pricing calculator, under the approved policy.
-        var discountSplit = Domain.CollaborativeCampaigns.ValueObjects.CampaignDiscountSplit.Of(
-            Domain.ValueObjects.Percentage.FromFraction(campaign.TotalDiscountRate.Value),
-            Domain.ValueObjects.Percentage.FromFraction(campaign.RestaurantShareRate.Value),
-            Domain.ValueObjects.Percentage.FromFraction(campaign.MealMateShareRate.Value));
-
-        var priceResult = new Domain.CollaborativeCampaigns.Services.CampaignPricingCalculator()
-            .Calculate(pricing.ReferenceCustomerPrice, discountSplit, request.DurationDays);
-
-        // 4. Validate Customer Eligibility
-        var profile = new CustomerEligibilityProfile(
-            request.CustomerId,
-            PriorSubscriptionCount: 0,
-            ActiveCampaignSubscriptionCount: 0,
-            DeliveryGovernorate: request.DeliveryGovernorate,
-            RequestedDurationDays: request.DurationDays);
-
-        var eligibilityResult = _eligibilityEngine.Evaluate(
-            campaign,
-            profile,
-            new CampaignEligibilityCriteria(),
-            _clock.UtcNow);
-
-        if (!eligibilityResult.IsEligible)
+        // 2c. Campaign-rule eligibility (legacy contract keeps its code and message shape).
+        if (e.LegacyIneligibilityReasons.Count > 0)
         {
             return Result.Failure<CampaignCheckoutSessionDto>(
-                Error.Validation("Campaign.Ineligible", string.Join("; ", eligibilityResult.IneligibilityReasons)));
+                Error.Validation("Campaign.Ineligible", string.Join("; ", e.LegacyIneligibilityReasons)));
         }
 
-        // 5. Fetch available daily capacities
+        // 2d. Profile gates (address/allergies/preferences) from the customer's own data.
+        if (e.HasProfileGateBlocks)
+        {
+            var gates = e.Blocks.Where(b => b.Code.StartsWith("profile.", StringComparison.Ordinal));
+            return Result.Failure<CampaignCheckoutSessionDto>(
+                Error.Validation("Campaign.Ineligible",
+                    string.Join("; ", gates.Select(g => $"{g.Code}: {g.MessageEn}"))));
+        }
+
+        // 3. Fetch available daily capacities
         var dates = request.RequestedServiceDates.Select(d => (DateOnly?)d).Distinct().ToList();
         var capacityEntities = await _context.CampaignRestaurantCapacities
             .Where(c => c.CampaignId == request.CampaignId && dates.Contains(c.ServiceDate))
@@ -150,14 +129,14 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
             .ToList();
 
         var capState = new SubscriberCapState(
-            campaign.MaxSubscribers,
+            e.Campaign.MaxSubscribers,
             ReservedSlots: 0,
-            CommittedSlots: campaign.CurrentSubscribers);
+            CommittedSlots: e.Campaign.CurrentSubscribers);
 
-        // 6. Coordinate Atomic Reservation
+        // 4. Coordinate Atomic Reservation
         var reservationResult = _reservationCoordinator.CoordinateReservation(new ReservationRequest(
-            campaign.Id,
-            request.BundleId,
+            e.Campaign.Id,
+            e.CampaignBundle.Id,
             request.CustomerId,
             capState,
             request.RequestedServiceDates,
@@ -170,23 +149,23 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
                 Error.Conflict("Campaign.CapacityUnavailable", reservationResult.FailureReason ?? "Requested campaign capacity is unavailable."));
         }
 
-        // 7. Persist Reservation Allocations & Update Capacity Counts
+        // 5. Persist Reservation Allocations & Update Capacity Counts
         var sessionId = reservationResult.ReservationId ?? Guid.NewGuid();
         var expiresAtUtc = reservationResult.ExpiresAtUtc ?? _clock.UtcNow.AddMinutes(15);
 
         var session = new CampaignCheckoutSession(sessionId)
         {
-            CampaignId = campaign.Id,
-            BundleId = request.BundleId,
+            CampaignId = e.Campaign.Id,
+            BundleId = e.CampaignBundle.Id,
             CustomerId = request.CustomerId,
             Status = CampaignCheckoutSessionStatus.Pending,
             ExpiresAtUtc = expiresAtUtc,
-            PriceQuoteSnapshotId = pricing.Id,
-            FinalAmount = priceResult.CampaignCustomerPrice.Amount,
-            CurrencyCode = priceResult.CampaignCustomerPrice.CurrencyCode,
-            PricingPolicyId = policy.Id,
-            PricingPolicyVersion = policy.Version,
-            CampaignSnapshotVersion = campaign.CurrentSnapshotVersion
+            PriceQuoteSnapshotId = e.DurationPrice.Id,
+            FinalAmount = e.Price.CampaignCustomerPrice.Amount,
+            CurrencyCode = e.Price.CampaignCustomerPrice.CurrencyCode,
+            PricingPolicyId = e.Policy.Id,
+            PricingPolicyVersion = e.Policy.Version,
+            CampaignSnapshotVersion = e.Campaign.CurrentSnapshotVersion
         };
 
         var allocationDtos = new List<CampaignReservationAllocationDto>(reservationResult.Allocations.Count);
@@ -202,8 +181,8 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
             session.Allocations.Add(new CampaignReservationAllocation
             {
                 CheckoutSessionId = sessionId,
-                CampaignId = campaign.Id,
-                BundleId = request.BundleId,
+                CampaignId = e.Campaign.Id,
+                BundleId = e.CampaignBundle.Id,
                 ServiceDate = alloc.ServiceDate,
                 RestaurantId = alloc.RestaurantId,
                 Units = alloc.Units
@@ -214,17 +193,17 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
 
         var dto = new CampaignCheckoutSessionDto(
             sessionId,
-            campaign.Id,
-            request.BundleId,
+            e.Campaign.Id,
+            e.CampaignBundle.Id,
             request.CustomerId,
             request.DurationDays,
-            priceResult.CampaignCustomerPrice.Amount,
-            priceResult.CampaignCustomerPrice.CurrencyCode,
+            e.Price.CampaignCustomerPrice.Amount,
+            e.Price.CampaignCustomerPrice.CurrencyCode,
             expiresAtUtc,
             nameof(CampaignCheckoutSessionStatus.Pending),
             allocationDtos);
 
-        // 8. Record Idempotency
+        // 6. Record Idempotency
         var record = new IdempotencyRecord
         {
             Scope = IdempotencyScope,
@@ -244,7 +223,7 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
 
     private static string ComputeRequestHash(CreateCampaignCheckoutSessionCommand request)
     {
-        var raw = $"{request.CampaignId:N}:{request.BundleId:N}:{request.CustomerId:N}:{request.DurationDays}:{string.Join(",", request.RequestedServiceDates.OrderBy(d => d))}";
+        var raw = $"{request.CampaignId:N}:{request.BundleId:N}:{request.CustomerId:N}:{request.DurationDays}:{string.Join(",", request.RequestedServiceDates.OrderBy(d => d))}:{request.AddressId?.ToString("N")}";
         using var sha = SHA256.Create();
         var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexString(bytes);

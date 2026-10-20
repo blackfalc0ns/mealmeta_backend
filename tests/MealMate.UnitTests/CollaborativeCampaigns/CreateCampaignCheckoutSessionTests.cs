@@ -2,11 +2,16 @@ using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.CollaborativeCampaigns.Commands;
 using MealMate.Application.Features.CollaborativeCampaigns.DTOs;
+using MealMate.Application.Features.CollaborativeCampaigns.Queries;
 using MealMate.Application.Features.CollaborativeCampaigns.Services;
+using MealMate.Application.Features.IdentityAccess.Customers;
 using MealMate.Domain.CollaborativeCampaigns;
 using MealMate.Domain.CollaborativeCampaigns.Enums;
 using MealMate.Domain.Enums;
+using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
+using MealMate.Application.Common.Models;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
@@ -18,11 +23,12 @@ public class CreateCampaignCheckoutSessionTests
 {
     private readonly AppDbContext _context;
     private readonly IDateTimeProvider _clock = Substitute.For<IDateTimeProvider>();
-    private readonly ICampaignEligibilityEngine _eligibilityEngine = new CampaignEligibilityEngine();
     private readonly ISubscriberCapManager _capManager = new SubscriberCapManager();
     private readonly ICampaignFulfillmentAllocator _allocator = new CampaignFulfillmentAllocator();
     private readonly ICampaignReservationCoordinator _coordinator;
+    private readonly ICustomerCampaignEvaluationService _evaluation;
     private readonly CreateCampaignCheckoutSessionCommandHandler _handler;
+    private readonly GetCampaignPricePreviewQueryHandler _previewHandler;
     private readonly DateTime _now = new(2026, 10, 5, 12, 0, 0, DateTimeKind.Utc);
 
     public CreateCampaignCheckoutSessionTests()
@@ -36,14 +42,19 @@ public class CreateCampaignCheckoutSessionTests
         _clock.UtcNow.Returns(_now);
 
         _coordinator = new CampaignReservationCoordinator(_capManager, _allocator, _clock);
-        _handler = new CreateCampaignCheckoutSessionCommandHandler(
+        _evaluation = new CustomerCampaignEvaluationService(
             _context,
             _clock,
-            _eligibilityEngine,
-            _coordinator);
+            new CampaignEligibilityEngine(),
+            new CustomerDeliveryAddressService(_context, _clock));
+        _handler = new CreateCampaignCheckoutSessionCommandHandler(_context, _clock, _evaluation, _coordinator);
+        _previewHandler = new GetCampaignPricePreviewQueryHandler(_evaluation);
     }
 
-    private (Campaign Campaign, Guid BundleId, Guid RestA, DateOnly Date1) SeedCampaignWithCapacity()
+    private async Task<(Campaign Campaign, Guid BundleId, Guid RestA, DateOnly Date1)> SeedCampaignWithCapacity(
+        decimal headline = 0.20m,
+        decimal restaurantShare = 0.10m,
+        decimal platformShare = 0.10m)
     {
         var campaign = new Campaign
         {
@@ -52,16 +63,45 @@ public class CreateCampaignCheckoutSessionTests
             Status = CampaignStatus.Active,
             StartsAtUtc = _now.AddDays(-2),
             EndsAtUtc = _now.AddDays(10),
-            TotalDiscountRate = Percentage.FromFraction(0.20m),
-            MealMateShareRate = Percentage.FromFraction(0.10m),
-            RestaurantShareRate = Percentage.FromFraction(0.10m),
+            TotalDiscountRate = Percentage.FromFraction(headline),
+            MealMateShareRate = Percentage.FromFraction(platformShare),
+            RestaurantShareRate = Percentage.FromFraction(restaurantShare),
             MaxSubscribers = 10
         };
         _context.Campaigns.Add(campaign);
 
-        var bundleId = Guid.NewGuid();
+        var program = new Program
+        {
+            Code = "P-" + Guid.NewGuid().ToString("N")[..8],
+            NameAr = "برنامج",
+            NameEn = "Program",
+            Status = ProgramStatus.Active,
+            IsActive = true
+        };
+        _context.Programs.Add(program);
+
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id,
+            Code = "B-" + Guid.NewGuid().ToString("N")[..8],
+            NameAr = "باقة",
+            NameEn = "Bundle",
+            MealsPerDay = 3,
+            Status = ProgramStatus.Active,
+            IsActive = true
+        };
+        _context.Bundles.Add(bundle);
+
+        var campaignBundle = new CampaignBundle
+        {
+            CampaignId = campaign.Id,
+            BundleId = bundle.Id
+        };
+        _context.CampaignBundles.Add(campaignBundle);
+        await _context.SaveChangesAsync();
+
         var durationPrice = CampaignBundleDurationPrice.Create(
-            bundleId,
+            campaignBundle.Id,
             1,
             new Money(100.000m, "KWD"),
             "System",
@@ -87,16 +127,42 @@ public class CreateCampaignCheckoutSessionTests
             "{\"restaurantShare\":0.5}", "{\"stacking\":\"exclusive\"}", "{\"basis\":\"undeliveredDays\"}").Value;
         policy.Approve(Guid.NewGuid(), _now);
         _context.CampaignPricingPolicies.Add(policy);
-        _context.SaveChanges();
+        await _context.SaveChangesAsync();
 
-        return (campaign, bundleId, restA, date1);
+        return (campaign, campaignBundle.Id, restA, date1);
+    }
+
+    private async Task SeedCustomerWithCompleteProfileAsync(Guid customerId)
+    {
+        var address = new CustomerAddress
+        {
+            UserId = customerId,
+            Label = "المنزل",
+            AddressLine = "شارع 1",
+            RegionId = Guid.NewGuid(),
+            Governorate = "العاصمة",
+            IsDefault = true
+        };
+        _context.CustomerAddresses.Add(address);
+
+        var profile = new CustomerProfile
+        {
+            UserId = customerId,
+            AllergiesCompletedAtUtc = _now.AddDays(-1),
+            DietaryPreferencesCompletedAtUtc = _now.AddDays(-1),
+            ActiveDeliveryAddressId = address.Id,
+            ActiveDeliveryRegionId = address.RegionId
+        };
+        _context.CustomerProfiles.Add(profile);
+        await _context.SaveChangesAsync();
     }
 
     [Fact]
     public async Task Handle_WhenValidRequest_CreatesSessionAndReservesCapacity()
     {
-        var (campaign, bundleId, restA, date1) = SeedCampaignWithCapacity();
+        var (campaign, bundleId, restA, date1) = await SeedCampaignWithCapacity();
         var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
 
         var command = new CreateCampaignCheckoutSessionCommand(
             IdempotencyKey: "key-1",
@@ -125,10 +191,194 @@ public class CreateCampaignCheckoutSessionTests
     }
 
     [Fact]
+    public async Task Handle_SameSelection_PreviewAndCheckoutAgreeOnFinalPrice()
+    {
+        var (campaign, bundleId, _, date1) = await SeedCampaignWithCapacity(headline: 0.30m, restaurantShare: 0.15m, platformShare: 0.15m);
+        var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
+
+        var preview = await _previewHandler.Handle(
+            new GetCampaignPricePreviewQuery(campaign.Id, bundleId, 1, customerId),
+            CancellationToken.None);
+
+        var checkout = await _handler.Handle(new CreateCampaignCheckoutSessionCommand(
+            IdempotencyKey: "key-price-parity",
+            CampaignId: campaign.Id,
+            BundleId: bundleId,
+            CustomerId: customerId,
+            DurationDays: 1,
+            RequestedServiceDates: new List<DateOnly> { date1 }),
+            CancellationToken.None);
+
+        preview.IsSuccess.Should().BeTrue();
+        checkout.IsSuccess.Should().BeTrue();
+        // 100.000 reference with 30% headline discount → 70.000 on both paths.
+        preview.Value.FinalCustomerPrice.Should().Be(70.000m);
+        checkout.Value.FinalCustomerPrice.Should().Be(preview.Value.FinalCustomerPrice);
+    }
+
+    [Fact]
+    public async Task Handle_WhenBundleFromAnotherCampaign_ReturnsNotFound()
+    {
+        var (campaign, _, _, _) = await SeedCampaignWithCapacity();
+        var otherCampaign = new Campaign
+        {
+            NameAr = "حملة أخرى",
+            NameEn = "Other Campaign",
+            Status = CampaignStatus.Active,
+            StartsAtUtc = _now.AddDays(-2),
+            EndsAtUtc = _now.AddDays(10),
+            TotalDiscountRate = Percentage.FromFraction(0.20m),
+            MealMateShareRate = Percentage.FromFraction(0.10m),
+            RestaurantShareRate = Percentage.FromFraction(0.10m)
+        };
+        _context.Campaigns.Add(otherCampaign);
+        var foreignCampaignBundle = new CampaignBundle
+        {
+            CampaignId = otherCampaign.Id,
+            BundleId = Guid.NewGuid()
+        };
+        _context.CampaignBundles.Add(foreignCampaignBundle);
+        await _context.SaveChangesAsync();
+
+        var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
+
+        var command = new CreateCampaignCheckoutSessionCommand(
+            IdempotencyKey: "key-foreign-bundle",
+            CampaignId: campaign.Id,
+            BundleId: foreignCampaignBundle.Id,
+            CustomerId: customerId,
+            DurationDays: 1,
+            RequestedServiceDates: new List<DateOnly> { new(2026, 10, 6) });
+
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Campaign.BundleNotInCampaign");
+    }
+
+    [Fact]
+    public async Task Handle_WhenDurationNotPriced_ReturnsNotFound()
+    {
+        var (campaign, bundleId, _, date1) = await SeedCampaignWithCapacity();
+        var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
+
+        var command = new CreateCampaignCheckoutSessionCommand(
+            IdempotencyKey: "key-unpriced",
+            CampaignId: campaign.Id,
+            BundleId: bundleId,
+            CustomerId: customerId,
+            DurationDays: 7, // no 7-day price row seeded
+            RequestedServiceDates: new List<DateOnly> { date1 });
+
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Campaign.PricingNotFound");
+    }
+
+    [Fact]
+    public async Task Handle_WhenCustomerHasActiveCampaignSubscription_ReturnsIneligible()
+    {
+        var (campaign, bundleId, _, date1) = await SeedCampaignWithCapacity();
+        var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
+
+        _context.Subscriptions.Add(new Subscription
+        {
+            CustomerUserId = customerId,
+            CampaignId = campaign.Id,
+            ProgramId = Guid.NewGuid(),
+            BundleId = Guid.NewGuid(),
+            DurationDays = 26,
+            StartDate = new DateOnly(2026, 10, 1),
+            EndDate = new DateOnly(2026, 10, 26),
+            Status = SubscriptionStatus.Active
+        });
+        await _context.SaveChangesAsync();
+
+        var command = new CreateCampaignCheckoutSessionCommand(
+            IdempotencyKey: "key-already-subscribed",
+            CampaignId: campaign.Id,
+            BundleId: bundleId,
+            CustomerId: customerId,
+            DurationDays: 1,
+            RequestedServiceDates: new List<DateOnly> { date1 });
+
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Campaign.Ineligible");
+        result.Error.Description.Should().Contain("subscription limit");
+    }
+
+    [Fact]
+    public async Task Handle_WhenCustomerProfileIncomplete_ReturnsIneligible()
+    {
+        var (campaign, bundleId, _, date1) = await SeedCampaignWithCapacity();
+        var customerId = Guid.NewGuid();
+        // No customer profile at all: address/allergies/preferences gates are all unmet.
+        await _context.SaveChangesAsync();
+
+        var command = new CreateCampaignCheckoutSessionCommand(
+            IdempotencyKey: "key-profile-incomplete",
+            CampaignId: campaign.Id,
+            BundleId: bundleId,
+            CustomerId: customerId,
+            DurationDays: 1,
+            RequestedServiceDates: new List<DateOnly> { date1 });
+
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Campaign.Ineligible");
+        result.Error.Description.Should().Contain("profile.address_missing");
+        result.Error.Description.Should().Contain("profile.allergies_missing");
+    }
+
+    [Fact]
+    public async Task Handle_WhenAddressNotOwned_ReturnsForbidden()
+    {
+        var (campaign, bundleId, _, date1) = await SeedCampaignWithCapacity();
+        var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
+
+        var otherCustomer = Guid.NewGuid();
+        var foreignAddress = new CustomerAddress
+        {
+            UserId = otherCustomer,
+            Label = "بيت غيره",
+            AddressLine = "شارع 9",
+            RegionId = Guid.NewGuid(),
+            Governorate = "حولي"
+        };
+        _context.CustomerAddresses.Add(foreignAddress);
+        await _context.SaveChangesAsync();
+
+        var command = new CreateCampaignCheckoutSessionCommand(
+            IdempotencyKey: "key-foreign-address",
+            CampaignId: campaign.Id,
+            BundleId: bundleId,
+            CustomerId: customerId,
+            DurationDays: 1,
+            RequestedServiceDates: new List<DateOnly> { date1 },
+            AddressId: foreignAddress.Id);
+
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Campaign.AddressNotOwned");
+        result.Error.Type.Should().Be(ErrorType.Forbidden);
+    }
+
+    [Fact]
     public async Task Handle_WhenIdempotentRequestRepeated_ReturnsCachedSessionWithoutDuplicateReservation()
     {
-        var (campaign, bundleId, restA, date1) = SeedCampaignWithCapacity();
+        var (campaign, bundleId, restA, date1) = await SeedCampaignWithCapacity();
         var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
 
         var command = new CreateCampaignCheckoutSessionCommand(
             IdempotencyKey: "key-repeat",
@@ -154,8 +404,9 @@ public class CreateCampaignCheckoutSessionTests
     [Fact]
     public async Task Handle_WhenIdempotentKeyReusedWithDifferentPayload_ReturnsConflict()
     {
-        var (campaign, bundleId, restA, date1) = SeedCampaignWithCapacity();
+        var (campaign, bundleId, restA, date1) = await SeedCampaignWithCapacity();
         var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
 
         var command1 = new CreateCampaignCheckoutSessionCommand(
             IdempotencyKey: "key-conflict",
@@ -183,7 +434,9 @@ public class CreateCampaignCheckoutSessionTests
     [Fact]
     public async Task Handle_WhenCapacityUnavailable_ReturnsConflictAndDoesNotReserve()
     {
-        var (campaign, bundleId, restA, date1) = SeedCampaignWithCapacity();
+        var (campaign, bundleId, restA, date1) = await SeedCampaignWithCapacity();
+        var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
 
         // Exhaust capacity
         var cap = await _context.CampaignRestaurantCapacities
@@ -195,7 +448,7 @@ public class CreateCampaignCheckoutSessionTests
             IdempotencyKey: "key-exhausted",
             CampaignId: campaign.Id,
             BundleId: bundleId,
-            CustomerId: Guid.NewGuid(),
+            CustomerId: customerId,
             DurationDays: 1,
             RequestedServiceDates: new List<DateOnly> { date1 });
 
