@@ -121,7 +121,7 @@ WITH o AS (
   SELECT gen_random_uuid(),'عرض كيتو مباشر 20%','[MM-MOBILE-QA] Direct Keto 20% off',
     'اشترك في باقة الكيتو الكاملة بخصم مباشر','Subscribe to Full Keto Bundle with a direct discount',
     3,1,1,1, 0.20,0.05,0.15, now()-interval '1 hour', now()+interval '30 days',
-    NULL,0,1,1,NULL,false, false,NULL, now()
+    NULL,0,1,0,NULL,false, false,NULL, now()
   WHERE NOT EXISTS (SELECT 1 FROM "Offers" WHERE "NameEn"='[MM-MOBILE-QA] Direct Keto 20% off' AND "IsDeleted"=false)
   RETURNING "Id"
 )
@@ -141,7 +141,7 @@ WITH o AS (
   SELECT gen_random_uuid(),'عرض الرياضيين المباشر 10%','[MM-MOBILE-QA] Direct Athlete 10% off',
     'اشترك في باقة Elite Athlete بخصم مباشر','Subscribe to Elite Athlete Bundle with a direct discount',
     3,1,1,1, 0.10,0.05,0.05, now()-interval '1 hour', now()+interval '30 days',
-    NULL,0,1,1,NULL,false, false,NULL, now()
+    NULL,0,1,0,NULL,false, false,NULL, now()
   WHERE NOT EXISTS (SELECT 1 FROM "Offers" WHERE "NameEn"='[MM-MOBILE-QA] Direct Athlete 10% off' AND "IsDeleted"=false)
   RETURNING "Id"
 )
@@ -160,7 +160,7 @@ INSERT INTO "Offers"
 SELECT gen_random_uuid(),'كوبون العائلة 25%','[MM-MOBILE-QA] Coupon Family 25% off',
   'استخدم الكود في الاشتراك العائلي','Apply the code in the family subscription flow',
   3,1,1,1, 0.25,0.10,0.15, now()-interval '1 hour', now()+interval '30 days',
-  NULL,0,1,1,NULL,false, false,'MMQA25', now()
+  NULL,0,1,0,NULL,false, false,'MMQA25', now()
 WHERE NOT EXISTS (SELECT 1 FROM "Offers" WHERE "NameEn"='[MM-MOBILE-QA] Coupon Family 25% off' AND "IsDeleted"=false);
 
 COMMIT;
