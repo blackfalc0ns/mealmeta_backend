@@ -98,13 +98,12 @@ public sealed class CampaignPaymentService : ICampaignPaymentService
                 return Result.Failure<StartPreparation>(Error.Conflict("campaign.payment.already_started"));
 
             if (session.Status != CampaignCheckoutSessionStatus.Pending || session.PaymentWasCancelled)
-                return Result.Failure<StartPreparation>(Error.Conflict(
-                    session.Status == CampaignCheckoutSessionStatus.Expired || session.ExpiresAtUtc <= _clock.UtcNow
-                        ? "campaign.payment.session_expired"
-                        : "campaign.payment.session_not_payable"));
+                return Result.Failure<StartPreparation>(session.Status == CampaignCheckoutSessionStatus.Expired || session.ExpiresAtUtc <= _clock.UtcNow
+                    ? ExpiredHoldError()
+                    : Error.Conflict("campaign.payment.session_not_payable"));
 
             if (session.ExpiresAtUtc <= _clock.UtcNow)
-                return Result.Failure<StartPreparation>(Error.Conflict("campaign.payment.session_expired"));
+                return Result.Failure<StartPreparation>(ExpiredHoldError());
 
             if (session.FinalAmount is not decimal amount || amount <= 0m || decimal.Round(amount, 3) != amount ||
                 !string.Equals(session.CurrencyCode, "KWD", StringComparison.Ordinal))
@@ -616,5 +615,19 @@ public sealed class CampaignPaymentService : ICampaignPaymentService
         string? ErrorUrl = null);
 
     private enum ProviderPaymentState { Pending, Paid, Failed, Expired, Cancelled }
-}
 
+    /// <summary>
+    /// An expired reservation hold is Gone (410), not a retryable conflict: the client must
+    /// request a fresh quote and a new session; refresh hints cover summary and availability.
+    /// </summary>
+    private static Error ExpiredHoldError() => new(
+        "campaign.payment.session_expired",
+        "The campaign checkout session has expired. Request a new quote and session.",
+        ErrorType.Gone,
+        null,
+        new Dictionary<string, object?>
+        {
+            ["refreshSummary"] = true,
+            ["refreshAvailability"] = true
+        });
+}

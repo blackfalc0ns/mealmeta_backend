@@ -180,6 +180,9 @@ public sealed class CampaignPaymentServiceTests : IDisposable
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("campaign.payment.session_expired");
+        result.Error.Type.Should().Be(ErrorType.Gone);
+        result.Error.Metadata.Should().ContainKey("refreshSummary").WhoseValue.Should().Be(true);
+        result.Error.Metadata.Should().ContainKey("refreshAvailability").WhoseValue.Should().Be(true);
         await _gateway.DidNotReceiveWithAnyArgs().ExecutePaymentAsync(default, default!, default!, default!, default!, default!, default, default, default);
     }
 
@@ -276,6 +279,53 @@ public sealed class CampaignPaymentServiceTests : IDisposable
         Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
         .Returns(new PaymentCreationReceipt("provider-id", "https://payzah.example/checkout", "track-123"));
 
+    [Fact]
+    public async Task ProcessCallbackAsync_LateSuccessAfterReservationRelease_RecoversSubscriptionWithoutDoubleRelease()
+    {
+        var (campaign, capacity) = PrepareInitiatedPayment();
+
+        // The hold expired and the expiration worker released the boxes before the provider
+        // capture arrived late.
+        var session = _db.CampaignCheckoutSessions.Single();
+        session.Status = CampaignCheckoutSessionStatus.Expired;
+        session.ReservationsReleasedAtUtc = _now.AddMinutes(-1);
+        capacity.ReservedBoxes = 0;
+        _db.SaveChanges();
+
+        _gateway.GetPaymentStatusAsync("pz-track-123", "PaymentId", Arg.Any<CancellationToken>())
+            .Returns(VerifiedStatus("CAPTURED"));
+        _latePayments.ResolveLatePaymentAsync(Arg.Do<CampaignCheckoutSession>(s => s.MarkPaid()), Arg.Any<CampaignPaymentTransaction>(), Arg.Any<CancellationToken>())
+            .Returns(new LatePaymentResolutionResult(true, CampaignCheckoutSessionStatus.Paid, false, "late capture honored"));
+        var service = CreateService();
+
+        var result = await service.ProcessCallbackAsync(new ProcessPaymentCallbackCommand(
+            _sessionId, "Payzah", "pz-track-123", null, 50.000m, "KWD", true), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var freshCapacity = await _db.CampaignRestaurantCapacities.SingleAsync();
+        freshCapacity.ReservedBoxes.Should().Be(0); // released exactly once, never negative
+        (await _db.Subscriptions.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task StartAsync_StoppedCampaignWithLiveHold_StillPayableWithinHoldValidity()
+    {
+        SetGatewayReceipt();
+        var session = _db.CampaignCheckoutSessions.Single();
+        var campaign = _db.Campaigns.Single(c => c.Id == session.CampaignId);
+        campaign.Status = CampaignStatus.Stopped; // merchant stopped the campaign mid-hold
+        _db.SaveChanges();
+
+        var service = CreateService();
+        var result = await service.StartAsync(_sessionId, _customerId, new StartCampaignPaymentRequest("stop-hold-key"));
+
+        // Policy: no NEW reservations after stop, but an existing live hold stays payable
+        // until its own expiry; a completed subscription is never auto-cancelled.
+        result.IsSuccess.Should().BeTrue();
+        await _gateway.Received(1).ExecutePaymentAsync(Arg.Any<decimal>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
     private void SeedSession()
     {
         var campaign = new Campaign
@@ -291,7 +341,15 @@ public sealed class CampaignPaymentServiceTests : IDisposable
             MaxSubscribers = 10
         };
         _db.Campaigns.Add(campaign);
-        var bundleId = Guid.NewGuid();
+                var bundle = new Bundle
+        {
+            Code = "BUNDLE-PAY-01",
+            NameAr = "باقة",
+            NameEn = "Bundle",
+            ProgramId = Guid.NewGuid()
+        };
+        _db.Bundles.Add(bundle);
+        var bundleId = bundle.Id;
         _db.CampaignBundleDurationPrices.Add(CampaignBundleDurationPrice.Create(bundleId, 1,
             new Money(50.000m, "KWD"), "System", 1).Value);
         _db.CampaignCheckoutSessions.Add(new CampaignCheckoutSession(_sessionId)
