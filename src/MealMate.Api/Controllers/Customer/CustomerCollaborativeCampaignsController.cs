@@ -61,6 +61,30 @@ public sealed class CustomerCollaborativeCampaignsController : ApiControllerBase
         return response;
     }
 
+    [Authorize]
+    [HttpGet]
+    public async Task<IActionResult> GetCampaigns([FromQuery] int pageSize = 20, [FromQuery] string? cursor = null, CancellationToken cancellationToken = default)
+    {
+        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue) return Forbid();
+        var query = new GetCustomerCampaignsQuery(CurrentUser.UserId.Value, pageSize, cursor);
+        var result = await Sender.Send(query, cancellationToken);
+        return HandleResult(result);
+    }
+
+    [Authorize]
+    [HttpGet("{campaignId:guid}")]
+    public async Task<IActionResult> GetCampaignDetails(
+        Guid campaignId,
+        [FromQuery] Guid? bundleId,
+        [FromQuery] int? durationDays,
+        CancellationToken cancellationToken)
+    {
+        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue) return Forbid();
+        var query = new GetCustomerCampaignDetailsQuery(CurrentUser.UserId.Value, campaignId, bundleId, durationDays);
+        var result = await Sender.Send(query, cancellationToken);
+        return HandleResult(result);
+    }
+
     [AllowAnonymous]
     [HttpPost("price-preview")]
     public async Task<IActionResult> GetPricePreview([FromBody] GetCampaignPricePreviewQuery query, CancellationToken cancellationToken)

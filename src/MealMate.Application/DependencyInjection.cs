@@ -130,6 +130,7 @@ public static class DependencyInjection
         services.AddScoped<Features.CollaborativeCampaigns.Services.IOutboxDispatcherService, Features.CollaborativeCampaigns.Services.OutboxDispatcherService>();
         services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignEligibilityEngine, Features.CollaborativeCampaigns.Services.CampaignEligibilityEngine>();
         services.AddScoped<Features.CollaborativeCampaigns.Services.ICustomerCampaignEvaluationService, Features.CollaborativeCampaigns.Services.CustomerCampaignEvaluationService>();
+        services.AddScoped<Features.CollaborativeCampaigns.Queries.CustomerCampaignOptionProjector>();
         services.AddScoped<Features.CollaborativeCampaigns.Services.ICampaignPaymentService, Features.CollaborativeCampaigns.Services.CampaignPaymentService>();
 
         // Advertising Services

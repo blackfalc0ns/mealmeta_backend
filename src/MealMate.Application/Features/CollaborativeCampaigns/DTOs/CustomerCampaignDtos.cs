@@ -37,3 +37,59 @@ public sealed record CustomerCampaignQuote(
     DateTime ServerNowUtc,
     bool CanCheckout,
     IReadOnlyList<CustomerCampaignBlock> BlockingReasons);
+
+/// <summary>
+/// Customer-facing campaign card. MinPrice is present only when a confirmed, policy-backed
+/// option exists (never a fabricated "from" price); funding contributions are never projected.
+/// </summary>
+public sealed record CustomerCampaignListItemDto(
+    Guid CampaignId,
+    string NameAr,
+    string NameEn,
+    string? DescriptionAr,
+    string? DescriptionEn,
+    DateTime StartsAtUtc,
+    DateTime EndsAtUtc,
+    decimal? MinPrice,
+    string? CurrencyCode,
+    Guid? MinPriceCampaignBundleId,
+    int? MinPriceDurationDays,
+    int? RemainingSubscriberSlots,
+    bool FullSequenceAvailable);
+
+public sealed record CustomerCampaignsPageDto(
+    IReadOnlyList<CustomerCampaignListItemDto> Items,
+    string? NextCursor,
+    DateTime ServerNowUtc);
+
+public sealed record CustomerCampaignOptionDto(
+    Guid CampaignBundleId,
+    Guid CatalogBundleId,
+    Guid ProgramId,
+    string ProgramNameAr,
+    string ProgramNameEn,
+    string BundleNameAr,
+    string BundleNameEn,
+    string? BundleDescriptionAr,
+    string? BundleDescriptionEn,
+    int DurationDays,
+    decimal? ReferencePrice,
+    decimal FinalPrice,
+    string CurrencyCode,
+    decimal? CustomerDiscountPercent,
+    bool CanShowReferencePrice,
+    bool FullSequenceAvailable);
+
+public sealed record CustomerCampaignDetailsDto(
+    Guid CampaignId,
+    string NameAr,
+    string NameEn,
+    string? DescriptionAr,
+    string? DescriptionEn,
+    DateTime StartsAtUtc,
+    DateTime EndsAtUtc,
+    DateTime ServerNowUtc,
+    bool CanCheckout,
+    int? RemainingSubscriberSlots,
+    IReadOnlyList<CustomerCampaignBlock> BlockingReasons,
+    IReadOnlyList<CustomerCampaignOptionDto> Options);

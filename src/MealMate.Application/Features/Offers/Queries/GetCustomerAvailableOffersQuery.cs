@@ -18,7 +18,10 @@ public sealed record GetCustomerAvailableOffersQuery(
     string? DeliveryGovernorate = null,
     Guid? ProgramId = null,
     Guid? BundleId = null,
-    Guid? RestaurantId = null
+    Guid? RestaurantId = null,
+    /// <summary>Legacy callers keep campaign unification. The dedicated campaign discovery tab
+    /// passes false so campaigns are sourced only from the campaign endpoints.</summary>
+    bool IncludeCampaigns = true
 ) : IQuery<IReadOnlyList<OfferDto>>;
 
 public sealed class GetCustomerAvailableOffersQueryHandler : IQueryHandler<GetCustomerAvailableOffersQuery, IReadOnlyList<OfferDto>>
@@ -41,7 +44,7 @@ public sealed class GetCustomerAvailableOffersQueryHandler : IQueryHandler<GetCu
     {
         var now = _clock.UtcNow;
 
-        var activeOffers = await _context.Offers
+        List<Offer> activeOffers = await _context.Offers
             .AsNoTracking()
             .Include(o => o.EligiblePrograms)
             .Include(o => o.EligibleBundles)
@@ -50,46 +53,58 @@ public sealed class GetCustomerAvailableOffersQueryHandler : IQueryHandler<GetCu
             .Where(o => o.Status == OfferStatus.Active && o.StartsAtUtc <= now && o.EndsAtUtc >= now)
             .ToListAsync(cancellationToken);
 
-        // Seamless unification: also include any active campaigns not yet in the offers table
-        var activeCampaigns = await _context.Campaigns
-            .AsNoTracking()
-            .Include(c => c.Programs)
-            .Include(c => c.Bundles)
-            .Include(c => c.RestaurantEnrollments)
-            .Where(c => c.Status == CampaignStatus.Active && c.StartsAtUtc <= now && c.EndsAtUtc >= now)
-            .ToListAsync(cancellationToken);
+        if (!request.IncludeCampaigns)
+        {
+            // Explicit separation: campaign-sourced offers (synced rows included) belong to the
+            // dedicated campaign endpoints, never to the offers source.
+            activeOffers = activeOffers.Where(o => o.CampaignId is null).ToList();
+        }
 
         var existingCampaignIds = activeOffers.Where(o => o.CampaignId.HasValue).Select(o => o.CampaignId!.Value).ToHashSet();
-        foreach (var campaign in activeCampaigns)
-        {
-            if (!existingCampaignIds.Contains(campaign.Id))
-            {
-                var virtualOffer = new Offer
-                {
-                    CampaignId = campaign.Id,
-                    NameAr = campaign.NameAr,
-                    NameEn = campaign.NameEn,
-                    Status = OfferStatus.Active,
-                    Type = OfferType.StandardDiscount,
-                    DiscountType = DiscountType.Percentage,
-                    FundingMode = (OfferFundingMode)(int)campaign.FundingMode,
-                    DiscountRate = campaign.TotalDiscountRate,
-                    PlatformShareRate = campaign.MealMateShareRate,
-                    RestaurantShareRate = campaign.RestaurantShareRate,
-                    StartsAtUtc = campaign.StartsAtUtc,
-                    EndsAtUtc = campaign.EndsAtUtc,
-                    TotalUsageLimit = campaign.MaxSubscribers,
-                    CurrentUsageCount = campaign.CurrentSubscribers,
-                    PerCustomerLimit = 1,
-                    CustomerSegment = CustomerSegmentFilter.All,
-                    EligiblePrograms = campaign.Programs.Select(p => new OfferProgram { ProgramId = p.ProgramId }).ToList(),
-                    EligibleBundles = campaign.Bundles.Select(b => new OfferBundle { BundleId = b.BundleId }).ToList(),
-                    EligibleRestaurants = campaign.RestaurantEnrollments
-                        .Where(e => e.ParticipationStatus is MealMate.Domain.CollaborativeCampaigns.Enums.CampaignRestaurantParticipationStatus.Accepted or MealMate.Domain.CollaborativeCampaigns.Enums.CampaignRestaurantParticipationStatus.Locked)
-                        .Select(e => new OfferRestaurant { RestaurantId = e.RestaurantId }).ToList()
-                };
 
-                activeOffers.Add(virtualOffer);
+        // Seamless unification: also include any active campaigns not yet in the offers table.
+        // Optional explicit separation keeps the dedicated campaign tab off the offers source.
+        if (request.IncludeCampaigns)
+        {
+            var activeCampaigns = await _context.Campaigns
+                .AsNoTracking()
+                .Include(c => c.Programs)
+                .Include(c => c.Bundles)
+                .Include(c => c.RestaurantEnrollments)
+                .Where(c => c.Status == CampaignStatus.Active && c.StartsAtUtc <= now && c.EndsAtUtc >= now)
+                .ToListAsync(cancellationToken);
+
+            foreach (var campaign in activeCampaigns)
+            {
+                if (!existingCampaignIds.Contains(campaign.Id))
+                {
+                    var virtualOffer = new Offer
+                    {
+                        CampaignId = campaign.Id,
+                        NameAr = campaign.NameAr,
+                        NameEn = campaign.NameEn,
+                        Status = OfferStatus.Active,
+                        Type = OfferType.StandardDiscount,
+                        DiscountType = DiscountType.Percentage,
+                        FundingMode = (OfferFundingMode)(int)campaign.FundingMode,
+                        DiscountRate = campaign.TotalDiscountRate,
+                        PlatformShareRate = campaign.MealMateShareRate,
+                        RestaurantShareRate = campaign.RestaurantShareRate,
+                        StartsAtUtc = campaign.StartsAtUtc,
+                        EndsAtUtc = campaign.EndsAtUtc,
+                        TotalUsageLimit = campaign.MaxSubscribers,
+                        CurrentUsageCount = campaign.CurrentSubscribers,
+                        PerCustomerLimit = 1,
+                        CustomerSegment = CustomerSegmentFilter.All,
+                        EligiblePrograms = campaign.Programs.Select(p => new OfferProgram { ProgramId = p.ProgramId }).ToList(),
+                        EligibleBundles = campaign.Bundles.Select(b => new OfferBundle { BundleId = b.BundleId }).ToList(),
+                        EligibleRestaurants = campaign.RestaurantEnrollments
+                            .Where(e => e.ParticipationStatus is MealMate.Domain.CollaborativeCampaigns.Enums.CampaignRestaurantParticipationStatus.Accepted or MealMate.Domain.CollaborativeCampaigns.Enums.CampaignRestaurantParticipationStatus.Locked)
+                            .Select(e => new OfferRestaurant { RestaurantId = e.RestaurantId }).ToList()
+                    };
+
+                    activeOffers.Add(virtualOffer);
+                }
             }
         }
 
