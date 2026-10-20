@@ -102,6 +102,25 @@ public sealed class CustomerCollaborativeCampaignsController : ApiControllerBase
     }
 
     [Authorize]
+    [HttpPost("quote")]
+    public async Task<IActionResult> CreateQuote([FromBody] CreateCustomerCampaignQuoteCommand command, CancellationToken cancellationToken)
+    {
+        if (CurrentUser.UserType != UserType.Customer || !CurrentUser.UserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        // The buyer is always the authenticated customer; a client-supplied CustomerId is never trusted.
+        if (command.CustomerId != CurrentUser.UserId.Value)
+        {
+            command = command with { CustomerId = CurrentUser.UserId.Value };
+        }
+
+        var result = await Sender.Send(command, cancellationToken);
+        return HandleResult(result);
+    }
+
+    [Authorize]
     [HttpPost("checkout-session")]
     public async Task<IActionResult> CreateCheckoutSession([FromBody] CreateCampaignCheckoutSessionCommand command, CancellationToken cancellationToken)
     {

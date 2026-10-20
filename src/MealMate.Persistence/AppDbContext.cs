@@ -313,6 +313,7 @@ public sealed class AppDbContext
     public DbSet<CampaignCheckoutSession> CampaignCheckoutSessions => Set<CampaignCheckoutSession>();
     public DbSet<CampaignReservationAllocation> CampaignReservationAllocations => Set<CampaignReservationAllocation>();
     public DbSet<CampaignPricingPolicy> CampaignPricingPolicies => Set<CampaignPricingPolicy>();
+    public DbSet<CustomerCampaignQuote> CustomerCampaignQuotes => Set<CustomerCampaignQuote>();
 
     // â”€â”€ Advertising â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<AdvertisingSettings> AdvertisingSettings => Set<AdvertisingSettings>();

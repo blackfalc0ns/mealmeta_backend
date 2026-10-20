@@ -222,6 +222,7 @@ public interface IAppDbContext
     DbSet<CampaignCheckoutSession> CampaignCheckoutSessions { get; }
     DbSet<CampaignReservationAllocation> CampaignReservationAllocations { get; }
     DbSet<CampaignPricingPolicy> CampaignPricingPolicies { get; }
+    DbSet<CustomerCampaignQuote> CustomerCampaignQuotes { get; }
 
     // Advertising
     DbSet<AdvertisingSettings> AdvertisingSettings { get; }

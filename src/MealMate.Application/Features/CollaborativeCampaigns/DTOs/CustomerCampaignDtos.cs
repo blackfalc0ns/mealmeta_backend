@@ -25,9 +25,18 @@ public sealed record CustomerCampaignSelection(
     Guid AddressId,
     string? PromoCode);
 
+public sealed record CustomerCampaignCouponStatus(
+    string Code,
+    string Status,
+    Guid? OfferId,
+    decimal DiscountAmount,
+    string MessageAr,
+    string MessageEn);
+
 /// <summary>
 /// Server-side price offer for a selection. Holds no capacity: ExpiresAtUtc bounds the price
-/// only; payment and subscription require a reserved checkout session.
+/// only; payment and subscription require a reserved checkout session. QuoteId is empty when
+/// the selection is not checkout-ready (blockers explain why; nothing was persisted).
 /// </summary>
 public sealed record CustomerCampaignQuote(
     Guid QuoteId,
@@ -36,7 +45,8 @@ public sealed record CustomerCampaignQuote(
     DateTime ExpiresAtUtc,
     DateTime ServerNowUtc,
     bool CanCheckout,
-    IReadOnlyList<CustomerCampaignBlock> BlockingReasons);
+    IReadOnlyList<CustomerCampaignBlock> BlockingReasons,
+    CustomerCampaignCouponStatus? Coupon = null);
 
 /// <summary>
 /// Customer-facing campaign card. MinPrice is present only when a confirmed, policy-backed

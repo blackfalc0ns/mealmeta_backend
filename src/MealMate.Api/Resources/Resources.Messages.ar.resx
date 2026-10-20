@@ -1102,4 +1102,16 @@
   <data name="checkout.quote_expired" xml:space="preserve"><value>انتهت صلاحية عرض السعر. يُرجى تحديث الملخص للحصول على عرض سعر محدّث.</value></data>
   <data name="checkout.selection_not_eligible" xml:space="preserve"><value>الباقة أو التكوين المختار غير مؤهل لهذا العرض.</value></data>
   <data name="checkout.coupon_full_discount_unsupported" xml:space="preserve"><value>تخفض الخصومات السعر إلى صفر، ولا يمكن إتمام الدفع بهذا المبلغ عبر مسار الدفع المتاح.</value></data>
+  <data name="campaign.no_longer_available" xml:space="preserve"><value>هذه الحملة لم تعد متاحة.</value></data>
+  <data name="campaign.bundle_not_in_campaign" xml:space="preserve"><value>الباقة المختارة لا تنتمي إلى هذه الحملة.</value></data>
+  <data name="campaign.invalid_duration" xml:space="preserve"><value>مدة الاشتراك يجب أن تكون أكبر من صفر.</value></data>
+  <data name="campaign.address_not_owned" xml:space="preserve"><value>عنوان التوصيل هذا لا يتبع حسابك.</value></data>
+  <data name="campaign.address_required" xml:space="preserve"><value>لازم عنوان توصيل لعرض سعر الحملة.</value></data>
+  <data name="campaign.invalid_start_date" xml:space="preserve"><value>لا يمكن أن يكون تاريخ بدء الاشتراك في الماضي.</value></data>
+  <data name="campaign.selection_mismatch" xml:space="preserve"><value>البرنامج المختار لا يطابق اختيار الحملة.</value></data>
+  <data name="campaign.schedule_unavailable" xml:space="preserve"><value>لا يمكن اشتقاق جدول الخدمة لهذا الاختيار.</value></data>
+  <data name="campaign.invalid_cursor" xml:space="preserve"><value>مفتاح الترقيم المرسل غير صالح.</value></data>
+  <data name="campaign.option_incomplete" xml:space="preserve"><value>أرسل bundleId و durationDays معًا لتحديد خيار بعينه.</value></data>
+  <data name="campaign.option_not_found" xml:space="preserve"><value>الخيار المطلوب غير موجود في هذه الحملة.</value></data>
+  <data name="campaign.option_capacity_unavailable" xml:space="preserve"><value>الخيار المطلوب لم يعد يملك طاقة كافية لتغطية المددة كاملة.</value></data>
 </root>
