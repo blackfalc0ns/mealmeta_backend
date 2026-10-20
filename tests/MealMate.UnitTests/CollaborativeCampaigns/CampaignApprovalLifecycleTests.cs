@@ -10,6 +10,7 @@ using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
+using MealMate.Persistence.CollaborativeCampaigns;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -251,7 +252,8 @@ public class CampaignPricingPolicyGateTests
             new CustomerCampaignEvaluationService(
                 _context, _clock, _eligibilityEngine,
                 new CustomerDeliveryAddressService(_context, _clock)),
-            _reservationCoordinator);
+            _reservationCoordinator,
+            new CampaignCapacityLockRepository(_context));
     }
 
     private Campaign CreateActiveCampaign()

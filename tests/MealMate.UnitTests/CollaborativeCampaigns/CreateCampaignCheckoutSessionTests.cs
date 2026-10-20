@@ -12,10 +12,15 @@ using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.ValueObjects;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.CustomerCheckout;
+using MealMate.Application.Features.Offers.Services;
+using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Persistence;
+using MealMate.Persistence.CollaborativeCampaigns;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using Xunit;
+using CustomerCampaignQuoteEntity = MealMate.Domain.CollaborativeCampaigns.CustomerCampaignQuote;
 
 namespace MealMate.UnitTests.CollaborativeCampaigns;
 
@@ -46,8 +51,10 @@ public class CreateCampaignCheckoutSessionTests
             _context,
             _clock,
             new CampaignEligibilityEngine(),
-            new CustomerDeliveryAddressService(_context, _clock));
-        _handler = new CreateCampaignCheckoutSessionCommandHandler(_context, _clock, _evaluation, _coordinator);
+            new CustomerDeliveryAddressService(_context, _clock),
+            new SubscriptionScheduleService(_clock));
+        _handler = new CreateCampaignCheckoutSessionCommandHandler(
+            _context, _clock, _evaluation, _coordinator, new CampaignCapacityLockRepository(_context));
         _previewHandler = new GetCampaignPricePreviewQueryHandler(_evaluation);
     }
 
@@ -211,7 +218,7 @@ public class CreateCampaignCheckoutSessionTests
             CancellationToken.None);
 
         preview.IsSuccess.Should().BeTrue();
-        checkout.IsSuccess.Should().BeTrue();
+        checkout.IsSuccess.Should().BeTrue("err={0}", checkout.Error?.Code);
         // 100.000 reference with 30% headline discount → 70.000 on both paths.
         preview.Value.FinalCustomerPrice.Should().Be(70.000m);
         checkout.Value.FinalCustomerPrice.Should().Be(preview.Value.FinalCustomerPrice);
@@ -416,13 +423,15 @@ public class CreateCampaignCheckoutSessionTests
             DurationDays: 1,
             RequestedServiceDates: new List<DateOnly> { date1 });
 
+        // The idempotency scope is per customer; the same customer reusing the key with a
+        // different payload is a conflict.
         var command2 = new CreateCampaignCheckoutSessionCommand(
             IdempotencyKey: "key-conflict",
             CampaignId: campaign.Id,
             BundleId: bundleId,
-            CustomerId: Guid.NewGuid(), // Different customer!
+            CustomerId: customerId,
             DurationDays: 1,
-            RequestedServiceDates: new List<DateOnly> { date1 });
+            RequestedServiceDates: new List<DateOnly> { date1.AddDays(1) });
 
         await _handler.Handle(command1, CancellationToken.None);
         var result2 = await _handler.Handle(command2, CancellationToken.None);
@@ -456,5 +465,231 @@ public class CreateCampaignCheckoutSessionTests
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("Campaign.CapacityUnavailable");
+    }
+
+    // ---- Task 4: quote-driven checkout, snapshot binding, idempotency scope ----
+
+    private CreateCustomerCampaignQuoteCommandHandler CreateQuoteHandler() =>
+        new(_context, _clock, _evaluation, new SubscriptionFlowCouponService(_context, new OfferEligibilityEngine(), _clock));
+
+    private async Task<Guid> GetProgramIdAsync(Guid campaignBundleId)
+    {
+        var catalogBundleId = await _context.CampaignBundles
+            .Where(b => b.Id == campaignBundleId).Select(b => b.BundleId).SingleAsync();
+        return await _context.Bundles
+            .Where(b => b.Id == catalogBundleId).Select(b => b.ProgramId).SingleAsync();
+    }
+
+    [Fact]
+    public async Task Handle_WithQuoteId_BindsSessionToQuoteSnapshotAndQuoteSchedule()
+    {
+        var (campaign, bundleId, restA, _) = await SeedCampaignWithCapacity(headline: 0.30m, restaurantShare: 0.15m, platformShare: 0.15m);
+        var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
+
+        // A 26-day duration price plus capacity across 30 days serve the quote schedule.
+        _context.CampaignBundleDurationPrices.Add(CampaignBundleDurationPrice.Create(
+            bundleId, 26, new Money(156.000m, "KWD"), "System", 1).Value);
+        var restaurantId = await _context.CampaignRestaurantCapacities
+            .Where(c => c.CampaignId == campaign.Id).Select(c => c.RestaurantId).SingleAsync();
+        for (var i = 2; i <= 45; i++)
+        {
+            _context.CampaignRestaurantCapacities.Add(new CampaignRestaurantCapacity
+            {
+                CampaignId = campaign.Id,
+                RestaurantId = restaurantId,
+                ServiceDate = new DateOnly(2026, 10, 6).AddDays(i - 1),
+                MaxBoxes = 5,
+                ReservedBoxes = 0
+            });
+        }
+        await _context.SaveChangesAsync();
+
+        var programId = await GetProgramIdAsync(bundleId);
+        var startDate = DateOnly.FromDateTime(_now.Date.AddDays(2));
+        var quoteResult = await CreateQuoteHandler().Handle(new CreateCustomerCampaignQuoteCommand(
+            customerId, campaign.Id, programId, bundleId, 26, startDate,
+            (await _context.CustomerAddresses.SingleAsync(a => a.UserId == customerId)).Id), CancellationToken.None);
+        quoteResult.IsSuccess.Should().BeTrue();
+
+        // Client dates are deliberately wrong; the quote schedule must win.
+        var checkout = await _handler.Handle(new CreateCampaignCheckoutSessionCommand(
+            IdempotencyKey: "key-quote-flow",
+            CampaignId: campaign.Id,
+            BundleId: bundleId,
+            CustomerId: customerId,
+            DurationDays: 26,
+            RequestedServiceDates: new List<DateOnly> { new(2026, 10, 6) },
+            QuoteId: quoteResult.Value.QuoteId), CancellationToken.None);
+
+        checkout.IsSuccess.Should().BeTrue("err={0}", checkout.Error?.Code);
+        var session = await _context.CampaignCheckoutSessions
+            .Include(s => s.Allocations)
+            .SingleAsync(s => s.Id == checkout.Value.SessionId);
+        session.CustomerQuoteId.Should().Be(quoteResult.Value.QuoteId);
+        session.FinalAmount.Should().Be(quoteResult.Value.Price.FinalPrice);
+        session.Allocations.Should().HaveCount(26);
+        session.Allocations.Select(a => a.ServiceDate).Min().Should().Be(quoteResult.Value.Selection.StartDate);
+        session.Allocations.Select(a => a.ServiceDate).Should().OnlyContain(d => d.DayOfWeek != DayOfWeek.Friday);
+    }
+
+    [Fact]
+    public async Task Handle_WithExpiredQuote_ReturnsGone()
+    {
+        var (campaign, bundleId, _, _) = await SeedCampaignWithCapacity();
+        var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
+
+        var expiredQuote = new CustomerCampaignQuoteEntity
+        {
+            CustomerId = customerId,
+            CampaignId = campaign.Id,
+            CampaignBundleId = bundleId,
+            CatalogBundleId = Guid.NewGuid(),
+            ProgramId = Guid.NewGuid(),
+            DurationDays = 1,
+            StartDate = new DateOnly(2026, 10, 6),
+            AddressId = Guid.NewGuid(),
+            ReferencePrice = 100m,
+            DiscountAmount = 30m,
+            FinalPrice = 70m,
+            CurrencyCode = "KWD",
+            PricingPolicyId = Guid.NewGuid(),
+            PricingPolicyVersion = 1,
+            CampaignSnapshotVersion = campaign.CurrentSnapshotVersion,
+            ExpiresAtUtc = _now.AddMinutes(-1) // expired
+        };
+        _context.CustomerCampaignQuotes.Add(expiredQuote);
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(new CreateCampaignCheckoutSessionCommand(
+            IdempotencyKey: "key-expired-quote",
+            CampaignId: campaign.Id,
+            BundleId: bundleId,
+            CustomerId: customerId,
+            DurationDays: 1,
+            RequestedServiceDates: new List<DateOnly> { new(2026, 10, 6) },
+            QuoteId: expiredQuote.Id), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Campaign.QuoteExpired");
+        result.Error.Type.Should().Be(ErrorType.Gone);
+    }
+
+    [Fact]
+    public async Task Handle_WithAnotherCustomersQuote_ReturnsNotFound()
+    {
+        var (campaign, bundleId, _, _) = await SeedCampaignWithCapacity();
+        var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
+
+        var foreignQuote = new CustomerCampaignQuoteEntity
+        {
+            CustomerId = Guid.NewGuid(), // someone else's quote
+            CampaignId = campaign.Id,
+            CampaignBundleId = bundleId,
+            CatalogBundleId = Guid.NewGuid(),
+            ProgramId = Guid.NewGuid(),
+            DurationDays = 1,
+            StartDate = new DateOnly(2026, 10, 6),
+            AddressId = Guid.NewGuid(),
+            ReferencePrice = 100m,
+            DiscountAmount = 30m,
+            FinalPrice = 70m,
+            CurrencyCode = "KWD",
+            PricingPolicyId = Guid.NewGuid(),
+            PricingPolicyVersion = 1,
+            CampaignSnapshotVersion = campaign.CurrentSnapshotVersion,
+            ExpiresAtUtc = _now.AddMinutes(10)
+        };
+        _context.CustomerCampaignQuotes.Add(foreignQuote);
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(new CreateCampaignCheckoutSessionCommand(
+            IdempotencyKey: "key-foreign-quote",
+            CampaignId: campaign.Id,
+            BundleId: bundleId,
+            CustomerId: customerId,
+            DurationDays: 1,
+            RequestedServiceDates: new List<DateOnly> { new(2026, 10, 6) },
+            QuoteId: foreignQuote.Id), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Campaign.QuoteNotFound");
+    }
+
+    [Fact]
+    public async Task Handle_WhenCampaignChangedAfterQuote_ReturnsConflict()
+    {
+        var (campaign, bundleId, restA, _) = await SeedCampaignWithCapacity();
+        var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
+
+        var quoteResult = await CreateQuoteHandler().Handle(new CreateCustomerCampaignQuoteCommand(
+            customerId, campaign.Id, await GetProgramIdAsync(bundleId), bundleId, 1, new DateOnly(2026, 10, 6),
+            (await _context.CustomerAddresses.SingleAsync(a => a.UserId == customerId)).Id), CancellationToken.None);
+        quoteResult.IsSuccess.Should().BeTrue("err={0}", quoteResult.Error?.Code);
+
+        campaign.BumpSnapshotVersion(); // terms changed after quoting
+        await _context.SaveChangesAsync();
+
+        var result = await _handler.Handle(new CreateCampaignCheckoutSessionCommand(
+            IdempotencyKey: "key-stale-quote",
+            CampaignId: campaign.Id,
+            BundleId: bundleId,
+            CustomerId: customerId,
+            DurationDays: 1,
+            RequestedServiceDates: new List<DateOnly> { new(2026, 10, 6) },
+            QuoteId: quoteResult.Value.QuoteId), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Campaign.QuoteStale");
+        result.Error.Type.Should().Be(ErrorType.Conflict);
+    }
+
+    [Fact]
+    public async Task Handle_SameIdempotencyKeyFromDifferentCustomers_DoNotCollide()
+    {
+        var (campaign, bundleId, restA, date1) = await SeedCampaignWithCapacity();
+        var customerA = Guid.NewGuid();
+        var customerB = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerA);
+        await SeedCustomerWithCompleteProfileAsync(customerB);
+
+        var commandA = new CreateCampaignCheckoutSessionCommand(
+            "shared-key", campaign.Id, bundleId, customerA, 1, new List<DateOnly> { date1 });
+        var commandB = new CreateCampaignCheckoutSessionCommand(
+            "shared-key", campaign.Id, bundleId, customerB, 1, new List<DateOnly> { date1 });
+
+        var resultA = await _handler.Handle(commandA, CancellationToken.None);
+        var resultB = await _handler.Handle(commandB, CancellationToken.None);
+
+        resultA.IsSuccess.Should().BeTrue();
+        resultB.IsSuccess.Should().BeTrue();
+        resultB.Value.SessionId.Should().NotBe(resultA.Value.SessionId);
+    }
+
+    [Fact]
+    public async Task Handle_NewSessionForSameCustomer_SupersedesOwnLiveReservationWithoutDoubleBooking()
+    {
+        var (campaign, bundleId, restA, date1) = await SeedCampaignWithCapacity();
+        var customerId = Guid.NewGuid();
+        await SeedCustomerWithCompleteProfileAsync(customerId);
+
+        var first = await _handler.Handle(new CreateCampaignCheckoutSessionCommand(
+            "key-first", campaign.Id, bundleId, customerId, 1, new List<DateOnly> { date1 }), CancellationToken.None);
+        first.IsSuccess.Should().BeTrue();
+
+        // A new session for the same customer must release the first reservation, not stack on it.
+        var second = await _handler.Handle(new CreateCampaignCheckoutSessionCommand(
+            "key-second", campaign.Id, bundleId, customerId, 1, new List<DateOnly> { date1 }), CancellationToken.None);
+
+        second.IsSuccess.Should().BeTrue();
+        var cap = await _context.CampaignRestaurantCapacities
+            .SingleAsync(c => c.CampaignId == campaign.Id && c.RestaurantId == restA && c.ServiceDate == date1);
+        cap.ReservedBoxes.Should().Be(1);
+
+        var firstSession = await _context.CampaignCheckoutSessions.FindAsync(first.Value.SessionId);
+        firstSession!.Status.Should().Be(CampaignCheckoutSessionStatus.Expired);
     }
 }

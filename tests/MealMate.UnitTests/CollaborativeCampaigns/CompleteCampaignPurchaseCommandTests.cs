@@ -256,4 +256,33 @@ public class CompleteCampaignPurchaseCommandTests
         subscriptions.Should().HaveCount(2);
         subscriptions.Select(x => x.CorrelationId).Should().Contain(new[] { first.Id.ToString("N"), second.Id.ToString("N") });
     }
+
+    [Fact]
+    public async Task Handle_WhenCampaignStoppedAfterCompletedPurchase_SubscriptionAndTermsRemainIntact()
+    {
+        var (campaign, session, tx, bundleId, restA, date1) = SeedPaidSession();
+        await _context.SaveChangesAsync();
+
+        var first = await _handler.Handle(new CompleteCampaignPurchaseCommand(session.Id), CancellationToken.None);
+        first.IsSuccess.Should().BeTrue();
+
+        // The merchant stops the campaign after a completed purchase.
+        campaign.TransitionTo(CampaignStatus.Stopped, "admin", "merchant stop");
+        await _context.SaveChangesAsync();
+
+        // Re-running completion (payment callback retry / app reconnect) must return the same
+        // subscription with its original terms — never cancel or re-derive it.
+        var second = await _handler.Handle(new CompleteCampaignPurchaseCommand(session.Id), CancellationToken.None);
+
+        second.IsSuccess.Should().BeTrue();
+        second.Value.SubscriptionId.Should().Be(first.Value.SubscriptionId);
+        second.Value.TotalAmount.Should().Be(first.Value.TotalAmount);
+        second.Value.StartDate.Should().Be(first.Value.StartDate);
+        second.Value.EndDate.Should().Be(first.Value.EndDate);
+
+        var subscription = await _context.Subscriptions
+            .SingleAsync(s => s.Id == first.Value.SubscriptionId);
+        subscription.Status.Should().Be(SubscriptionStatus.Active);
+        subscription.PaidAmount!.Amount.Should().Be(tx.Amount);
+    }
 }

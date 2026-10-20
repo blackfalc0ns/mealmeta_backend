@@ -115,6 +115,8 @@ public sealed class CampaignCapacityLockRepository : ICampaignCapacityLockReposi
 
     private static bool IsTransientPostgresCode(string? sqlState)
     {
-        return sqlState is "40P01" or "40001";
+        // 23505: a concurrent duplicate insert (e.g. the same idempotency key committed by a
+        // parallel twin transaction) — retry re-reads the committed winner and replays it.
+        return sqlState is "40P01" or "40001" or "23505";
     }
 }

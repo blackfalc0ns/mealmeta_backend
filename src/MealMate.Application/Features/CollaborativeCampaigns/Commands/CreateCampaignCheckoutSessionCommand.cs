@@ -11,6 +11,7 @@ using MealMate.Domain.CollaborativeCampaigns;
 using MealMate.Domain.CollaborativeCampaigns.Enums;
 using MealMate.Domain.Foundation;
 using Microsoft.EntityFrameworkCore;
+using QuoteEntity = MealMate.Domain.CollaborativeCampaigns.CustomerCampaignQuote;
 
 namespace MealMate.Application.Features.CollaborativeCampaigns.Commands;
 
@@ -22,27 +23,34 @@ public sealed record CreateCampaignCheckoutSessionCommand(
     int DurationDays,
     IReadOnlyList<DateOnly> RequestedServiceDates,
     string? DeliveryGovernorate = null,
-    Guid? AddressId = null) : ICommand<CampaignCheckoutSessionDto>;
+    Guid? AddressId = null,
+    /// <summary>Quote-driven flow: selections, schedule and price derive from the saved quote;
+    /// client-sent dates and amounts are ignored. Absent keeps the legacy client-dated flow.</summary>
+    Guid? QuoteId = null) : ICommand<CampaignCheckoutSessionDto>;
 
 public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandler<CreateCampaignCheckoutSessionCommand, CampaignCheckoutSessionDto>
 {
-    private const string IdempotencyScope = "CampaignCheckoutSession";
+    /// <summary>Idempotency scope is per customer: identical keys from different customers never collide.</summary>
+    private static string ScopeFor(Guid customerId) => $"CampaignCheckoutSession:{customerId:N}";
 
     private readonly IAppDbContext _context;
     private readonly IDateTimeProvider _clock;
     private readonly ICustomerCampaignEvaluationService _evaluation;
     private readonly ICampaignReservationCoordinator _reservationCoordinator;
+    private readonly ICampaignCapacityLockRepository _lockRepository;
 
     public CreateCampaignCheckoutSessionCommandHandler(
         IAppDbContext context,
         IDateTimeProvider clock,
         ICustomerCampaignEvaluationService evaluation,
-        ICampaignReservationCoordinator reservationCoordinator)
+        ICampaignReservationCoordinator reservationCoordinator,
+        ICampaignCapacityLockRepository lockRepository)
     {
         _context = context;
         _clock = clock;
         _evaluation = evaluation;
         _reservationCoordinator = reservationCoordinator;
+        _lockRepository = lockRepository;
     }
 
     public async Task<Result<CampaignCheckoutSessionDto>> Handle(
@@ -50,30 +58,109 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
         CancellationToken cancellationToken)
     {
         var requestHash = ComputeRequestHash(request);
+        var scope = ScopeFor(request.CustomerId);
 
-        // 1. Idempotency verification
-        var existingRecord = await _context.IdempotencyRecords
-            .FirstOrDefaultAsync(r => r.Scope == IdempotencyScope && r.Key == request.IdempotencyKey, cancellationToken);
-
-        if (existingRecord != null)
+        // 1. Idempotency fast path (re-checked inside the transaction against concurrent inserts).
+        var cached = await TryGetCachedResponseAsync(scope, request.IdempotencyKey, requestHash, cancellationToken);
+        if (cached is not null)
         {
-            if (existingRecord.RequestHash != requestHash)
-            {
-                return Result.Failure<CampaignCheckoutSessionDto>(
-                    Error.Conflict("Idempotency.Conflict", "An operation with this idempotency key already exists with different payload parameters."));
-            }
+            return cached;
+        }
 
-            if (!string.IsNullOrWhiteSpace(existingRecord.ResponseBody))
+        // 2. Atomic reservation: every competitor takes campaign row → day rows in the same
+        //    deterministic order inside one transaction; capacities and slots are re-read
+        //    authoritatively under those locks.
+        var outcome = await _lockRepository.ExecuteInTransactionWithRetryAsync(
+            ct => ReserveAsync(request, requestHash, scope, ct),
+            cancellationToken);
+
+        if (outcome.IsFailure)
+        {
+            return Result.Failure<CampaignCheckoutSessionDto>(outcome.Error!);
+        }
+
+        return Result.Success(outcome.Value!);
+    }
+
+    private async Task<Result<CampaignCheckoutSessionDto>?> TryGetCachedResponseAsync(
+        string scope, string idempotencyKey, string requestHash, CancellationToken cancellationToken)
+    {
+        var existingRecord = await _context.IdempotencyRecords
+            .FirstOrDefaultAsync(r => r.Scope == scope && r.Key == idempotencyKey, cancellationToken);
+
+        if (existingRecord is null)
+        {
+            return null;
+        }
+
+        if (existingRecord.RequestHash != requestHash)
+        {
+            return Result.Failure<CampaignCheckoutSessionDto>(
+                Error.Conflict("Idempotency.Conflict", "An operation with this idempotency key already exists with different payload parameters."));
+        }
+
+        if (!string.IsNullOrWhiteSpace(existingRecord.ResponseBody))
+        {
+            var cachedDto = JsonSerializer.Deserialize<CampaignCheckoutSessionDto>(existingRecord.ResponseBody);
+            if (cachedDto is not null)
             {
-                var cachedDto = JsonSerializer.Deserialize<CampaignCheckoutSessionDto>(existingRecord.ResponseBody);
-                if (cachedDto != null)
-                {
-                    return Result.Success(cachedDto);
-                }
+                return Result.Success(cachedDto);
             }
         }
 
-        // 2. Single pricing/eligibility source: shared evaluation over authorized customer data.
+        return null;
+    }
+
+    private async Task<Result<CampaignCheckoutSessionDto>> ReserveAsync(
+        CreateCampaignCheckoutSessionCommand request,
+        string requestHash,
+        string scope,
+        CancellationToken cancellationToken)
+    {
+        var now = _clock.UtcNow;
+
+        // Idempotency under the transaction: a concurrent insert of the same key resolves here.
+        var cached = await TryGetCachedResponseAsync(scope, request.IdempotencyKey, requestHash, cancellationToken);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        // 3. Lock the campaign row first (all competitors take this lock in the same order).
+        var campaign = await _lockRepository.LockCampaignAsync(request.CampaignId, cancellationToken);
+        if (campaign is null)
+        {
+            return Result.Failure<CampaignCheckoutSessionDto>(
+                Error.NotFound("Campaign.NotFound", $"Campaign with ID '{request.CampaignId}' was not found."));
+        }
+
+        // 4. Quote-driven flow: the saved quote is the only trusted selection, schedule and price.
+        QuoteEntity? quote = null;
+        if (request.QuoteId.HasValue)
+        {
+            quote = await _context.CustomerCampaignQuotes
+                .FirstOrDefaultAsync(q => q.Id == request.QuoteId.Value, cancellationToken);
+
+            if (quote is null || quote.CustomerId != request.CustomerId)
+            {
+                return Result.Failure<CampaignCheckoutSessionDto>(
+                    Error.NotFound("Campaign.QuoteNotFound", $"Quote '{request.QuoteId}' was not found for this customer."));
+            }
+
+            if (quote.ExpiresAtUtc <= now)
+            {
+                return Result.Failure<CampaignCheckoutSessionDto>(
+                    Error.Gone("Campaign.QuoteExpired", "The saved quote has expired. Request a new quote."));
+            }
+
+            if (quote.CampaignId != campaign.Id || quote.CampaignBundleId != request.BundleId)
+            {
+                return Result.Failure<CampaignCheckoutSessionDto>(
+                    Error.Conflict("Campaign.QuoteStale", "The quote does not match the requested selection. Request a new quote."));
+            }
+        }
+
+        // 5. Shared evaluation: eligibility, profile gates and approved policy from real data.
         var evaluation = await _evaluation.EvaluateAsync(
             new CustomerCampaignEvaluationRequest(
                 request.CampaignId,
@@ -90,7 +177,6 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
 
         var e = evaluation.Value;
 
-        // 2b. Pricing requires an explicitly approved policy; never a silent fallback price.
         if (e.Policy is null)
         {
             return Result.Failure<CampaignCheckoutSessionDto>(
@@ -98,14 +184,12 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
                     "No approved campaign pricing policy exists for this currency."));
         }
 
-        // 2c. Campaign-rule eligibility (legacy contract keeps its code and message shape).
         if (e.LegacyIneligibilityReasons.Count > 0)
         {
             return Result.Failure<CampaignCheckoutSessionDto>(
                 Error.Validation("Campaign.Ineligible", string.Join("; ", e.LegacyIneligibilityReasons)));
         }
 
-        // 2d. Profile gates (address/allergies/preferences) from the customer's own data.
         if (e.HasProfileGateBlocks)
         {
             var gates = e.Blocks.Where(b => b.Code.StartsWith("profile.", StringComparison.Ordinal));
@@ -114,11 +198,76 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
                     string.Join("; ", gates.Select(g => $"{g.Code}: {g.MessageEn}"))));
         }
 
-        // 3. Fetch available daily capacities
-        var dates = request.RequestedServiceDates.Select(d => (DateOnly?)d).Distinct().ToList();
-        var capacityEntities = await _context.CampaignRestaurantCapacities
-            .Where(c => c.CampaignId == request.CampaignId && dates.Contains(c.ServiceDate))
+        // Quote staleness under the lock: price, terms or campaign state moved since quoting.
+        if (quote is not null)
+        {
+            if (quote.CampaignSnapshotVersion != campaign.CurrentSnapshotVersion
+                || quote.PricingPolicyId != e.Policy.Id
+                || quote.PricingPolicyVersion != e.Policy.Version
+                || quote.FinalPrice != e.Price.CampaignCustomerPrice.Amount)
+            {
+                return Result.Failure<CampaignCheckoutSessionDto>(
+                    Error.Conflict("Campaign.QuoteStale",
+                        "Price, terms or campaign state changed since the quote was issued. Request a new quote."));
+            }
+        }
+
+        // 6. Service dates: quote-driven flow derives them from the saved schedule; the legacy
+        //    flow keeps its client-dated contract. Client dates never extend the quota.
+        var requestedDates = quote is not null
+            ? quote.ServiceDates
+            : request.RequestedServiceDates;
+        if (requestedDates.Count == 0)
+        {
+            return Result.Failure<CampaignCheckoutSessionDto>(
+                Error.Validation("Campaign.ScheduleUnavailable", "No service dates are available for this selection."));
+        }
+
+        // 7. Lock every participant capacity row for the requested dates (deterministic order
+        //    inside the repository) and read the authoritative availability from locked rows.
+        var distinctDates = requestedDates.Select(d => d).Distinct().ToList();
+        var candidateRows = await _context.CampaignRestaurantCapacities
+            .Where(c => c.CampaignId == request.CampaignId && c.ServiceDate != null && distinctDates.Contains(c.ServiceDate!.Value))
+            .Select(c => new { c.RestaurantId, c.ServiceDate })
             .ToListAsync(cancellationToken);
+
+        var targets = candidateRows
+            .Where(c => c.ServiceDate.HasValue)
+            .Select(c => (c.ServiceDate!.Value, c.RestaurantId))
+            .Distinct()
+            .ToList();
+        var capacityEntities = await _lockRepository.LockDailyCapacitiesAsync(request.CampaignId, targets, cancellationToken);
+
+        // 7b. Release this customer's own superseded live sessions for the same campaign so a
+        //     retry never self-overbooks, then count remaining live reservations for the cap.
+        var ownLiveSessions = await _context.CampaignCheckoutSessions
+            .Include(s => s.Allocations)
+            .Where(s => s.CampaignId == campaign.Id && s.CustomerId == request.CustomerId
+                && (s.Status == CampaignCheckoutSessionStatus.Pending || s.Status == CampaignCheckoutSessionStatus.PaymentPending)
+                && s.ExpiresAtUtc > now)
+            .ToListAsync(cancellationToken);
+
+        foreach (var superseded in ownLiveSessions)
+        {
+            if (superseded.MarkExpired(now).IsFailure)
+            {
+                // A processing lease (payment in flight) keeps the hold alive.
+                continue;
+            }
+
+            if (!superseded.ReservationsReleasedAtUtc.HasValue)
+            {
+                foreach (var alloc in superseded.Allocations)
+                {
+                    var capEntity = capacityEntities.FirstOrDefault(c => c.RestaurantId == alloc.RestaurantId && c.ServiceDate == alloc.ServiceDate);
+                    if (capEntity is not null)
+                    {
+                        capEntity.ReservedBoxes = Math.Max(0, capEntity.ReservedBoxes - alloc.Units);
+                    }
+                }
+                superseded.ReservationsReleasedAtUtc = now;
+            }
+        }
 
         var availabilityList = capacityEntities
             .Where(c => c.ServiceDate.HasValue)
@@ -128,18 +277,26 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
                 AvailableCapacity: Math.Max(0, c.MaxBoxes - c.ReservedBoxes)))
             .ToList();
 
-        var capState = new SubscriberCapState(
-            e.Campaign.MaxSubscribers,
-            ReservedSlots: 0,
-            CommittedSlots: e.Campaign.CurrentSubscribers);
+        // 8. Subscriber slots: committed subscribers plus live (unexpired) reservation sessions
+        //    counted from the book of record — never a hardcoded zero.
+        var liveReservedSlots = await _context.CampaignCheckoutSessions
+            .Where(s => s.CampaignId == campaign.Id
+                && (s.Status == CampaignCheckoutSessionStatus.Pending || s.Status == CampaignCheckoutSessionStatus.PaymentPending)
+                && s.ExpiresAtUtc > now)
+            .CountAsync(cancellationToken);
 
-        // 4. Coordinate Atomic Reservation
+        var capState = new SubscriberCapState(
+            campaign.MaxSubscribers,
+            ReservedSlots: liveReservedSlots,
+            CommittedSlots: campaign.CurrentSubscribers);
+
+        // 9. Coordinate the atomic reservation over the locked, authoritative availability.
         var reservationResult = _reservationCoordinator.CoordinateReservation(new ReservationRequest(
-            e.Campaign.Id,
-            e.CampaignBundle.Id,
+            campaign.Id,
+            request.BundleId,
             request.CustomerId,
             capState,
-            request.RequestedServiceDates,
+            requestedDates,
             availabilityList,
             ReservationTtl: TimeSpan.FromMinutes(15)));
 
@@ -149,23 +306,24 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
                 Error.Conflict("Campaign.CapacityUnavailable", reservationResult.FailureReason ?? "Requested campaign capacity is unavailable."));
         }
 
-        // 5. Persist Reservation Allocations & Update Capacity Counts
+        // 10. Persist allocations and capacity mutation inside the same transaction.
         var sessionId = reservationResult.ReservationId ?? Guid.NewGuid();
-        var expiresAtUtc = reservationResult.ExpiresAtUtc ?? _clock.UtcNow.AddMinutes(15);
+        var expiresAtUtc = reservationResult.ExpiresAtUtc ?? now.AddMinutes(15);
 
         var session = new CampaignCheckoutSession(sessionId)
         {
-            CampaignId = e.Campaign.Id,
-            BundleId = e.CampaignBundle.Id,
+            CampaignId = campaign.Id,
+            BundleId = request.BundleId,
             CustomerId = request.CustomerId,
             Status = CampaignCheckoutSessionStatus.Pending,
             ExpiresAtUtc = expiresAtUtc,
             PriceQuoteSnapshotId = e.DurationPrice.Id,
-            FinalAmount = e.Price.CampaignCustomerPrice.Amount,
+            CustomerQuoteId = quote?.Id,
+            FinalAmount = quote?.FinalPrice ?? e.Price.CampaignCustomerPrice.Amount,
             CurrencyCode = e.Price.CampaignCustomerPrice.CurrencyCode,
             PricingPolicyId = e.Policy.Id,
             PricingPolicyVersion = e.Policy.Version,
-            CampaignSnapshotVersion = e.Campaign.CurrentSnapshotVersion
+            CampaignSnapshotVersion = campaign.CurrentSnapshotVersion
         };
 
         var allocationDtos = new List<CampaignReservationAllocationDto>(reservationResult.Allocations.Count);
@@ -173,7 +331,7 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
         foreach (var alloc in reservationResult.Allocations)
         {
             var capEntity = capacityEntities.FirstOrDefault(c => c.RestaurantId == alloc.RestaurantId && c.ServiceDate == alloc.ServiceDate);
-            if (capEntity != null)
+            if (capEntity is not null)
             {
                 capEntity.ReservedBoxes += alloc.Units;
             }
@@ -181,8 +339,8 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
             session.Allocations.Add(new CampaignReservationAllocation
             {
                 CheckoutSessionId = sessionId,
-                CampaignId = e.Campaign.Id,
-                BundleId = e.CampaignBundle.Id,
+                CampaignId = campaign.Id,
+                BundleId = request.BundleId,
                 ServiceDate = alloc.ServiceDate,
                 RestaurantId = alloc.RestaurantId,
                 Units = alloc.Units
@@ -191,30 +349,28 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
             allocationDtos.Add(new CampaignReservationAllocationDto(alloc.ServiceDate, alloc.RestaurantId, alloc.Units));
         }
 
+        var amount = session.FinalAmount ?? e.Price.CampaignCustomerPrice.Amount;
         var dto = new CampaignCheckoutSessionDto(
             sessionId,
-            e.Campaign.Id,
-            e.CampaignBundle.Id,
+            campaign.Id,
+            request.BundleId,
             request.CustomerId,
             request.DurationDays,
-            e.Price.CampaignCustomerPrice.Amount,
+            amount,
             e.Price.CampaignCustomerPrice.CurrencyCode,
             expiresAtUtc,
             nameof(CampaignCheckoutSessionStatus.Pending),
             allocationDtos);
 
-        // 6. Record Idempotency
-        var record = new IdempotencyRecord
+        _context.IdempotencyRecords.Add(new IdempotencyRecord
         {
-            Scope = IdempotencyScope,
+            Scope = scope,
             Key = request.IdempotencyKey,
             RequestHash = requestHash,
             ResponseBody = JsonSerializer.Serialize(dto),
-            CreatedAtUtc = _clock.UtcNow,
-            ExpiresAtUtc = _clock.UtcNow.AddDays(7)
-        };
-
-        _context.IdempotencyRecords.Add(record);
+            CreatedAtUtc = now,
+            ExpiresAtUtc = now.AddDays(7)
+        });
         _context.CampaignCheckoutSessions.Add(session);
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -223,7 +379,7 @@ public sealed class CreateCampaignCheckoutSessionCommandHandler : ICommandHandle
 
     private static string ComputeRequestHash(CreateCampaignCheckoutSessionCommand request)
     {
-        var raw = $"{request.CampaignId:N}:{request.BundleId:N}:{request.CustomerId:N}:{request.DurationDays}:{string.Join(",", request.RequestedServiceDates.OrderBy(d => d))}:{request.AddressId?.ToString("N")}";
+        var raw = $"{request.CampaignId:N}:{request.BundleId:N}:{request.CustomerId:N}:{request.DurationDays}:{string.Join(",", request.RequestedServiceDates.OrderBy(d => d))}:{request.AddressId?.ToString("N")}:{request.QuoteId?.ToString("N")}";
         using var sha = SHA256.Create();
         var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexString(bytes);

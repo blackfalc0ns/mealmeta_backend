@@ -1,4 +1,7 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Models;
+using MealMate.Application.Features.CollaborativeCampaigns.Commands;
+using MealMate.Application.Features.CollaborativeCampaigns.DTOs;
 using MealMate.Domain.CollaborativeCampaigns;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ValueObjects;
@@ -386,4 +389,263 @@ public sealed class PostgreSqlConcurrencyTests : IAsyncLifetime
         Assert.Equal(2, capA.ReservedBoxes);
         Assert.Equal(2, capB.ReservedBoxes);
     }
+
+    // ---- Task 4: the checkout command itself racing on real PostgreSQL ----
+
+    private sealed class FixedClock : IDateTimeProvider
+    {
+        public DateTime UtcNow => new(2026, 10, 5, 12, 0, 0, DateTimeKind.Utc);
+
+        public DateOnly TodayUtc => DateOnly.FromDateTime(UtcNow);
+    }
+
+    private async Task<(Guid CampaignId, Guid CampaignBundleId, Guid CustomerId, DateOnly Date1)> SeedCheckoutReadyCampaignAsync(
+        AppDbContext db, int maxBoxes = 1, int maxSubscribers = 100)
+    {
+        var campaign = new Campaign
+        {
+            NameAr = "حملة تنافسية",
+            NameEn = "Contested Campaign",
+            Status = CampaignStatus.Active,
+            StartsAtUtc = new DateTime(2026, 10, 4, 0, 0, 0, DateTimeKind.Utc),
+            EndsAtUtc = new DateTime(2026, 12, 4, 0, 0, 0, DateTimeKind.Utc),
+            TotalDiscountRate = Percentage.FromFraction(0.30m),
+            MealMateShareRate = Percentage.FromFraction(0.15m),
+            RestaurantShareRate = Percentage.FromFraction(0.15m),
+            MaxSubscribers = maxSubscribers
+        };
+        db.Campaigns.Add(campaign);
+
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = "P-" + Guid.NewGuid().ToString("N")[..8],
+            NameAr = "برنامج",
+            NameEn = "Program",
+            Status = MealMate.Domain.Enums.ProgramStatus.Active,
+            IsActive = true
+        };
+        db.Programs.Add(program);
+        var catalogBundle = new MealMate.Domain.ProgramsSubscriptions.Bundle
+        {
+            ProgramId = program.Id,
+            Code = "B-" + Guid.NewGuid().ToString("N")[..8],
+            NameAr = "باقة",
+            NameEn = "Bundle",
+            MealsPerDay = 3,
+            Status = MealMate.Domain.Enums.ProgramStatus.Active,
+            IsActive = true
+        };
+        db.Bundles.Add(catalogBundle);
+        var campaignBundle = new CampaignBundle { CampaignId = campaign.Id, BundleId = catalogBundle.Id };
+        db.CampaignBundles.Add(campaignBundle);
+        await db.SaveChangesAsync();
+
+        db.CampaignBundleDurationPrices.Add(CampaignBundleDurationPrice.Create(
+            campaignBundle.Id, 1, new Money(100.000m, "KWD"), "System", 1).Value);
+
+        var restaurantId = Guid.NewGuid();
+        db.CampaignRestaurantEnrollments.Add(new CampaignRestaurantEnrollment
+        {
+            CampaignId = campaign.Id,
+            RestaurantId = restaurantId,
+            ParticipationStatus = Domain.CollaborativeCampaigns.Enums.CampaignRestaurantParticipationStatus.Accepted,
+            RequestedAtUtc = DateTime.UtcNow
+        });
+        var serviceDate = new DateOnly(2026, 11, 15);
+        db.CampaignRestaurantCapacities.Add(new CampaignRestaurantCapacity
+        {
+            CampaignId = campaign.Id,
+            RestaurantId = restaurantId,
+            ServiceDate = serviceDate,
+            MaxBoxes = maxBoxes,
+            ReservedBoxes = 0
+        });
+
+        var policy = CampaignPricingPolicy.Create(
+            1, CampaignPricingPolicy.ModelReferenceCustomerDiscount, "KWD",
+            CampaignPricingPolicy.RoundingAwayFromZero,
+            "{\"restaurantShare\":0.5}", "{\"stacking\":\"exclusive\"}", "{\"basis\":\"undeliveredDays\"}").Value;
+        policy.Approve(Guid.NewGuid(), DateTime.UtcNow);
+        db.CampaignPricingPolicies.Add(policy);
+
+        var customerId = Guid.NewGuid();
+        var address = new MealMate.Domain.IdentityAccess.CustomerAddress
+        {
+            UserId = customerId,
+            Label = "المنزل",
+            AddressLine = "شارع 1",
+            RegionId = Guid.NewGuid(),
+            Governorate = "العاصمة"
+        };
+        db.CustomerAddresses.Add(address);
+        db.CustomerProfiles.Add(new MealMate.Domain.IdentityAccess.CustomerProfile
+        {
+            UserId = customerId,
+            AllergiesCompletedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            DietaryPreferencesCompletedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            ActiveDeliveryAddressId = address.Id,
+            ActiveDeliveryRegionId = address.RegionId
+        });
+        await db.SaveChangesAsync();
+        return (campaign.Id, campaignBundle.Id, customerId, serviceDate);
+    }
+
+    private CreateCampaignCheckoutSessionCommandHandler CreateCheckoutHandler(AppDbContext db) =>
+        new(
+            db,
+            new FixedClock(),
+            new MealMate.Application.Features.CollaborativeCampaigns.Services.CustomerCampaignEvaluationService(
+                db,
+                new FixedClock(),
+                new MealMate.Application.Features.CollaborativeCampaigns.Services.CampaignEligibilityEngine(),
+                new MealMate.Application.Features.IdentityAccess.Customers.CustomerDeliveryAddressService(db, new FixedClock())),
+            new MealMate.Application.Features.CollaborativeCampaigns.Services.CampaignReservationCoordinator(
+                new MealMate.Application.Features.CollaborativeCampaigns.Services.SubscriberCapManager(),
+                new MealMate.Application.Features.CollaborativeCampaigns.Services.CampaignFulfillmentAllocator(),
+                new FixedClock()),
+            new CampaignCapacityLockRepository(db));
+
+    [Fact]
+    public async Task ScenarioE_ConcurrentCheckoutCommands_OnLastBox_OnlyOneSucceeds()
+    {
+        Guid campaignId, bundleId;
+        DateOnly serviceDate;
+        await using (var db = CreateDb())
+        {
+            (campaignId, bundleId, _, serviceDate) = await SeedCheckoutReadyCampaignAsync(db, maxBoxes: 1);
+        }
+
+        // Ten distinct customers with complete profiles race for the single remaining box.
+        var customerIds = new List<Guid>();
+        await using (var db = CreateDb())
+        {
+            for (var i = 0; i < 10; i++)
+            {
+                var racerId = Guid.NewGuid();
+                customerIds.Add(racerId);
+                var address = new MealMate.Domain.IdentityAccess.CustomerAddress
+                {
+                    UserId = racerId,
+                    Label = "المنزل",
+                    AddressLine = "شارع 1",
+                    RegionId = Guid.NewGuid(),
+                    Governorate = "العاصمة"
+                };
+                db.CustomerAddresses.Add(address);
+                db.CustomerProfiles.Add(new MealMate.Domain.IdentityAccess.CustomerProfile
+                {
+                    UserId = racerId,
+                    AllergiesCompletedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+                    DietaryPreferencesCompletedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+                    ActiveDeliveryAddressId = address.Id,
+                    ActiveDeliveryRegionId = address.RegionId
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        async Task<bool> TryCheckoutAsync(int attempt)
+        {
+            await using var db = CreateDb();
+            var handler = CreateCheckoutHandler(db);
+            await startGate.Task;
+            var result = await handler.Handle(new CreateCampaignCheckoutSessionCommand(
+                IdempotencyKey: "race-key-" + attempt,
+                CampaignId: campaignId,
+                BundleId: bundleId,
+                CustomerId: customerIds[attempt],
+                DurationDays: 1,
+                RequestedServiceDates: new List<DateOnly> { serviceDate }), CancellationToken.None);
+            return result.IsSuccess;
+        }
+
+        var tasks = Enumerable.Range(0, 10).Select(TryCheckoutAsync).ToList();
+        startGate.SetResult();
+        var results = await Task.WhenAll(tasks);
+
+        Assert.Equal(1, results.Count(r => r));
+        Assert.Equal(9, results.Count(r => !r));
+
+        await using var verifyDb = CreateDb();
+        var sessions = await verifyDb.CampaignCheckoutSessions.Where(s => s.CampaignId == campaignId).ToListAsync();
+        Assert.Single(sessions);
+    }
+
+    [Fact]
+    public async Task ScenarioF_SameKeySamePayload_Concurrent_CheckoutYieldsSingleSession()
+    {
+        Guid campaignId, bundleId, customerId;
+        DateOnly serviceDate;
+        await using (var db = CreateDb())
+        {
+            (campaignId, bundleId, customerId, serviceDate) = await SeedCheckoutReadyCampaignAsync(db, maxBoxes: 5);
+        }
+
+        var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        async Task<Result<CampaignCheckoutSessionDto>> TryCheckoutAsync()
+        {
+            await using var db = CreateDb();
+            var handler = CreateCheckoutHandler(db);
+            await startGate.Task;
+            return await handler.Handle(new CreateCampaignCheckoutSessionCommand(
+                IdempotencyKey: "identical-key",
+                CampaignId: campaignId,
+                BundleId: bundleId,
+                CustomerId: customerId,
+                DurationDays: 1,
+                RequestedServiceDates: new List<DateOnly> { serviceDate }), CancellationToken.None);
+        }
+
+        var tasks = new[] { TryCheckoutAsync(), TryCheckoutAsync(), TryCheckoutAsync() };
+        startGate.SetResult();
+        var results = await Task.WhenAll(tasks);
+
+        Assert.Equal(3, results.Count(r => r.IsSuccess));
+        Assert.Single(results.Select(r => r.Value!.SessionId).Distinct());
+
+        await using var verifyDb = CreateDb();
+        var sessions = await verifyDb.CampaignCheckoutSessions.Where(s => s.CampaignId == campaignId).ToListAsync();
+        Assert.Single(sessions);
+        var capacity = await verifyDb.CampaignRestaurantCapacities
+            .SingleAsync(c => c.CampaignId == campaignId && c.ServiceDate == serviceDate);
+        Assert.Equal(1, capacity.ReservedBoxes);
+    }
+
+    [Fact]
+    public async Task ScenarioG_SameKeyDifferentPayload_Sequential_ReturnsConflict()
+    {
+        Guid campaignId, bundleId, customerId;
+        DateOnly serviceDate;
+        await using (var db = CreateDb())
+        {
+            (campaignId, bundleId, customerId, serviceDate) = await SeedCheckoutReadyCampaignAsync(db, maxBoxes: 5);
+        }
+
+        await using (var db = CreateDb())
+        {
+            var handler = CreateCheckoutHandler(db);
+            var first = await handler.Handle(new CreateCampaignCheckoutSessionCommand(
+                IdempotencyKey: "payload-key",
+                CampaignId: campaignId,
+                BundleId: bundleId,
+                CustomerId: customerId,
+                DurationDays: 1,
+                RequestedServiceDates: new List<DateOnly> { serviceDate }), CancellationToken.None);
+            Assert.True(first.IsSuccess, "err=" + first.Error?.Code + " desc=" + first.Error?.Description);
+
+            var second = await handler.Handle(new CreateCampaignCheckoutSessionCommand(
+                IdempotencyKey: "payload-key",
+                CampaignId: campaignId,
+                BundleId: bundleId,
+                CustomerId: customerId,
+                DurationDays: 1,
+                RequestedServiceDates: new List<DateOnly> { serviceDate.AddDays(1) }), CancellationToken.None);
+            Assert.False(second.IsSuccess);
+            Assert.Equal("Idempotency.Conflict", second.Error!.Code);
+        }
+    }
+
 }

@@ -223,7 +223,7 @@ public sealed class EndToEndCampaignLifecycleTests : IAsyncLifetime
             var clock = Substitute.For<IDateTimeProvider>();
             clock.UtcNow.Returns(startsAtUtc.AddDays(1));
 
-            var previewHandler = new GetCampaignPricePreviewQueryHandler(db, clock, new CampaignEligibilityEngine());
+            var previewHandler = new GetCampaignPricePreviewQueryHandler(new MealMate.Application.Features.CollaborativeCampaigns.Services.CustomerCampaignEvaluationService(db, clock, new MealMate.Application.Features.CollaborativeCampaigns.Services.CampaignEligibilityEngine(), new MealMate.Application.Features.IdentityAccess.Customers.CustomerDeliveryAddressService(db, clock)));
             var previewResult = await previewHandler.Handle(
                 new GetCampaignPricePreviewQuery(campaignId, campaignBundleId, 26, customerId),
                 CancellationToken.None);

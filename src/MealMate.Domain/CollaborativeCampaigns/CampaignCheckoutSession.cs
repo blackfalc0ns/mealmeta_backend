@@ -28,6 +28,14 @@ public sealed class CampaignCheckoutSession : AuditableEntity
 
     public Guid? PriceQuoteSnapshotId { get; set; }
 
+    /// <summary>
+    /// The saved customer quote this session was derived from. The quote row is the immutable
+    /// price/terms snapshot (reference, discount, final, currency, program, bundle, duration,
+    /// service dates, policy and campaign versions); this session additionally pins the amount
+    /// and versions it will charge. Null for the legacy client-dated flow.
+    /// </summary>
+    public Guid? CustomerQuoteId { get; set; }
+
     /// <summary>Server-computed amount the customer must pay; webhook callbacks are verified against this.</summary>
     public decimal? FinalAmount { get; set; }
 
