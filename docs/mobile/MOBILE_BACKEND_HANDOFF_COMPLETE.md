@@ -30,6 +30,8 @@ GET /api/v1/customer/family-subscription-flow/programs/{programId}/bundles
 GET /api/v1/customer/offers/hub
 GET /api/v1/customer/offers/{offerId}/details
 GET /api/v1/customer/offers/{offerId}/purchase-options
+
+**Purchase mode on offer lists (live 2026-10-20):** every item in `GET /offers/available`, `POST /offers/available` and `GET /offers/hub` now carries `purchaseMode`: `DirectPurchase` means the id is a real active offer addressable by `GET /offers/{offerId}/purchase-options` (build the ready-offers section and open cards from purchase-options). `CouponOnly` means the offer is redeemed through its promo code in the subscription flow — and campaign projections keep their legacy campaign id and are always `CouponOnly` (purchase-options cannot address a campaign id). Do not infer the mode from `packageTargets`, `promoCode` or the offer name; use the field. To exclude campaign projections from the ready-offers list entirely, pass `includeCampaigns=false`.
 ```
 
 Catalog records always expose stable IDs, `nameAr`, `nameEn`, active availability, category/tier, and server-supported durations. Never identify a program, bundle, tier, or offer by display name or image.
