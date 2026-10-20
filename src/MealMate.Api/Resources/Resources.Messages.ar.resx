@@ -1358,4 +1358,17 @@
   <data name="driver_support_handover.notification_arrived_en" xml:space="preserve"><value>The replacement driver arrived for custody receipt.</value></data>
   <data name="driver_support_handover.notification_cancelled_en" xml:space="preserve"><value>Driver support handover cancelled.</value></data>
   <data name="driver_support_handover.notification_assigned_en" xml:space="preserve"><value>A driver support handover has been assigned to you.</value></data>
+<data name="driver_reassignment.notification_rejected" xml:space="preserve"><value>رفض مسؤول التوصيل طلب إعادة الإسناد. افتح الطلب للاطلاع على السبب.</value></data>
+<data name="driver_reassignment.custody_changed" xml:space="preserve"><value>حالة الطلب أو العهدة لم تعد تسمح بقبول طلب إعادة الإسناد.</value></data>
+<data name="driver_reassignment.stop_unavailable" xml:space="preserve"><value>لا يوجد بند توصيل محفوظ واضح لهذا الطلب.</value></data>
+<data name="driver_reassignment.already_decided" xml:space="preserve"><value>يوجد قرار محفوظ مختلف لهذا الطلب.</value></data>
+<data name="driver_reassignment.already_closed" xml:space="preserve"><value>طلب إعادة الإسناد مغلق بالفعل.</value></data>
+<data name="driver_reassignment.handover_exists" xml:space="preserve"><value>يوجد نقل عهدة لهذا الطلب بالفعل.</value></data>
+<data name="driver_reassignment.forbidden" xml:space="preserve"><value>لا تملك صلاحية الوصول إلى طلب إعادة الإسناد.</value></data>
+<data name="driver_reassignment.decision_required" xml:space="preserve"><value>استخدم قرار إعادة إسناد صريحاً قبل إغلاق هذا الطلب.</value></data>
+<data name="driver_reassignment.not_found" xml:space="preserve"><value>لم يتم العثور على طلب إعادة الإسناد.</value></data>
+<data name="driver_reassignment.notification_title" xml:space="preserve"><value>تحديث طلب إعادة الإسناد</value></data>
+<data name="driver_reassignment.notification_accepted" xml:space="preserve"><value>وافق مسؤول التوصيل على طلب إعادة الإسناد. تظل العهدة لديك حتى تأكيد نقلها.</value></data>
+<data name="driver_reassignment.decision_invalid" xml:space="preserve"><value>القرار يجب أن يكون قبولاً أو رفضاً والملاحظات حتى 500 حرف؛ سبب الرفض مطلوب من 3 أحرف.</value></data>
+<data name="driver_support_handover.reassignment_rejected" xml:space="preserve"><value>تم رفض طلب إعادة الإسناد.</value></data>
 </root>

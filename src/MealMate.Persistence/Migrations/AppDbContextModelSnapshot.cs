@@ -3662,6 +3662,31 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("OrderId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("ReassignmentDecidedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReassignmentDecidedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReassignmentDecision")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("ReassignmentDecisionNotes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ReassignmentNotes")
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)");
+
+                    b.Property<string>("ReassignmentReason")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("ReassignmentTripStopId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("RestaurantId")
                         .HasColumnType("uuid");
 
@@ -3701,7 +3726,12 @@ namespace MealMate.Persistence.Migrations
                         .HasDatabaseName("IX_Complaints_Active_ReassignmentRequest")
                         .HasFilter("\"Category\" = 'DriverReassignmentRequested' AND \"Status\" IN (1, 2) AND \"OrderId\" IS NOT NULL");
 
-                    b.ToTable("Complaints", (string)null);
+                    b.HasIndex("DriverProfileId", "ReassignmentTripStopId", "SubmittedAtUtc");
+
+                    b.ToTable("Complaints", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Complaints_ReassignmentDecision", "\"ReassignmentDecision\" IS NULL OR \"ReassignmentDecision\" IN ('Accepted','Rejected')");
+                        });
                 });
 
             modelBuilder.Entity("MealMate.Domain.ComplaintsSupport.ComplaintClassification", b =>
@@ -5431,9 +5461,6 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("ComplaintId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("RequestedIssueId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime?>("CompletedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -5493,6 +5520,9 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RequestedIssueId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("RestaurantId")

@@ -1281,6 +1281,9 @@ public sealed class DriverDeliveryOrderCommandHandlers
             Latitude = request.Latitude,
             Longitude = request.Longitude,
             Category = "DriverReassignmentRequested",
+            ReassignmentTripStopId = stop.Id,
+            ReassignmentReason = reason,
+            ReassignmentNotes = notes,
             Title = isAr
                 ? $"إعادة إسناد الطلب {stop.OrderCode} – {reasonLabel}"
                 : $"Reassignment requested for box {stop.OrderCode} – {reasonLabel}",

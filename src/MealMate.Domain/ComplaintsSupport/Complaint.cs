@@ -15,6 +15,14 @@ public sealed class Complaint : AuditableEntity
 
     public Guid? DriverProfileId { get; set; }
 
+    public Guid? ReassignmentTripStopId { get; set; }
+    public string? ReassignmentReason { get; set; }
+    public string? ReassignmentNotes { get; set; }
+    public string? ReassignmentDecision { get; set; }
+    public Guid? ReassignmentDecidedByUserId { get; set; }
+    public DateTime? ReassignmentDecidedAtUtc { get; set; }
+    public string? ReassignmentDecisionNotes { get; set; }
+
     /// <summary>
     /// Optional driver-reported location carried by driver reassignment requests
     /// (screen 08.02): where the driver is stuck and where the box can be handed

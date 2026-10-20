@@ -55,6 +55,69 @@ public class DriverSupportHandoverTests
     }
 
     [Fact]
+    public async Task ReassignmentRecovery_ExistsBeforeHandover_AndDecisionPreservesCustody()
+    {
+        var s = await Seed();
+        s.Stop.Status = TripStopStatus.PickedUp; await _db.SaveChangesAsync();
+        var clock = Substitute.For<IDateTimeProvider>(); clock.UtcNow.Returns(Now);
+        var handler = new DriverReassignmentHandlers(_db, _user, NullLocalizedMessageProvider.Instance, clock,
+            new PostgresApplicationTransactionExecutor(_db), new PostgresApplicationLockManager(_db));
+        _user.UserId.Returns(s.Original.UserId); _user.UserType.Returns(UserType.Driver);
+        var recovered = await handler.Handle(new GetDriverReassignmentRequestsQuery(s.Stop.Id), default);
+        recovered.IsSuccess.Should().BeTrue(); recovered.Value.Should().ContainSingle();
+        recovered.Value[0].Status.Should().Be("ReassignmentRequested");
+        recovered.Value[0].HandoverId.Should().BeNull();
+        _user.UserId.Returns(Guid.NewGuid()); _user.UserType.Returns(UserType.DeliveryManager);
+        var resolver = new ResolveSupportIssueCommandHandler(_db, NullLocalizedMessageProvider.Instance,
+            Substitute.For<IAuditLogger>(), _user, new PostgresApplicationTransactionExecutor(_db), new PostgresApplicationLockManager(_db));
+        (await resolver.Handle(new ResolveSupportIssueCommand(s.Issue.Id, "Pending decision"), default))
+            .Error.Code.Should().Be("REASSIGNMENT_DECISION_REQUIRED");
+        var accepted = await handler.Handle(new DecideDriverReassignmentCommand(s.Issue.Id, "Accepted", "Reviewed"), default);
+        accepted.IsSuccess.Should().BeTrue(); accepted.Value.Status.Should().Be("Accepted");
+        (await _db.DriverSupportHandovers.CountAsync()).Should().Be(0);
+        (await _db.DriverAssignments.SingleAsync()).DriverProfileId.Should().Be(s.Original.Id);
+        (await handler.Handle(new DecideDriverReassignmentCommand(s.Issue.Id, "Rejected", "Different decision"), default)).IsFailure.Should().BeTrue();
+        (await handler.Handle(new DecideDriverReassignmentCommand(s.Issue.Id, "Accepted", "Reviewed"), default)).IsSuccess.Should().BeTrue();
+        (await _db.AuditLogs.CountAsync(x => x.Action == "DriverReassignmentAccepted")).Should().Be(1);
+        (await resolver.Handle(new ResolveSupportIssueCommand(s.Issue.Id, "Issue handled without replacement"), default)).IsSuccess.Should().BeTrue();
+        var closed = await handler.Handle(new GetDriverReassignmentRequestQuery(s.Issue.Id), default);
+        closed.Value.Status.Should().Be("Closed"); closed.Value.Decision.Should().Be("Accepted");
+    }
+
+    [Fact]
+    public async Task RejectedReassignment_CannotCreateHandover_AndOtherDriverCannotRead()
+    {
+        var s = await Seed();
+        var clock = Substitute.For<IDateTimeProvider>(); clock.UtcNow.Returns(Now);
+        var handler = new DriverReassignmentHandlers(_db, _user, NullLocalizedMessageProvider.Instance, clock,
+            new PostgresApplicationTransactionExecutor(_db), new PostgresApplicationLockManager(_db));
+        (await handler.Handle(new DecideDriverReassignmentCommand(s.Issue.Id, "Rejected", "No replacement needed"), default)).IsSuccess.Should().BeTrue();
+        (await Handler().Handle(new CreateDriverSupportHandoverCommand(s.Issue.Id, s.Replacement.Id, "rejected"), default)).IsFailure.Should().BeTrue();
+        _user.UserType.Returns(UserType.Driver); _user.UserId.Returns(s.Replacement.UserId);
+        (await handler.Handle(new GetDriverReassignmentRequestQuery(s.Issue.Id), default)).IsFailure.Should().BeTrue();
+        _user.UserId.Returns(s.Original.UserId);
+        var read = await handler.Handle(new GetDriverReassignmentRequestQuery(s.Issue.Id), default);
+        read.Value.Status.Should().Be("Rejected"); read.Value.DecisionNotes.Should().Be("No replacement needed");
+    }
+
+    [Fact]
+    public async Task ReassignmentDecision_EnforcesScopeReasonAndTerminalCustody()
+    {
+        var s = await Seed();
+        var clock = Substitute.For<IDateTimeProvider>(); clock.UtcNow.Returns(Now);
+        var handler = new DriverReassignmentHandlers(_db, _user, NullLocalizedMessageProvider.Instance, clock,
+            new PostgresApplicationTransactionExecutor(_db), new PostgresApplicationLockManager(_db));
+        _user.RestaurantId.Returns(Guid.NewGuid());
+        (await handler.Handle(new DecideDriverReassignmentCommand(s.Issue.Id, "Rejected", "Not in scope"), default)).Error.Code.Should().Be("REASSIGNMENT_FORBIDDEN");
+        _user.RestaurantId.Returns(s.Trip.RestaurantId);
+        (await handler.Handle(new DecideDriverReassignmentCommand(s.Issue.Id, "Rejected"), default)).Error.Code.Should().Be("REASSIGNMENT_DECISION_INVALID");
+        s.Stop.Status = TripStopStatus.Delivered; await _db.SaveChangesAsync();
+        (await handler.Handle(new DecideDriverReassignmentCommand(s.Issue.Id, "Accepted"), default)).Error.Code.Should().Be("REASSIGNMENT_CUSTODY_CHANGED");
+        s.Issue.ReassignmentDecision.Should().BeNull();
+        (await _db.AuditLogs.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public async Task Assignment_PreservesCustody_AndReplayReturnsSameHandover()
     {
         var s = await Seed(); var handler = Handler();

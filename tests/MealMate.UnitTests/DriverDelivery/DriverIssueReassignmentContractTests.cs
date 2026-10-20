@@ -748,6 +748,18 @@ public class DriverIssueReassignmentContractTests
         var saved = await db.Complaints.SingleAsync();
         result.Value.RequestId.Should().Be(saved.Id);
         saved.Category.Should().Be("DriverReassignmentRequested");
+        saved.ReassignmentTripStopId.Should().Be(stop.Id);
+        saved.ReassignmentReason.Should().Be("VehicleBreakdown");
+        saved.ReassignmentNotes.Should().Be("المركبة متوقفة أمام مجمع الأفنيوز");
+        var clock = Substitute.For<IDateTimeProvider>(); clock.UtcNow.Returns(DateTime.UtcNow);
+        var recoveryHandler = new DriverReassignmentHandlers(db, currentUser, messages, clock,
+            new MealMate.Persistence.Common.PostgresApplicationTransactionExecutor(db),
+            new MealMate.Persistence.Common.PostgresApplicationLockManager(db));
+        var recovery = await recoveryHandler.Handle(new GetDriverReassignmentRequestsQuery(stop.Id), default);
+        recovery.IsSuccess.Should().BeTrue();
+        recovery.Value.Single().RequestId.Should().Be(result.Value.RequestId);
+        recovery.Value.Single().Reason.Should().Be("VehicleBreakdown");
+        recovery.Value.Single().Status.Should().Be("ReassignmentRequested");
         saved.Status.Should().Be(ComplaintStatus.Submitted);
         saved.DriverProfileId.Should().Be(driver.Id);
         saved.RestaurantId.Should().Be(trip.RestaurantId);

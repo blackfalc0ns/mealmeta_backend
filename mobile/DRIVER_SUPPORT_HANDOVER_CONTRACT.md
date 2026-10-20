@@ -2,7 +2,34 @@
 
 All routes below are under `/api/v1`. Send the bearer token and `Accept-Language: en` or `ar`. Driver identity and dispatcher restaurant scope come from authenticated claims and persisted account/profile state. `driverId` query values and client-supplied restaurant IDs never grant access. Errors are RFC 7807 Problem Details with a stable `code` extension; statuses are 400 validation, 401 unauthenticated, 403 out of scope, 404 unavailable resource, and 409 lifecycle/custody conflict.
 
-## Lifecycle and custody
+## Reassignment request recovery and explicit dispatch decision (before handover)
+
+The existing `POST /driver/orders/{boxId}/request-reassignment` persists the request and returns its `requestId`. Recover a lost POST response with `GET /driver/reassignment-requests?boxId={tripStopId}&page=1&pageSize=20`. Omit `boxId` to list all requests of the authenticated reporting driver, newest first; page size is capped at 100. The response is a bare array, including historical decisions. A duplicate send still returns the existing active-request conflict; follow it with GET rather than treating it as local success. An in-flight POST may not yet be visible to GET, so re-read after its duplicate conflict.
+
+`GET /driver/reassignment-requests/{requestId}` reads the original reporter's request even after custody moves. A replacement driver uses the handover APIs instead. Dispatcher detail: `GET /dispatcher/reassignment-requests/{requestId}` under restaurant scope.
+
+```json
+{
+  "requestId": "<guid>", "boxId": "<trip-stop-guid>", "boxCode": "<code>",
+  "status": "ReassignmentRequested", "reason": "VehicleBreakdown", "notes": null,
+  "requestedAtUtc": "2026-10-20T10:00:00Z", "decision": null, "decisionNotes": null,
+  "decidedByUserId": null, "decidedAtUtc": null, "handoverId": null, "handoverStatus": null,
+  "replacementDriverId": null, "replacementTripId": null, "latitude": null, "longitude": null
+}
+```
+
+`status` is `ReassignmentRequested`, `Accepted`, `Rejected`, or `Closed`. `decision` is nullable `Accepted`/`Rejected`, separate from `handoverStatus`. Legacy rows may have null reason, notes, boxId/code or decision evidence; no missing decision is fabricated. An existing legacy handover proves acceptance but does not invent a decision actor or timestamp. `/resolve` rejects an undecided request with no handover; an accepted request may be resolved without a handover when replacement is no longer required, returning `Closed` while retaining `decision: Accepted`.
+
+- `POST /dispatcher/reassignment-requests/{requestId}/accept`: `{ "notes": "optional, max 500" }`.
+- `POST /dispatcher/reassignment-requests/{requestId}/reject`: `{ "notes": "required, 3–500 characters" }`.
+
+Both return the request DTO. Acceptance alone preserves custody and creates no handover. A successful existing assign/reassign atomically accepts an undecided request for compatibility. Rejection closes the complaint and prevents handover creation; it does not move a box. The same decision and trimmed notes replay safely; differing evidence conflicts. `/resolve` cannot substitute for deciding a request with no handover. Decisions emit persisted driver notifications and the existing scoped issue event with `eventName` `reassignment-accepted`/`reassignment-rejected`; refresh request details after the event or reconnect.
+
+Errors: `REASSIGNMENT_FORBIDDEN` (403), `REASSIGNMENT_NOT_FOUND` (404), `REASSIGNMENT_DECISION_INVALID` (400), `REASSIGNMENT_ALREADY_DECIDED`, `REASSIGNMENT_ALREADY_CLOSED`, `REASSIGNMENT_HANDOVER_EXISTS`, `REASSIGNMENT_STOP_UNAVAILABLE`, `REASSIGNMENT_CUSTODY_CHANGED`, `REASSIGNMENT_DECISION_REQUIRED`, `REASSIGNMENT_REJECTED` (409).
+
+Sending reassignment requires a `PickedUp` stop, active original assignment/account, nonterminal trip, and no active handover or unresolved hold. General issue reporting requires active ownership and shared guards but has no identical PickedUp-only restriction. `RoadIssue` is a final report-issue type, not an additional reassignment-reason value. Apply `AddDriverReassignmentDecisions` before serving these APIs; a Git push is not confirmation of the deployed server version.
+
+## Handover lifecycle and custody
 
 A handover moves through `Assigned → Arrived → Receiving → Completed`, or to `Cancelled` before any receipt evidence is recorded. Pending assignment does not change the original trip, active assignment, or physical custody. Arrival stores the replacement driver's coordinate pair and timestamp; no proximity threshold is asserted because none is configured. Pickup location uses one complete valid pair from the complaint or a single persisted tracking point, and includes its source and evidence time.
 

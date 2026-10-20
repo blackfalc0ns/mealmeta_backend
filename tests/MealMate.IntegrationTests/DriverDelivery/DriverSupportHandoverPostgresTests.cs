@@ -72,6 +72,43 @@ public sealed class DriverSupportHandoverPostgresTests : IAsyncLifetime
         var caller = Substitute.For<ICurrentUser>();
         caller.IsAuthenticated.Returns(true); caller.UserId.Returns(managerUserId); caller.UserType.Returns(UserType.DeliveryManager); caller.RestaurantId.Returns(restaurant.Id);
         var clock = Substitute.For<IDateTimeProvider>(); clock.UtcNow.Returns(DateTime.UtcNow);
+        issue.Category = "DriverReassignmentRequested";
+        issue.ReassignmentTripStopId = receivedStop.Id;
+        issue.ReassignmentReason = "VehicleBreakdown";
+        await _db.SaveChangesAsync();
+        // A lost send response can be recovered before a handover exists.
+        caller.UserId.Returns(originalUserId); caller.UserType.Returns(UserType.Driver); caller.RestaurantId.Returns((Guid?)null);
+        var recovery = new DriverReassignmentHandlers(_db, caller, NullLocalizedMessageProvider.Instance, clock,
+            new PostgresApplicationTransactionExecutor(_db), new PostgresApplicationLockManager(_db));
+        var pending = await recovery.Handle(new GetDriverReassignmentRequestsQuery(receivedStop.Id), default);
+        pending.Value.Should().ContainSingle(); pending.Value[0].Status.Should().Be("ReassignmentRequested");
+        pending.Value[0].HandoverId.Should().BeNull();
+        caller.UserId.Returns(managerUserId); caller.UserType.Returns(UserType.DeliveryManager); caller.RestaurantId.Returns(restaurant.Id);
+        async Task<Result<DriverReassignmentRequestDto>> AcceptFromFreshContextAsync(bool fail = false)
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_database.GetConnectionString());
+            if (fail) options.AddInterceptors(new ThrowOnceOnSaveInterceptor());
+            await using var context = new AppDbContext(options.Options, Substitute.For<IDomainEventDispatcher>());
+            var decisionHandler = new DriverReassignmentHandlers(context, caller, NullLocalizedMessageProvider.Instance, clock,
+                new PostgresApplicationTransactionExecutor(context), new PostgresApplicationLockManager(context));
+            return await decisionHandler.Handle(new DecideDriverReassignmentCommand(issue.Id, "Accepted", "Reviewed by dispatch"), default);
+        }
+        Func<Task> failDecision = async () => await AcceptFromFreshContextAsync(true);
+        await failDecision.Should().ThrowAsync<InvalidOperationException>();
+        await using (var rolledBack = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_database.GetConnectionString()).Options, Substitute.For<IDomainEventDispatcher>()))
+        {
+            (await rolledBack.Complaints.SingleAsync(x => x.Id == issue.Id)).ReassignmentDecision.Should().BeNull();
+            (await rolledBack.AuditLogs.CountAsync(x => x.Action == "DriverReassignmentAccepted")).Should().Be(0);
+        }
+        var decisions = await Task.WhenAll(AcceptFromFreshContextAsync(), AcceptFromFreshContextAsync());
+        decisions.Should().OnlyContain(x => x.IsSuccess);
+        await using (var acceptedRead = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_database.GetConnectionString()).Options, Substitute.For<IDomainEventDispatcher>()))
+        {
+            (await acceptedRead.AuditLogs.CountAsync(x => x.Action == "DriverReassignmentAccepted")).Should().Be(1);
+            (await acceptedRead.DriverSupportHandovers.CountAsync()).Should().Be(0);
+            (await acceptedRead.DriverAssignments.SingleAsync(x => x.TripId == trip.Id)).DriverProfileId.Should().Be(original.Id);
+        }
+        _db.ChangeTracker.Clear();
         async Task<Result<DriverSupportHandoverDto>> CreateFromFreshContextAsync()
         {
             var options = new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_database.GetConnectionString()).Options;

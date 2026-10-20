@@ -1,6 +1,6 @@
 # الدليل الكامل لدعم السائق ومسؤول التوصيل ونقل العهدة
 
-تاريخ المراجعة: 20 أكتوبر 2026. مرجع التنفيذ: commit `bda25c968c192644c100186fd50e9719d7d40ab2`.
+تاريخ المراجعة: 20 أكتوبر 2026. أصل فلو العهدة: commit `bda25c968c192644c100186fd50e9719d7d40ab2`، مع إضافة قراءة طلب إعادة الإسناد والقرار الصريح الموضحة أدناه. تحقق من نشر migration `AddDriverReassignmentDecisions` قبل ربط الإضافة. رفع Git وحده لا يؤكد نسخة السيرفر المنشورة.
 
 هذا الملف لفريق الموبايل والداشبورد وQA. يغطي بلاغ العنوان غير الواضح، التأخير الشديد، مشاكل الطريق والمركبة، اختيار البديل، واستلام البوكسات ومتابعة الناقص والمتضرر. تفاصيل الحسابات والرواتب وإدارة الأسطول العامة خارج نطاقه.
 
@@ -142,6 +142,57 @@ Content-Type: application/json
 لا يحرر هذا الطلب العهدة ولا ينشئ تعيينًا للبديل. الطلب النشط المكرر له خطأ تعارض؛ اقرأ الحالة قبل إنشاء طلب جديد. احتفظ بمعرّف البلاغ الأصلي ولا تستبدله بمعرّف السائق البديل.
 
 ## 5. مركز دعم مسؤول التوصيل
+
+### مرحلة انتظار القرار واسترجاع طلب الإرسال
+
+هذه المرحلة متاحة قبل وجود أي `handoverId`. طلب الإرسال الحالي لا يتغير:
+`POST /driver/orders/{boxId}/request-reassignment` يعيد `requestId` و`ReassignmentRequested`.
+
+عند فقد الرد، افتح التطبيق أو شاشة البوكس واستدعِ:
+
+`GET /driver/reassignment-requests?boxId=<trip-stop-guid>&page=1&pageSize=20`
+
+يرجع مصفوفة طلبات السائق فقط مرتبة من الأحدث للأقدم. `boxId` اختياري؛ حذفه يسترجع طلبات السائق عبر البوكسات، بما فيها الحالات المنتهية، بحد 100 عنصر للصفحة. لا تعتمد على معرف مفقود في رد POST: ابحث بمعرف البوكس المعروف. القائمة الفارغة تعني عدم وجود طلب ظاهر في هذه القراءة؛ إذا أعدت POST والطلب الأول كان قد حُفظ فستحصل على تعارض الطلب النشط، ثم أعد GET. لا تحوّل هذا التعارض إلى نجاح محلي دون قراءة الطلب المحفوظ.
+
+تفاصيل طلب محدد: `GET /driver/reassignment-requests/{requestId}`. بعد نقل العهدة تظل القراءة متاحة للسائق المبلّغ الأصلي، حتى لو لم يعد يملك تعيين الرحلة. لا تتيح هذه الواجهة بيانات الطلب للسائق البديل؛ البديل يستخدم واجهات `support-handovers` الخاصة به.
+
+مثال عنصر القراءة:
+
+```json
+{
+  "requestId": "<complaint-guid>", "boxId": "<trip-stop-guid>", "boxCode": "<persisted-code>",
+  "status": "ReassignmentRequested", "reason": "VehicleBreakdown", "notes": "المركبة متوقفة",
+  "requestedAtUtc": "2026-10-20T10:00:00Z", "decision": null, "decisionNotes": null,
+  "decidedByUserId": null, "decidedAtUtc": null, "handoverId": null, "handoverStatus": null,
+  "replacementDriverId": null, "replacementTripId": null, "latitude": 29.3, "longitude": 47.9
+}
+```
+
+البلاغات القديمة قد لا تحتوي `reason` أو `notes` المنفصلين أو ربط بوكس غير ملتبس؛ ترجع هذه الحقول `null` بدل اختلاقها. يبقى الوصف الأصلي في تفاصيل البلاغ. `boxId` و`boxCode` قابلان لـnull في هذه الحالة.
+
+| `status` | ما تعرضه شاشة السائق |
+|---|---|
+| `ReassignmentRequested` | في انتظار قرار مسؤول التوصيل، لا يوجد نقل عهدة بعد |
+| `Accepted` | وافق المسؤول؛ `handoverId` قد يظل null حتى اختيار البديل |
+| `Rejected` | رفض المسؤول؛ اعرض `decisionNotes` |
+| `Closed` | طلب أُغلق دون handover؛ اقرأ `decision` لمعرفة القرار إن كان محفوظًا، ولا تختلق قرارًا للطلبات القديمة |
+
+`decision` مستقلة عن دورة حياة نقل العهدة: بعد إنشاء العملية اعرض `handoverStatus` (`Assigned/Arrived/Receiving/Completed/Cancelled`) أيضًا. الإلغاء لا يمحو قرار القبول ولا يعيد الطلب تلقائيًا إلى انتظار القرار.
+
+مسؤول التوصيل يقرأ نفس الكائن عبر `GET /dispatcher/reassignment-requests/{requestId}` ضمن نطاق المطعم، ثم يقرر:
+
+- `POST /dispatcher/reassignment-requests/{requestId}/accept` مع `{ "notes": "تمت مراجعة الطلب" }`؛ الملاحظة اختيارية حتى 500 حرف.
+- `POST /dispatcher/reassignment-requests/{requestId}/reject` مع `{ "notes": "يمكن استكمال التوصيل بعد معالجة المشكلة" }`؛ سبب الرفض مطلوب من 3 إلى 500 حرف.
+
+كلاهما يعيد `200` بكائن القراءة أعلاه بعد تحديث القرار والمنفّذ والتوقيت. القبول لا ينشئ رحلة أو handover ولا ينقل العهدة. يلي القبول اختيار البديل بالمسارات المعتادة. لحفظ التوافق، التعيين الناجح مباشرة بالـassign/reassign يقبل الطلب تلقائيًا في نفس المعاملة إذا لم يوجد قرار سابق، ويسجل التدقيق والإشعار.
+
+القرار نهائي: تكرار نفس القرار ونفس الملاحظة المنظفة يرجع النتيجة الحالية دون إشعار/تدقيق مكرر؛ تغيير أي منهما يعيد `REASSIGNMENT_ALREADY_DECIDED`. الرفض يغلق البلاغ ويمنع إنشاء handover له، ولا يغيّر عهدة السائق. يمكن إنشاء طلب جديد لاحقًا إن استوفت الحالة شروط الإرسال. لا تستخدم `/resolve` بدل قرار طلب ما زال معلّقًا بلا handover؛ يرجع `REASSIGNMENT_DECISION_REQUIRED`. بعد القبول يمكن حل البلاغ دون handover إذا عولجت المشكلة ولم يعد البديل مطلوبًا؛ تصبح `status` مساوية `Closed` مع بقاء `decision` مساوية `Accepted`. لا يمكن إنشاء handover لبلاغ مغلق.
+
+أخطاء الإضافة: `REASSIGNMENT_FORBIDDEN` (403)، `REASSIGNMENT_NOT_FOUND` (404)، `REASSIGNMENT_DECISION_INVALID` (400)، و`REASSIGNMENT_ALREADY_DECIDED`، `REASSIGNMENT_ALREADY_CLOSED`، `REASSIGNMENT_HANDOVER_EXISTS`، `REASSIGNMENT_STOP_UNAVAILABLE`، `REASSIGNMENT_CUSTODY_CHANGED`، `REASSIGNMENT_DECISION_REQUIRED` (409). إنشاء handover لطلب مرفوض يعيد `REASSIGNMENT_REJECTED` أو تعارض البلاغ المغلق للبلاغات القديمة.
+
+القرار يرسل إشعارًا محفوظًا للسائق وحدث البلاغ المعتاد `driver-support-issue-updated` / `driver-issue-updated` بقيمة `eventName` تساوي `reassignment-accepted` أو `reassignment-rejected`. عنده أعد قراءة الطلب. حدث الإرسال `reassignment-requested` نفسه كافٍ لتحديث مركز الدعم، ولا يلزم انتظار إنشاء handover.
+
+شروط الإرسال: `PickedUp` فقط، تعيين نشط، هوية وحساب صحيحان، لا handover نشط ولا متابعة مفتوحة، والرحلة غير Completed/Cancelled. شروط البلاغ العام لا تفرض `PickedUp` تحديدًا لكنها تتطلب تعيينًا نشطًا والحمايات المشتركة. `RoadIssue` موجود في قائمة أنواع البلاغ النهائية، لكنه ليس سببًا إضافيًا في قائمة أسباب طلب الاستبدال؛ استخدم السبب التشغيلي الملائم من قائمة القسم 4.3.
 
 ### 5.1 القائمة والفلاتر
 

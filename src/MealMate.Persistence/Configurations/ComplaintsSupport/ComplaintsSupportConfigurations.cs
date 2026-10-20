@@ -15,6 +15,13 @@ public sealed class ComplaintConfiguration : IEntityTypeConfiguration<Complaint>
         builder.Property(x => x.Category).HasMaxLength(100).IsRequired();
         builder.Property(x => x.Title).HasMaxLength(300).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(4000).IsRequired();
+        builder.Property(x => x.ReassignmentReason).HasMaxLength(100);
+        builder.Property(x => x.ReassignmentNotes).HasMaxLength(250);
+        builder.Property(x => x.ReassignmentDecision).HasMaxLength(20);
+        builder.Property(x => x.ReassignmentDecisionNotes).HasMaxLength(500);
+        builder.HasIndex(x => new { x.DriverProfileId, x.ReassignmentTripStopId, x.SubmittedAtUtc });
+        builder.ToTable("Complaints", table => table.HasCheckConstraint("CK_Complaints_ReassignmentDecision",
+            "\"ReassignmentDecision\" IS NULL OR \"ReassignmentDecision\" IN ('Accepted','Rejected')"));
 
         builder.Property(x => x.Latitude).HasPrecision(10, 7);
         builder.Property(x => x.Longitude).HasPrecision(10, 7);

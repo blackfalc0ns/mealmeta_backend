@@ -88,6 +88,10 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
 
             if (await _db.DriverSupportHandovers.AnyAsync(x => x.ComplaintId == complaint.Id && (x.Status == "Assigned" || x.Status == "Arrived" || x.Status == "Receiving"), cancellationToken))
                 return Error.Conflict("HANDOVER_PENDING", _messages.GetMessage("driver_support_handover.pending", "Complete or cancel the active driver handover before resolving this issue."));
+            if (complaint.Category == "DriverReassignmentRequested"
+                && complaint.ReassignmentDecision is null
+                && !await _db.DriverSupportHandovers.AnyAsync(x => x.ComplaintId == complaint.Id, cancellationToken))
+                return Error.Conflict("REASSIGNMENT_DECISION_REQUIRED", _messages.GetMessage("driver_reassignment.decision_required"));
             if (await _db.DeliveryHolds.AnyAsync(x => x.DriverSupportHandoverBoxId.HasValue && x.Status == "Active"
                 && x.ReleasedAtUtc == null && x.ResolvedAtUtc == null
                 && _db.DriverSupportHandoverBoxes.Any(b => b.Id == x.DriverSupportHandoverBoxId.Value

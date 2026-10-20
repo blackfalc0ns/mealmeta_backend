@@ -100,7 +100,9 @@ public sealed class DriverSupportHandoverHandlers :
         await _locks.LockSupportComplaintAsync(complaintId, ct);
         complaint = await _db.Complaints.FirstOrDefaultAsync(x => x.Id == complaintId && !x.IsDeleted, ct);
         if (complaint is null) return NotFound();
-        if (complaint.Status is ComplaintStatus.Resolved or ComplaintStatus.Closed)
+        if (complaint.ReassignmentDecision == "Rejected")
+            return Conflict("REASSIGNMENT_REJECTED", "The reassignment request was rejected.", "تم رفض طلب إعادة الإسناد.");
+        if (complaint.Status is ComplaintStatus.Resolved or ComplaintStatus.Rejected or ComplaintStatus.Closed)
             return Conflict("ISSUE_ALREADY_RESOLVED", "The support issue is already resolved.", "تم حل البلاغ مسبقاً.");
         var stopQuery = _db.TripStops.AsNoTracking().Include(x => x.Trip).ThenInclude(x => x.DriverAssignments)
             .Where(x => complaint.OrderId.HasValue && (x.Id == complaint.OrderId || x.DailyOrderId == complaint.OrderId)
@@ -201,6 +203,15 @@ public sealed class DriverSupportHandoverHandlers :
         foreach (var item in manifest)
             handover.Boxes.Add(new DriverSupportHandoverBox { TripStopId = item.Id, ManifestCode = item.OrderCode, Status = "Pending" });
         _db.DriverSupportHandovers.Add(handover);
+        if (complaint.Category == "DriverReassignmentRequested" && complaint.ReassignmentDecision is null)
+        {
+            // Existing assign APIs remain compatible: successful assignment atomically accepts the request.
+            complaint.ReassignmentDecision = "Accepted";
+            complaint.ReassignmentDecidedByUserId = _user.UserId;
+            complaint.ReassignmentDecidedAtUtc = now;
+            complaint.ReassignmentDecisionNotes = notes;
+            DriverReassignmentHandlers.RecordDecision(_db, complaint, _user.UserId.Value, now, _messages);
+        }
         complaint.Status = ComplaintStatus.UnderReview;
         await AddNotificationsAsync(handover, "assigned", ct);
         await _db.SaveChangesAsync(ct);
