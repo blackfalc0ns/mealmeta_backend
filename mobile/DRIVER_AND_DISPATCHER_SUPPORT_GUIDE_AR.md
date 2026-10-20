@@ -1,0 +1,489 @@
+# الدليل الكامل لدعم السائق ومسؤول التوصيل ونقل العهدة
+
+تاريخ المراجعة: 20 أكتوبر 2026. مرجع التنفيذ: commit `bda25c968c192644c100186fd50e9719d7d40ab2`.
+
+هذا الملف لفريق الموبايل والداشبورد وQA. يغطي بلاغ العنوان غير الواضح، التأخير الشديد، مشاكل الطريق والمركبة، اختيار البديل، واستلام البوكسات ومتابعة الناقص والمتضرر. تفاصيل الحسابات والرواتب وإدارة الأسطول العامة خارج نطاقه.
+
+أمثلة JSON توضيحية لعقود الاتصال وليست سجلات إنتاج. استبدل القيم بين `<...>` بمعرّفات وبيانات حقيقية. جميع المسارات أدناه تبدأ بـ `/api/v1` ما عدا مسارات SignalR.
+
+## 1. قواعد الاتصال والمعرّفات
+
+```http
+Authorization: Bearer <access-token>
+Accept-Language: ar
+Content-Type: application/json
+```
+
+استخدم `Accept-Language: en` للإنجليزية. لا ترسل أسماء عربية بدل القيم البرمجية مثل `VehicleBreakdown` و`Received`. رد النجاح يعيد القيمة مباشرة؛ لا يوجد غلاف عام باسم `data` أو `result`. التاريخ بصيغة UTC عند وجود اللاحقة `Utc`؛ حوّله للعرض فقط.
+
+| المعرّف | المقصود والاستخدام |
+|---|---|
+| `boxId` في مسارات السائق | `TripStop.Id` من خريطة/طلبات السائق، وليس كود العرض ولا `DailyOrderId` |
+| `tripStopId` | نفس معرّف بند الرحلة المستخدم في قائمة نقل العهدة |
+| `driverId` و`replacementDriverId` | معرّف `DriverProfile`، وليس معرّف حساب المستخدم |
+| `issueId` | معرّف البلاغ الذي تعيده قائمة الدعم؛ المسارات القديمة قد تعيد معرّف توقف متعذر |
+| `requestId` | معرّف البلاغ المحفوظ الناتج عن طلب الاستبدال؛ يصلح لفتح تفاصيل الدعم |
+| `handoverId` | معرّف عملية نقل العهدة المحفوظة |
+| `tripId` في نقل العهدة | الرحلة الأصلية، ويظل محفوظًا بعد الاكتمال |
+| `replacementTripId` | رحلة جديدة للمستلم فقط؛ قد يكون `null` حتى بعد الاكتمال إذا لم يُستلم أي بوكس |
+| `manifestCode` | كود القائمة المحفوظ للبوكس؛ لا تختصره ولا تستخرج لاحقته |
+
+السيرفر يستخرج الهوية من التوكن والحساب والملف المحفوظ. `driverId` في query للتوافق حيث يوجد؛ تغييره لا يمنح ملكية. مسؤول التوصيل يعمل في نطاق المطعم الموجود بهويته. الصلاحيات الإدارية الأوسع يحكمها دور `Admin`.
+
+## 2. المسؤوليات والشاشات
+
+| الطرف/الشاشة | يعرض | الإجراء |
+|---|---|---|
+| السائق الأصلي: الإبلاغ | البوكس، نوع المشكلة، الوصف، الخطورة، الصور | `report-issue` |
+| السائق الأصلي: التأخير | دقائق التأخير والسبب | `report-delay` |
+| السائق الأصلي: طلب بديل | السبب، الملاحظة، موقع السائق الفعلي | `request-reassignment` |
+| مسؤول التوصيل: مركز الدعم | العدادات، المناطق، الحالات، البحث، التاريخ | قائمة البلاغات |
+| مسؤول التوصيل: تفاصيل البلاغ | السائق، المركبة، المشكلة، الصور، بيانات الرحلة والحل | تفاصيل البلاغ، فتح المرشحين أو الحل |
+| مسؤول التوصيل: اختيار البديل | المرشحون والبيانات المتاحة فعليًا | إنشاء نقل عهدة |
+| السائق البديل: المهمة | موقع الاستلام ومصدره ووقته، الطرف الآخر، قائمة البوكسات | الوصول، تسجيل النتائج، التأكيد |
+| السائق الأصلي: متابعة العهدة | حالة العملية ونتائج البوكسات | قراءة التحديثات، إلغاء آمن قبل تسجيل النتائج |
+| مسؤول التوصيل: متابعة الاستلام | المستلم والناقص والمتضرر وحالات المتابعة | إرجاع مؤكد للمطبخ ثم حل البلاغ |
+
+تعطيل الأزرار في الواجهة لتحسين الاستخدام؛ السيرفر يعيد التحقق من الصلاحية والحالة عند كل طلب.
+
+## 3. الفلو الكامل
+
+1. السائق يفتح البوكس من رحلته الفعلية، ويبلغ عن المشكلة المناسبة.
+2. في مشكلة العنوان يمكن لمسؤول التوصيل مراجعة البيانات والتواصل ثم حل البلاغ دون بديل إن لم يحتج الأمر لنقل عهدة.
+3. التأخير يسجّل بلاغًا للتوزيع؛ لا يعني تلقائيًا أن البوكس فشل أو أن السائق استُبدل.
+4. عند الحاجة لبديل يرسل السائق طلب الاستبدال وموقعه الحقيقي إن توفر.
+5. مسؤول التوصيل يفتح البلاغ والمرشحين ثم يختار بديلًا. التعيين ينشئ عملية `Assigned` فقط، وتبقى العهدة لدى الأصلي.
+6. البديل يفتح تفاصيل المهمة، ويتجه إلى إحداثيات الاستلام، وليس إلى المطبخ أو عنوان العميل تلقائيًا.
+7. البديل يسجل الوصول ثم كل بوكس كـ `Received` أو `Missing` أو `Damaged`.
+8. بعد تسجيل جميع البنود يؤكد البديل العملية. تنتقل البوكسات `Received` فقط إلى رحلة البديل، وتُحفظ متابعة حقيقية للناقص والمتضرر.
+9. يعرض التطبيق ملخص السيرفر ويعيد تحميل الرحلة الجديدة. لا يضع البوكسات الناقصة أو المتضررة في قائمة التوصيل.
+10. مسؤول التوصيل يتابع البوكسات المحجوزة، ويسجل الإرجاع للمطبخ فقط عند التأكد الفعلي، ثم يحل البلاغ عند زوال الموانع.
+
+## 4. واجهات السائق الأصلي
+
+### 4.1 الإبلاغ عن مشكلة
+
+`POST /driver/orders/{boxId}/report-issue`
+
+```json
+{
+  "issueType": "AddressIssue",
+  "description": "العنوان غير واضح ويحتاج مراجعة",
+  "severity": "High",
+  "evidencePhotoStorageKey": null,
+  "evidencePhotoStorageKeys": []
+}
+```
+
+النجاح `200` وقيمته JSON string مباشرة:
+
+```json
+"<issue-guid>"
+```
+
+| الحقل | القاعدة |
+|---|---|
+| `issueType` | قيمة من الجدول التالي؛ تُطبّع دون حساسية لحالة الأحرف |
+| `description` | اختياري؛ أقصى طول 250 حرفًا |
+| `severity` | `Low` أو `Medium` أو `High`؛ الافتراضي `Medium` |
+| مفاتيح الصور | مفاتيح ملفات مرفوعة فعلًا، وليست روابط أو base64؛ تُدمج القائمتان وتُزال التكرارات، بحد أقصى 3 صور مميزة |
+
+هذا الطلب لا يقبل إحداثيات في جسمه الحالي. لا تضف حقول GPS متوقعة من الواجهة دون تغيير العقد. مسار طلب الاستبدال التالي يقبل الإحداثيات.
+
+| `issueType` | المعنى |
+|---|---|
+| `AddressIssue` | عنوان خاطئ أو غير واضح |
+| `SevereDelay` | تأخير شديد |
+| `RoadIssue` | مشكلة في الطريق |
+| `VehicleBreakdown` | عطل بالمركبة |
+| `TrafficAccident` | حادث سير/طارئ |
+| `SevereWeather` | سوء الأحوال الجوية |
+| `CustomerUnavailable` | العميل غير متاح |
+| `CustomerRefusal` | رفض الاستلام |
+| `DamagedBox` | بوكس تالف |
+| `Other` | مشكلة أخرى |
+
+### 4.2 تسجيل التأخير
+
+`POST /driver/orders/{boxId}/report-delay`
+
+```json
+{ "delayMinutes": 30, "reason": "ازدحام شديد في الطريق" }
+```
+
+`delayMinutes` بين 1 و1440. السبب اختياري، لكن التنفيذ يحسب حد 250 حرفًا على الوصف المركب كله: `Delay reported: {minutes} minutes. Reason: {reason}`؛ لذلك المساحة المتاحة للسبب أقل من 250. يتطلب تعيينًا نشطًا للسائق على الرحلة. لا يقبل البوكس الذي سُلّم أو أُعيد للمطبخ. النتيجة `200` وقيمة JSON مباشرة `true`.
+
+### 4.3 طلب سائق بديل
+
+`POST /driver/orders/{boxId}/request-reassignment`
+
+```json
+{
+  "reason": "VehicleBreakdown",
+  "notes": "المركبة متوقفة والبوكسات ما زالت في العهدة",
+  "latitude": 29.3,
+  "longitude": 47.9
+}
+```
+
+الأسباب: `VehicleBreakdown`، `TrafficAccident`، `MedicalOrPersonalEmergency`، `DeviceFailure`، `OtherOperationalReason`. الملاحظات اختيارية بحد 250 حرفًا. GPS اختياري، لكن يجب إرسال الزوج كاملًا أو حذفه كاملًا: خط العرض بين -90 و90 والطول بين -180 و180.
+
+```json
+{
+  "requestId": "<issue-guid>",
+  "boxId": "<trip-stop-guid>",
+  "boxCode": "<display-code>",
+  "status": "ReassignmentRequested",
+  "message": "<localized-message>",
+  "requestedAtUtc": "2026-10-20T10:00:00Z"
+}
+```
+
+لا يحرر هذا الطلب العهدة ولا ينشئ تعيينًا للبديل. الطلب النشط المكرر له خطأ تعارض؛ اقرأ الحالة قبل إنشاء طلب جديد. احتفظ بمعرّف البلاغ الأصلي ولا تستبدله بمعرّف السائق البديل.
+
+## 5. مركز دعم مسؤول التوصيل
+
+### 5.1 القائمة والفلاتر
+
+`GET /dispatcher/support/issues`
+
+| Query | المعنى |
+|---|---|
+| `restaurantId` | اختياري؛ لا يتجاوز نطاق الهوية |
+| `status` | الافتراضي `Open`؛ استخدم `InProgress` أو مرادفه `InResolution` أو `Resolved` أو `All` |
+| `area` | `areaKey` القادم من السيرفر؛ `all` لكل المناطق |
+| `search` | يبحث في كود البوكس واسم/كود السائق والتصنيف والعنوان |
+| `datePreset` | `Today`، `Last7Days`، `Last30Days`، `Custom` |
+| `fromDateUtc`, `toDateUtc` | نطاق مخصص؛ أرسل ISO UTC واضحًا |
+| `pageNumber` | يبدأ من 1 |
+| `pageSize` | الافتراضي 20، الأقصى 50 |
+
+العدادات تتأثر بالتاريخ ولا تتأثر بفلتر الحالة. شرائح المناطق لا تتأثر بالمنطقة المختارة. القائمة تتأثر بالحالة والمنطقة والبحث والتاريخ؛ لذلك لا تساوِ عدد نتائج الصفحة بعدادات المركز.
+
+```json
+{
+  "counters": { "openCount": 1, "inProgressCount": 0, "resolvedCount": 0, "inResolutionCount": 0 },
+  "areaChips": [{ "areaKey": "all", "name": "كل المناطق", "count": 1, "isSelected": true, "areaName": "كل المناطق", "issueCount": 1 }],
+  "issues": [{
+    "id": "<issue-guid>", "issueId": "<issue-guid>", "boxCode": "<box-code>", "issueCode": "<issue-code>",
+    "title": "<persisted-title>", "category": "AddressIssue", "issueCategory": "<localized-category>",
+    "badgeText": "<localized-badge>", "badgeColor": "<badge-color>", "issueCategoryColor": "<color>",
+    "reportedTimeText": "<relative-time>", "timeAgo": "<relative-time>", "createdAtUtc": "2026-10-20T10:00:00Z",
+    "driverId": "<driver-profile-guid>", "driverCode": null, "driverName": "<persisted-name>", "driverAvatarUrl": null,
+    "area": null, "vehicleText": null, "vehicleInfo": null,
+    "priority": "High", "priorityLabel": "<localized-priority>", "priorityColor": "<color>", "status": "Open", "statusLabel": "<localized-status>"
+  }],
+  "pagination": { "pageNumber": 1, "pageSize": 20, "totalItems": 1, "totalPages": 1, "hasPreviousPage": false, "hasNextPage": false },
+  "selectedArea": null, "areas": [{ "areaKey": "all", "name": "كل المناطق", "count": 1, "isSelected": true, "areaName": "كل المناطق", "issueCount": 1 }],
+  "selectedStatus": "Open"
+}
+```
+
+### 5.2 تفاصيل البلاغ
+
+`GET /dispatcher/support/issues/{issueId}`
+
+```json
+{
+  "issueId": "<issue-guid>", "title": "<title>", "category": "VehicleBreakdown", "categoryLabel": "<label>", "categoryColor": null,
+  "createdAtUtc": "2026-10-20T10:00:00Z", "reportedTimeText": "<relative-time>",
+  "metadata": { "boxCode": null, "area": null, "affectedBoxesCount": null, "affectedBoxesText": null, "priority": null, "priorityText": "<label>", "priorityColor": null },
+  "driver": {
+    "driverId": "<profile-guid>", "driverCode": null, "fullName": "<persisted-name>", "avatarUrl": null,
+    "status": "<status>", "statusText": "<label>", "statusColor": "<color>", "phoneNumber": null, "vehicleInfo": null,
+    "vehicle": { "type": null, "model": null, "color": null, "plateNumber": null }
+  },
+  "description": "<persisted-description>", "evidencePhotos": [],
+  "tripInfo": {
+    "customerName": null, "mealsCount": null, "mealsCountText": "<label>", "expectedDeliveryFromUtc": null,
+    "expectedDeliveryToUtc": null, "expectedDeliveryTimeText": null, "pickupLocation": null, "deliveryAddress": null, "mealSummary": null
+  },
+  "status": "Open", "statusLabel": "<label>", "resolution": null, "vehicleInfo": null
+}
+```
+
+كل صورة في `evidencePhotos`: `id`, `url?`, `thumbnailUrl?`, `uploadedAtUtc`. عند الحل، `resolution` يحتوي `notes`, `resolvedAtUtc?`, `resolvedById?`, `resolvedByName?`. الاسم من المستخدم المحفوظ أو `null`؛ لا تعرض اسم موظف ثابتًا.
+
+### 5.3 المرشحون
+
+`GET /dispatcher/support/issues/{issueId}/candidates?pageNumber=1&pageSize=20`
+
+الجذر: `summary`, `issue` (نفس نوع ملخص البلاغ)، `currentDriver` وقد يكون `null`، `candidates`، `pagination` بنفس حقول ترقيم قائمة الدعم.
+
+حقول `summary` و`issue`: `issueId`, `title`, `category`, `categoryLabel`, `categoryColor`, `createdAtUtc?`, `reportedTimeText`, `boxCode?`, `area?`, `affectedBoxesCount?`, `affectedBoxesText`, `priority?`, `priorityText`, `priorityColor?`, `status`. علامة `?` تعني nullable؛ و`categoryColor` قد يرجع `null` فعليًا عند غياب تصنيف الخطورة رغم تعريفه النصي غير القابل لـnull في DTO الحالي.
+
+حقول `currentDriver`: `driverId?`, `driverCode?`, `fullName?`, `avatarUrl?`, `status`, `statusText`, `statusColor`, `unavailabilityReason?`, `unavailabilityReasonText?`.
+
+مثال عنصر في `candidates`:
+
+```json
+{
+  "driverId": "<profile-guid>", "driverCode": null, "fullName": "<persisted-name>", "avatarUrl": null,
+  "status": "Available", "statusText": "متاح", "statusColor": "<color>", "rating": null,
+  "activeOrdersCount": 0, "area": null, "isSameArea": null, "distanceKm": null, "distanceText": null,
+  "estimatedArrivalMinutes": null, "estimatedArrivalText": null, "vehicleInfo": null,
+  "lastLocationUpdatedAtUtc": null, "recommendationRank": 1
+}
+```
+
+البديل يجب أن يكون معتمدًا ومتاحًا، حسابه نشط، مرتبطًا بالمطعم، لديه جلسة عمل نشطة، بلا تعيين عمل حالي أو حجز بديل نشط، ووثائقه غير منتهية عندما توجد تواريخ انتهاء. السيرفر يعيد الفحص عند التعيين؛ ظهور المرشح لا يضمن بقاءه متاحًا.
+
+المسافة حساب من نقاط محفوظة عند توفرها. لا تستنتج وقت وصول أو تقييمًا أو منطقة من قيم ناقصة. عرض `null` يعني أن البيانات غير متاحة. `recommendationRank` ترتيب عرض وليس قبولًا تلقائيًا.
+
+## 6. إنشاء ومتابعة نقل العهدة
+
+### 6.1 إنشاء العملية الموصى به
+
+`POST /dispatcher/support-handovers/issues/{issueId}/assign`
+
+```json
+{ "replacementDriverId": "<profile-guid>", "idempotencyKey": "<stable-client-operation-key>", "notes": "<optional-note>" }
+```
+
+المفتاح مطلوب، أقصى طوله 100 بعد التنظيف؛ الملاحظة اختيارية بحد 500 حرف. خزّن نفس المفتاح لإعادة محاولة نفس العملية. استعماله مع بلاغ أو بديل أو ملاحظات مختلفة يسبب `IDEMPOTENCY_KEY_REUSED`. الرد `200` بكائن نقل العهدة في القسم 8.
+
+التوافق القديم: `POST /dispatcher/support/issues/{issueId}/reassign` يقبل `replacementDriverId`, `notes?` دون مفتاح من العميل. الرد يحتوي:
+
+`success`, `issueId`, `previousDriverId`, `issueStatus`, `replacementDriver` (بنفس نوع سائق تفاصيل البلاغ)، `reassignedAtUtc`, `message`, `replacementDriverId`, `replacementDriverCode?`, `driverName?`, `handoverId?`, `handoverStatus?`.
+
+اسم `reassign` أو `reassignedAtUtc` لا يعني انتقال العهدة فورًا؛ اعتمد `handoverStatus` وتأكيد العملية.
+
+### 6.2 القراءة والاسترجاع
+
+| الطرف | المسار |
+|---|---|
+| مسؤول التوصيل | `GET /dispatcher/support-handovers?status=Assigned&restaurantId=<guid>&page=1&pageSize=20` |
+| مسؤول التوصيل | `GET /dispatcher/support-handovers/{handoverId}` |
+| السائق | `GET /driver/support-handovers?status=active` |
+| السائق | `GET /driver/support-handovers/{handoverId}` |
+
+قائمة مسؤول التوصيل تعيد `{ items, totalCount, pageNumber, pageSize }`؛ حد الصفحة الأقصى 100. فلتر `status` فيها حالة محددة، وليس كلمة `active`. قائمة السائق مصفوفة مباشرة، و`active` يعرض العمليات غير المنتهية. السائق يقرأ العملية فقط إذا كان الأصلي أو البديل وبحساب صالح.
+
+### 6.3 موقع الاستلام
+
+`pickupLatitude`, `pickupLongitude` من زوج صحيح كامل في البلاغ أو نقطة تتبع فعلية واحدة للسائق الأصلي. `pickupLocationSource` يوضح `Complaint` أو `DriverTracking` ومعه `pickupLocationRecordedAtUtc`.
+
+لا تستخدم إحداثيات `TripStop` الخاصة بوجهة العميل كمكان استلام البوكسات، ولا ترسل البديل إلى المطبخ بدل السائق المتعطل. عند غياب مصدر حقيقي يرجع `PICKUP_LOCATION_UNAVAILABLE`. اعرض وقت تسجيل الموقع؛ لا تصفه بأنه موقع حي بلا دليل أحدث.
+
+## 7. إجراءات السائق البديل
+
+### 7.1 الوصول
+
+`POST /driver/support-handovers/{handoverId}/arrival`
+
+```json
+{ "latitude": 29.3, "longitude": 47.9 }
+```
+
+يسجل الوصول البديل وحده، بإحداثيات صحيحة. الحالة تتحول من `Assigned` إلى `Arrived`. لا يوجد حد مسافة مفروض حاليًا لإثبات القرب؛ لا تعرض للمستخدم أن السيرفر تحقق من نصف قطر معين.
+
+### 7.2 تسجيل البوكسات
+
+`POST /driver/support-handovers/{handoverId}/boxes/scan`
+
+```json
+{ "code": "<actual-barcode>", "status": "Received", "method": "Barcode", "followUpNote": null }
+```
+
+```json
+{ "code": "<exact-manifest-code>", "status": "Missing", "method": "ManualCode", "followUpNote": "البوكس غير موجود عند المطابقة" }
+```
+
+| الحقل | القاعدة |
+|---|---|
+| `code` | الرمز الكامل للبوكس الموجود في قائمة هذه العملية فقط |
+| `method` | `Barcode` أو `ManualCode`؛ الافتراضي `Barcode` |
+| `status` | `Received` أو `Missing` أو `Damaged`؛ الافتراضي `Received` |
+| `followUpNote` | إلزامي للناقص والمتضرر؛ أقصى 500 حرف، واختياري للمستلم |
+
+الباركود يجب أن يكون محفوظًا وغير ملغى أو مؤرشف، ومخصصًا لبوكس واحد في القائمة. الإدخال اليدوي يطابق الكود بعد تطبيع السيرفر؛ الكود الملتبس بين بوكسين يُرفض ويحتاج باركودًا فريدًا. تكرار نفس النتيجة أثناء `Arrived` أو `Receiving` آمن، لكن تغيير النتيجة بعد تسجيلها يُرفض. بعد `Completed` اقرأ التفاصيل بدل إعادة المسح؛ شرط مرحلة الاستلام يرفض المسح في الحالة المنتهية. لا تعرض إمكانية تعديل نتيجة مسجلة محليًا.
+
+### 7.3 التأكيد النهائي
+
+`POST /driver/support-handovers/{handoverId}/complete` بلا جسم.
+
+فعّل زر التأكيد عندما يكون الوصول مسجلًا و`pendingCount = 0` والحالة تسمح بالتأكيد. جميع البوكسات يجب أن تحمل نتيجة؛ `Missing` و`Damaged` نتائج مسجلة وليستا استلامًا صالحًا للتوصيل.
+
+النتيجة `200` بكائن العملية النهائي. الحفظ ذري: البوكسات المستلمة وتعيين البديل والمتابعات والإشعارات تُحفظ معًا. التكرار يرجع نفس النتيجة المحفوظة، ولا ينشئ رحلة أو تعيينًا ثانيًا. لا تنقل أي بوكس في مخزن التطبيق قبل نجاح التأكيد أو قراءة نتيجة اكتمال محفوظة.
+
+## 8. نموذج الاستجابة المشترك
+
+```json
+{
+  "handoverId": "<handover-guid>", "issueId": "<complaint-guid>", "tripId": "<original-trip-guid>",
+  "originalDriverId": "<original-profile-guid>", "replacementDriverId": "<replacement-profile-guid>", "restaurantId": "<restaurant-guid>",
+  "status": "Completed", "pickupLatitude": 29.3, "pickupLongitude": 47.9,
+  "assignedAtUtc": "2026-10-20T10:00:00Z", "arrivedAtUtc": "2026-10-20T10:10:00Z", "completedAtUtc": "2026-10-20T10:15:00Z",
+  "replacementTripId": "<replacement-trip-guid>", "receivedCount": 1, "missingCount": 1, "damagedCount": 0, "pendingCount": 0,
+  "pickupLocationSource": "Complaint", "pickupLocationRecordedAtUtc": "2026-10-20T09:55:00Z",
+  "issueTitle": "<persisted-title>", "issueCategory": "VehicleBreakdown", "issueDescription": "<persisted-description>",
+  "tripCode": "<original-trip-code>", "originalDriverName": "<persisted-name>", "originalDriverPhone": null,
+  "replacementDriverName": "<persisted-name>", "replacementDriverPhone": null,
+  "boxes": [
+    { "tripStopId": "<received-stop-guid>", "manifestCode": "<received-code>", "status": "Received", "receivedAtUtc": "2026-10-20T10:12:00Z", "recordedAtUtc": "2026-10-20T10:12:00Z", "followUpNote": null, "followUpId": null, "followUpStatus": null },
+    { "tripStopId": "<missing-stop-guid>", "manifestCode": "<missing-code>", "status": "Missing", "receivedAtUtc": null, "recordedAtUtc": "2026-10-20T10:13:00Z", "followUpNote": "غير موجود", "followUpId": "<hold-guid>", "followUpStatus": "Active" }
+  ]
+}
+```
+
+`recordedAtUtc` لأي نتيجة مسجلة؛ `receivedAtUtc` للمستلم فقط. أسماء وأرقام الأطراف والبيانات الوصفية قد تكون `null`. لا تولّد أسماء أو هواتف أو مواعيد بديلة. مجموع العدادات يساوي عدد عناصر `boxes`.
+
+في البلاغ القديم قد يُرقّى التوقف إلى Complaint حقيقي؛ لذلك احتفظ بمعرّف البطاقة الأصلي وبـ`issueId` الذي تعيده العملية، ولا تفترض أنهما متساويان دائمًا.
+
+## 9. الحالات والإلغاء والعهدة
+
+| الحالة | المعنى | الإجراءات المعتادة |
+|---|---|---|
+| `Assigned` | البديل مختار والعهدة لدى الأصلي | وصول البديل، إلغاء قبل وجود دليل |
+| `Arrived` | الوصول محفوظ ولم تسجل نتائج بعد | مسح/إدخال النتائج، إلغاء إن لم توجد نتائج |
+| `Receiving` | نتيجة بوكس واحدة على الأقل محفوظة | استكمال الباقي ثم التأكيد؛ الإلغاء ممنوع |
+| `Completed` | التسوية محفوظة | قراءة الملخص، متابعة الناقص والمتضرر |
+| `Cancelled` | ألغيت قبل نتائج الاستلام | قراءة التاريخ؛ لا تؤكدها |
+
+`POST /dispatcher/support-handovers/{handoverId}/cancel` أو `POST /driver/support-handovers/{handoverId}/cancel`:
+
+```json
+{ "reason": "<optional-reason>" }
+```
+
+السبب اختياري وحده 500 حرف. يسمح لمسؤول النطاق أو أحد الطرفين وفق الحساب والصلاحية. وجود أي نتيجة استلام يمنع الإلغاء، حتى لو كانت `Missing`. تبقى الملاحظة الأصلية ودليل العملية محفوظين. لا تستعمل إلغاءً محليًا بديلًا عن نجاح السيرفر.
+
+لا يعاد فتح `Delivered` أو `ReturnedToKitchen`. المسارات القديمة للتعيين والاستلام والرحلة والمزامنة لا يجوز أن تتجاوز نقل عهدة نشطًا أو حجز متابعة.
+
+## 10. متابعة الناقص والمتضرر وحل البلاغ
+
+بعد الاكتمال تظل هذه البوكسات على الرحلة الأصلية وتُربط بـ`DeliveryHold`. لا تصبح قابلة للتوصيل مع البديل. يظهر لمسؤول التوصيل إشعار متابعة فعلي.
+
+عند التأكد من رجوع بوكس إلى المطبخ:
+
+`POST /dispatcher/support-handovers/{handoverId}/boxes/{tripStopId}/follow-up/return-to-kitchen`
+
+```json
+{ "manifestCode": "<exact-manifest-code-or-active-barcode>", "resolutionNote": "تم التحقق من استلام المطبخ للبوكس فعليًا" }
+```
+
+مطلوب عملية مكتملة، نتيجة `Missing` أو `Damaged`، متابعة محفوظة، وبوكس ما زال في الرحلة الأصلية. الملاحظة من 5 إلى 500 حرف. الكود اليدوي يجب أن يكون فريدًا في القائمة أو استخدم الباركود الحقيقي. يرجع كائن العملية بعد التسوية.
+
+يحفظ السيرفر التدقيق وهوية المنفذ والتوقيت، يجعل حالة التوقف `ReturnedToKitchen` والمتابعة `Resolved`، ويترك نتيجة `Missing`/`Damaged` الأصلية دون تعديل. تكرار الدليل والملاحظة نفسيهما آمن، واختلافهما بعد التسوية يسبب تعارضًا. لا يوجد في هذا الفلو زر لتحويل الناقص تلقائيًا إلى `Received` أو وعد بتعويض مالي.
+
+حل البلاغ:
+
+`POST /dispatcher/support/issues/{issueId}/resolve`
+
+```json
+{ "resolutionNotes": "تمت معالجة المشكلة وإغلاق جميع المتابعات" }
+```
+
+الملاحظات مطلوبة بين 3 و500 حرف. يمنع الحل عند نقل عهدة نشط أو متابعة مفتوحة مرتبطة بالبلاغ. الرد:
+
+```json
+{
+  "issueId": "<issue-guid>", "status": "Resolved", "statusLabel": "<localized-status>",
+  "resolution": { "notes": "<saved-notes>", "resolvedAtUtc": "2026-10-20T11:00:00Z", "resolvedById": "<user-guid>", "resolvedByName": null },
+  "resolvedAtUtc": "2026-10-20T11:00:00Z", "message": "<localized-message>", "driverId": "<original-profile-guid>"
+}
+```
+
+## 11. الأخطاء واستراتيجية الواجهة
+
+```json
+{
+  "type": "about:blank", "title": "Conflict", "status": 409,
+  "detail": "<localized-description>",
+  "instance": "/api/v1/driver/support-handovers/<handover-guid>/complete",
+  "code": "HANDOVER_RECEIPTS_INCOMPLETE"
+}
+```
+
+تعامل مع `code` كمعرّف برمجي ومع `detail` كنص مترجم؛ قد تختلف `type` و`title` بحسب مُنشئ ProblemDetails. `400` إدخال غير صالح، `401` تسجيل الدخول، `403` صلاحية، `404` مورد غير متاح، `409` تعارض حالة. أخطاء ربط/تحقق ASP.NET قد تحتوي `errors` أيضًا.
+
+| الكود | تصرف الواجهة |
+|---|---|
+| `DISPATCHER_SCOPE_REQUIRED`, `DISPATCHER_SCOPE_FORBIDDEN`, `HANDOVER_FORBIDDEN` | منع الإجراء؛ تحقق من الدور والنطاق |
+| `HANDOVER_NOT_FOUND` | إغلاق التفاصيل القديمة وتحديث القائمة |
+| `PICKUP_LOCATION_UNAVAILABLE` | بيان غياب موقع موثوق؛ لا تستبدله بموقع العميل |
+| `REPLACEMENT_DRIVER_UNAVAILABLE`, `REPLACEMENT_DRIVER_BUSY`, `REPLACEMENT_ACCOUNT_INACTIVE` | تحديث المرشحين واختيار بديل صالح |
+| `HANDOVER_ALREADY_ACTIVE`, `HANDOVER_PENDING` | افتح العملية القائمة بدل إنشاء أخرى |
+| `IDEMPOTENCY_KEY_REUSED` | لا تعدّل حمولة عملية تحمل نفس المفتاح |
+| `HANDOVER_ARRIVAL_REQUIRED` | تسجيل الوصول أولًا |
+| `MANIFEST_BOX_NOT_FOUND`, `BARCODE_INVALID`, `BARCODE_NOT_ASSIGNED` | رفض الرمز وإظهار بند القائمة الصحيح |
+| `MANIFEST_CODE_AMBIGUOUS`, `MANIFEST_BARCODE_AMBIGUOUS` | استخدم هوية بوكس فريدة؛ لا تختر أول تطابق |
+| `BOX_ALREADY_RECORDED` | تحديث التفاصيل؛ لا تستبدل النتيجة |
+| `FOLLOW_UP_REQUIRED` | طلب ملاحظة للناقص أو المتضرر |
+| `HANDOVER_RECEIPTS_INCOMPLETE` | عرض البنود التي ما زالت `Pending` |
+| `HANDOVER_RECEIPT_EXISTS` | منع الإلغاء مع وجود دليل محفوظ |
+| `TERMINAL_BOX_CANNOT_TRANSFER`, `TRIP_TERMINAL` | تحديث الرحلة وعدم إعادة فتح الحالات النهائية |
+| `SUPPORT_FOLLOWUP_PENDING` | فتح المتابعات قبل حل البلاغ |
+| `FOLLOW_UP_CODE_MISMATCH` | إعادة التحقق من رمز البوكس |
+| `FOLLOW_UP_CUSTODY_CHANGED`, `FOLLOW_UP_STOP_TERMINAL` | منع الإرجاع ومراجعة الحالة الفعلية |
+| `FOLLOW_UP_ALREADY_RESOLVED` | قراءة التسوية المحفوظة؛ لا تعِد حفظ دليل مختلف |
+
+هذه أبرز الأخطاء وليست بديلًا عن التعامل العام مع أي `code` جديد. عند انقطاع الرد لا تفترض فشل العملية؛ اقرأ التفاصيل أولًا ثم أعد نفس الطلب عند الحاجة. اعمل pending/loading لكل زر لمنع النقر المكرر.
+
+## 12. SignalR والاسترجاع بعد الاتصال
+
+| الطرف | مسار Hub | الحدث |
+|---|---|---|
+| السائق | `/hubs/driver-hub` أو `/hubs/driver` | `support-handover-updated`, `driver-support-issue-updated` |
+| مسؤول التوصيل | `/hubs/dispatcher-hub` أو `/hubs/dispatcher` | `driver-support-handover-updated`, `driver-issue-updated` |
+
+نفس توكن الدور المطلوب للـAPI. عضوية المطعم/السائق تأتي من الهوية، ولا يمكن الانضمام لبيانات طرف آخر بمعرّف يرسله العميل.
+
+حمولة تحديث نقل العهدة:
+
+```json
+{
+  "eventId": "<event-guid>", "occurredAtUtc": "2026-10-20T10:15:00Z", "handoverId": "<guid>",
+  "tripId": "<original-trip-guid>", "replacementTripId": "<replacement-trip-guid>", "restaurantId": "<guid>",
+  "originalDriverId": "<profile-guid>", "replacementDriverId": "<profile-guid>", "status": "Completed", "eventName": "completed"
+}
+```
+
+حمولة تحديث البلاغ: `eventId`, `occurredAtUtc`, `issueId`, `restaurantId`, `driverId?`, `category`, `eventName`. الأحداث تنطلق عبر outbox محفوظ ثم نقل PostgreSQL إلى API وSignalR، وليست بثًا عامًا لكل المستخدمين. لا تفترض وصول الحدث مرة واحدة أو وصول كل حدث أثناء الانقطاع.
+
+عند حدث أو reconnect: أزل تكرار `eventId` عند الحاجة، حدّث القائمة والتفاصيل من GET، ثم حدّث شاشة الرحلة. عند cold start استدعِ قائمة نقل العهدة أيضًا. الحدث إشارة لتحديث البيانات؛ كائن GET هو مصدر عرض التفاصيل.
+
+## 13. التوافق مع الاستلام الحالي
+
+فلو استلام المطبخ الموجود مثل point/arrive/manifest/validate-barcode/confirm/pickup-summary يظل خاصًا بالمطبخ. لا تستخدمه بدل عملية استلام من سائق متعطل. البديل يبدأ بـ`support-handovers`، وبعد الاكتمال يعتمد الرحلة الجديدة والبوكسات المستلمة فقط في فلو التوصيل الحالي.
+
+الاسم أو الهاتف أو ETA أو التقييم المفقود يعرض كغير متاح؛ لا يوجد fallback تجاري مصطنع. لا تفترض اكتمال بلاغ الدعم عند اكتمال الاستلام إذا كانت متابعة الناقص أو المتضرر ما زالت مفتوحة.
+
+## 14. قائمة قبول فريق الموبايل والداشبورد وQA
+
+- بلاغ عنوان ووصف وصور صحيحة يظهر في نطاق المطعم الصحيح، وبهوية السائق الأصلي.
+- التأخير ينشئ بلاغًا ولا يحرر العهدة أو يُسلم البوكس.
+- رفض نوع مشكلة أو خطورة غير مسموحة، ورفض النصوص والصور الزائدة.
+- إرسال معرّف حساب بدل DriverProfile أو كود عرض بدل TripStop لا يُستخدم كبديل صحيح.
+- مستخدم غير مسجل/دور آخر/سائق ثالث/مطعم آخر لا يقرأ أو يعدّل العملية.
+- تعيين البديل لا يغير عهدة الأصلي قبل تأكيد الاستلام.
+- غياب موقع فعلي يمنع الإنشاء؛ موقع العميل لا يظهر كموقع الاستلام.
+- الوصول ثم Barcode صحيح أو ManualCode فريد يسجل النتيجة مرة واحدة.
+- إعادة المسح بنفس النتيجة آمنة؛ نتيجة مختلفة أو رمز خارج القائمة يُرفض.
+- لا يمكن تأكيد قائمة بها Pending أو إلغاء عملية بها أي دليل.
+- تأكيدان متزامنان ينتجان نفس رحلة البديل دون تكرار التعيين.
+- فشل الحفظ في منتصف التأكيد لا يترك نقلًا جزئيًا.
+- المستلم فقط ينتقل للبديل؛ الناقص والمتضرر لهما متابعة، ولا يعاد فتح Delivered/ReturnedToKitchen.
+- الإرجاع المؤكد للمطبخ يحفظ التدقيق، وإعادته لا تضاعف الآثار ولا تغير نتيجة الاستلام الأصلية.
+- حل البلاغ يظل ممنوعًا مع عملية أو متابعة مفتوحة.
+- reconnect وcold start يعيدان الحالة من GET دون الاعتماد على وصول SignalR.
+- فلو استلام المطبخ والتوصيل الحالي يعملان مع الحمايات الجديدة.
+
+التحقق المنفذ على مرجع الكود المذكور: 407 اختبارًا في DriverDelivery، و3 اختبارات HTTP للصلاحيات، واختبار PostgreSQL يضم التزامن والتراجع وإعادة المحاولة والمتابعة، وبناء API وفحص تطابق EF مع migration. هذه نتائج backend؛ قائمة القبول أعلاه تحتاج تنفيذًا على واجهات الموبايل والداشبورد بعد ربطها.
+
+## 15. مصادر العقد
+
+- `src/MealMate.Api/Controllers/V1/DriverHomeController.cs`
+- `src/MealMate.Api/Controllers/V1/DispatcherDashboardController.cs`
+- `src/MealMate.Api/Controllers/V1/DriverSupportHandoversController.cs`
+- `src/MealMate.Api/Controllers/V1/DispatcherSupportHandoversController.cs`
+- `src/MealMate.Api/Common/ApiControllerBase.cs`
+- `src/MealMate.Application/Features/DriverDelivery/DriverApp/DriverAppDtos.cs`
+- `src/MealMate.Application/Features/DriverDelivery/DriverApp/DriverIssueCatalog.cs`
+- `src/MealMate.Application/Features/DriverDelivery/DriverApp/DriverDeliveryOrderCommands.cs`
+- `src/MealMate.Application/Features/DriverDelivery/DriverApp/DriverSupportHandoverDtos.cs`
+- `src/MealMate.Application/Features/DriverDelivery/DriverApp/DriverSupportHandoverHandlers.cs`
+- `src/MealMate.Application/Features/DriverDelivery/Dispatcher/DispatcherSupportDtos.cs`
+- استعلامات الدعم والمرشحين وأمر حل البلاغ في مجلد `Dispatcher` نفسه.
+- `src/MealMate.Api/Realtime/DriverSupportHandoverRealtimeNotifier.cs`
+- المرجع المختصر: [DRIVER_SUPPORT_HANDOVER_CONTRACT.md](DRIVER_SUPPORT_HANDOVER_CONTRACT.md).
