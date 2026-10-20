@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Storage;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
@@ -56,6 +57,7 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
         var complaints = await _db.Complaints
             .AsNoTracking()
             .Include(c => c.EvidencePhotos)
+            .Include(c => c.Classifications)
             .Where(c => !restaurantId.HasValue || c.RestaurantId == restaurantId.Value)
             .OrderByDescending(c => c.SubmittedAtUtc)
             .ToListAsync(cancellationToken);
@@ -75,6 +77,9 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
         var stopById = allStops.ToDictionary(s => s.Id);
         var stopBySubDayId = allStops.Where(s => s.SubscriptionDayId.HasValue)
             .GroupBy(s => s.SubscriptionDayId!.Value)
+            .ToDictionary(g => g.Key, g => g.First());
+        var stopByDailyOrderId = allStops.Where(s => s.DailyOrderId.HasValue)
+            .GroupBy(s => s.DailyOrderId!.Value)
             .ToDictionary(g => g.Key, g => g.First());
 
         // 3. Fetch drivers & registrations for vehicle details
@@ -116,6 +121,10 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
             {
                 stop = s2;
             }
+            else if (c.OrderId.HasValue && stopByDailyOrderId.TryGetValue(c.OrderId.Value, out var s3))
+            {
+                stop = s3;
+            }
 
             var driver = c.DriverProfileId.HasValue && driverById.TryGetValue(c.DriverProfileId.Value, out var d)
                 ? d
@@ -123,27 +132,23 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
 
             var reg = driver != null && regByDriverId.TryGetValue(driver.Id, out var r) ? r : null;
 
-            var vehicleText = reg != null && !string.IsNullOrWhiteSpace(reg.VehicleType)
-                ? $"{reg.VehicleType} • {reg.VehicleColor ?? (isAr ? "أبيض" : "White")}"
-                : (isAr ? "تويوتا كامري • أبيض" : "Toyota Camry • White");
+            var vehicleText = BuildVehicleInfo(
+                driver?.VehicleModel ?? reg?.VehicleModel ?? driver?.VehicleType ?? reg?.VehicleType,
+                driver?.VehicleColor ?? reg?.VehicleColor);
 
-            var boxCode = stop != null
-                ? (stop.OrderCode.StartsWith("#") ? stop.OrderCode : $"#{stop.OrderCode}")
-                : (c.OrderId.HasValue
-                    ? $"#BX-{Math.Abs(c.OrderId.Value.GetHashCode()) % 9000 + 1000}"
-                    : $"#BX-{Math.Abs(c.Id.GetHashCode()) % 9000 + 1000}");
+            var boxCode = FormatOrderCode(stop?.OrderCode);
 
-            var driverCode = driver != null ? $"DR-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}" : "DR-1025";
-            var driverName = driver != null ? (isAr ? driver.FullNameAr : driver.FullNameEn) : (isAr ? "أحمد السعيد" : "Ahmed Al-Saeed");
+            var driverCode = NonBlank(driver?.LicenseNumber) ?? NonBlank(reg?.LicenseNumber);
+            var driverName = driver == null ? null : NonBlank(isAr ? driver.FullNameAr : driver.FullNameEn);
 
-            string areaName;
+            string? areaName;
             if (stop != null && (!string.IsNullOrWhiteSpace(stop.ZoneNameAr) || !string.IsNullOrWhiteSpace(stop.ZoneNameEn)))
             {
                 areaName = isAr ? stop.ZoneNameAr : (stop.ZoneNameEn ?? stop.ZoneNameAr);
             }
             else
             {
-                areaName = ResolveAreaFromText($"{c.Title} {c.Description}", isAr);
+                areaName = null;
             }
 
             var timeDiffMinutes = (int)Math.Max(1, (nowUtc - createdAtUtc).TotalMinutes);
@@ -151,6 +156,7 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
             var title = !string.IsNullOrWhiteSpace(c.Title) ? c.Title : (!string.IsNullOrWhiteSpace(c.Description) ? c.Description : (isAr ? "شكوى عميل" : "Customer Complaint"));
             var category = c.Category ?? "DeliveryIssue";
             var categoryColor = badgeColor == "Red" ? "#EF4444" : "#F59E0B";
+            var priority = GetComplaintSeverity(c);
 
             allIssueCards.Add(new SupportIssueCardDto(
                 Id: c.Id,
@@ -166,16 +172,16 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
                 ReportedTimeText: timeText,
                 TimeAgo: timeText,
                 CreatedAtUtc: createdAtUtc,
-                DriverId: driver?.Id ?? Guid.Empty,
+                DriverId: driver?.Id,
                 DriverCode: driverCode,
                 DriverName: driverName,
-                DriverAvatarUrl: driver != null ? $"https://cdn.mealmate.app/avatars/{driver.Id.ToString()[..8]}.jpg" : null,
+                DriverAvatarUrl: CatalogImageStorage.ToContentUrl(driver?.ProfileImageStorageKey),
                 Area: areaName,
                 VehicleText: vehicleText,
                 VehicleInfo: vehicleText,
-                Priority: "High",
-                PriorityLabel: isAr ? "أولوية عالية" : "High Priority",
-                PriorityColor: "#EF4444",
+                Priority: priority,
+                PriorityLabel: GetPriorityLabel(priority, isAr),
+                PriorityColor: GetPriorityColor(priority),
                 Status: statusStr,
                 StatusLabel: statusLabel));
         }
@@ -186,7 +192,7 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
         foreach (var stop in stopsWithFailures)
         {
             var createdAtUtc = stop.DeliveredAtUtc ?? stop.ModifiedAtUtc ?? stop.CreatedAtUtc;
-            var boxCode = stop.OrderCode.StartsWith("#") ? stop.OrderCode : $"#{stop.OrderCode}";
+            var boxCode = FormatOrderCode(stop.OrderCode);
             if (existingBoxCodes.Contains(boxCode))
             {
                 continue;
@@ -196,14 +202,15 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
             var driver = assignment != null && driverById.TryGetValue(assignment.DriverProfileId, out var d) ? d : null;
             var reg = driver != null && regByDriverId.TryGetValue(driver.Id, out var r) ? r : null;
 
-            var vehicleText = reg != null && !string.IsNullOrWhiteSpace(reg.VehicleType)
-                ? $"{reg.VehicleType} • {reg.VehicleColor ?? (isAr ? "أبيض" : "White")}"
-                : (isAr ? "تويوتا كامري • أبيض" : "Toyota Camry • White");
+            var vehicleText = BuildVehicleInfo(
+                driver?.VehicleModel ?? reg?.VehicleModel ?? driver?.VehicleType ?? reg?.VehicleType,
+                driver?.VehicleColor ?? reg?.VehicleColor);
 
-            var driverCode = driver != null ? $"DR-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}" : "DR-1025";
-            var driverName = driver != null ? (isAr ? driver.FullNameAr : driver.FullNameEn) : (isAr ? "محمد العنزي" : "Mohammed Al-Anzi");
-            var areaName = isAr ? stop.ZoneNameAr : (stop.ZoneNameEn ?? stop.ZoneNameAr);
-            if (string.IsNullOrWhiteSpace(areaName)) areaName = ResolveAreaFromText(stop.FailureReason ?? "", isAr);
+            var driverCode = NonBlank(driver?.LicenseNumber) ?? NonBlank(reg?.LicenseNumber);
+            var driverName = driver == null ? null : NonBlank(isAr ? driver.FullNameAr : driver.FullNameEn);
+            var areaName = NonBlank(isAr ? stop.ZoneNameAr : stop.ZoneNameEn)
+                ?? NonBlank(isAr ? stop.ZoneNameEn : stop.ZoneNameAr);
+            if (string.IsNullOrWhiteSpace(areaName)) areaName = null;
 
             var (badgeText, badgeColor) = MapCategoryToBadge(stop.FailureReason ?? "", stop.FailureReason ?? "", isAr);
             var timeDiffMinutes = (int)Math.Max(1, (nowUtc - createdAtUtc).TotalMinutes);
@@ -212,6 +219,7 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
             var statusStr = string.IsNullOrWhiteSpace(stop.FailureReason) ? "Resolved" : (stop.Trip?.Status == TripStatus.InProgress ? "InProgress" : "Open");
             var statusLabel = MapStatusLabel(statusStr, isAr);
             var categoryColor = badgeColor == "Red" ? "#EF4444" : "#F59E0B";
+            var priority = (string?)null;
 
             allIssueCards.Add(new SupportIssueCardDto(
                 Id: stop.Id,
@@ -227,16 +235,16 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
                 ReportedTimeText: timeText,
                 TimeAgo: timeText,
                 CreatedAtUtc: createdAtUtc,
-                DriverId: driver?.Id ?? Guid.Empty,
+                DriverId: driver?.Id,
                 DriverCode: driverCode,
                 DriverName: driverName,
-                DriverAvatarUrl: driver != null ? $"https://cdn.mealmate.app/avatars/{driver.Id.ToString()[..8]}.jpg" : null,
+                DriverAvatarUrl: CatalogImageStorage.ToContentUrl(driver?.ProfileImageStorageKey),
                 Area: areaName,
                 VehicleText: vehicleText,
                 VehicleInfo: vehicleText,
-                Priority: "High",
-                PriorityLabel: isAr ? "أولوية عالية" : "High Priority",
-                PriorityColor: "#EF4444",
+                Priority: priority,
+                PriorityLabel: GetPriorityLabel(priority, isAr),
+                PriorityColor: GetPriorityColor(priority),
                 Status: statusStr,
                 StatusLabel: statusLabel));
         }
@@ -423,7 +431,61 @@ public sealed class GetDispatcherSupportIssuesQueryHandler : IQueryHandler<GetDi
         return issueStatus.Equals(filterStatus, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool AreaMatches(string issueArea, string filterArea)
+    private static string? NonBlank(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static string? FormatOrderCode(string? orderCode)
+    {
+        var value = NonBlank(orderCode);
+        if (value is null || value.StartsWith("#", StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        return $"#{value}";
+    }
+
+    private static string? BuildVehicleInfo(string? identity, string? color)
+    {
+        var parts = new[] { NonBlank(identity), NonBlank(color) }
+            .Where(part => part is not null);
+        var value = string.Join(" • ", parts);
+        return value.Length == 0 ? null : value;
+    }
+
+    private static string? GetComplaintSeverity(Complaint complaint)
+        => complaint.Classifications
+            .OrderByDescending(classification => classification.ClassifiedAtUtc)
+            .Select(classification => NonBlank(classification.Severity))
+            .FirstOrDefault(severity => severity is not null);
+
+    private string GetPriorityLabel(string? severity, bool isAr)
+    {
+        if (severity is null)
+        {
+            return _messages.GetMessage("dispatcher_support.data_unavailable", isAr ? "غير متوفر" : "Unavailable");
+        }
+
+        return severity.ToLowerInvariant() switch
+        {
+            "urgent" => isAr ? "عاجلة" : "Urgent",
+            "high" => isAr ? "عالية" : "High",
+            "medium" => isAr ? "متوسطة" : "Medium",
+            "low" => isAr ? "منخفضة" : "Low",
+            _ => severity
+        };
+    }
+
+    private static string? GetPriorityColor(string? severity)
+        => severity?.ToLowerInvariant() switch
+        {
+            "urgent" or "high" => "#EF4444",
+            "medium" => "#F59E0B",
+            "low" => "#6B7280",
+            _ => null
+        };
+
+    private static bool AreaMatches(string? issueArea, string? filterArea)
     {
         if (string.IsNullOrWhiteSpace(filterArea) || filterArea.Equals("all", StringComparison.OrdinalIgnoreCase) || filterArea.Equals("كل المناطق", StringComparison.OrdinalIgnoreCase))
         {

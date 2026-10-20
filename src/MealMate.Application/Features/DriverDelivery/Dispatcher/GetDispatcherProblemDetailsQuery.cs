@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Storage;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
@@ -34,6 +35,7 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         var complaint = await _db.Complaints
             .AsNoTracking()
             .Include(c => c.EvidencePhotos)
+            .Include(c => c.Classifications)
             .Include(c => c.AdminReviews)
             .FirstOrDefaultAsync(c => c.Id == request.IssueId, cancellationToken);
 
@@ -64,7 +66,7 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
                     .AsNoTracking()
                     .Include(s => s.Trip)
                         .ThenInclude(t => t.DriverAssignments)
-                    .FirstOrDefaultAsync(s => s.Id == boxId || s.SubscriptionDayId == boxId, cancellationToken);
+                    .FirstOrDefaultAsync(s => s.Id == boxId || s.SubscriptionDayId == boxId || s.DailyOrderId == boxId, cancellationToken);
             }
         }
 
@@ -80,19 +82,33 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
             : null;
 
         string? driverPhone = null;
+        string? registrationVehicleType = null;
+        string? registrationVehicleModel = null;
+        string? registrationVehicleColor = null;
+        string? registrationVehiclePlate = null;
         if (driver != null)
         {
-            driverPhone = await _db.DriverRegistrations
+            var registration = await _db.DriverRegistrations
                 .AsNoTracking()
                 .Where(r => r.ResultingDriverProfileId == driver.Id || (r.SubmittedByUserId.HasValue && r.SubmittedByUserId.Value == driver.UserId))
-                .Select(r => r.Phone)
+                .Select(r => new
+                {
+                    r.Phone,
+                    r.VehicleType,
+                    r.VehicleModel,
+                    r.VehicleColor,
+                    r.VehiclePlate
+                })
                 .FirstOrDefaultAsync(cancellationToken);
+            driverPhone = NonBlank(registration?.Phone);
+            registrationVehicleType = registration?.VehicleType;
+            registrationVehicleModel = registration?.VehicleModel;
+            registrationVehicleColor = registration?.VehicleColor;
+            registrationVehiclePlate = registration?.VehiclePlate;
         }
 
-        var driverName = driver != null ? (isAr ? driver.FullNameAr : driver.FullNameEn) : (isAr ? "أحمد السعيد" : "Ahmed Al-Saeed");
-        var driverCode = driver != null && !string.IsNullOrWhiteSpace(driver.LicenseNumber)
-            ? driver.LicenseNumber
-            : $"DR-{Math.Abs((driver?.Id ?? Guid.NewGuid()).GetHashCode()) % 900 + 1000}";
+        var driverName = driver == null ? null : NonBlank(isAr ? driver.FullNameAr : driver.FullNameEn);
+        var driverCode = NonBlank(driver?.LicenseNumber);
 
         var driverStatus = driver != null
             ? (driver.IsAvailable ? "OnTask" : "Unavailable")
@@ -102,55 +118,58 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
             : (isAr ? "غير متاح" : "Unavailable");
         var driverStatusColor = driverStatus == "OnTask" ? "#10B981" : "#EF4444";
 
-        var vehicleType = isAr ? "سيارة" : "Car";
-        var vehicleModel = isAr ? "تويوتا كامري" : "Toyota Camry";
-        var vehicleColor = isAr ? "أبيض" : "White";
-        var vehiclePlate = "12-34567";
-        var vehicleInfoText = $"{vehicleModel} • {vehicleColor}";
-        var vehicleDto = new DriverVehicleDto(vehicleType, vehicleModel, vehicleColor, vehiclePlate);
+        var vehicleType = NonBlank(driver?.VehicleType) ?? NonBlank(registrationVehicleType);
+        var vehicleModel = NonBlank(driver?.VehicleModel) ?? NonBlank(registrationVehicleModel);
+        var vehicleColor = NonBlank(driver?.VehicleColor) ?? NonBlank(registrationVehicleColor);
+        var vehiclePlate = NonBlank(driver?.VehiclePlate) ?? NonBlank(registrationVehiclePlate);
+        var vehicleIdentity = vehicleModel ?? vehicleType;
+        var vehicleInfoText = BuildVehicleInfo(vehicleIdentity, vehicleColor);
+        var vehicleDto = vehicleType is null && vehicleModel is null && vehicleColor is null && vehiclePlate is null
+            ? null
+            : new DriverVehicleDto(vehicleType, vehicleModel, vehicleColor, vehiclePlate);
 
         var driverDto = new SupportProblemDriverDto(
-            DriverId: driver?.Id ?? Guid.Empty,
+            DriverId: driver?.Id,
             DriverCode: driverCode,
             FullName: driverName,
-            AvatarUrl: driver != null ? $"https://cdn.mealmate.app/avatars/dr-{Math.Abs(driver.Id.GetHashCode()) % 900 + 1000}.jpg" : null,
+            AvatarUrl: CatalogImageStorage.ToContentUrl(driver?.ProfileImageStorageKey),
             Status: driverStatus,
             StatusText: driverStatusText,
             StatusColor: driverStatusColor,
-            PhoneNumber: driverPhone ?? "+965 50 123 4567",
+            PhoneNumber: driverPhone,
             VehicleInfo: vehicleInfoText,
             Vehicle: vehicleDto);
 
         // 3. Resolve Trip / Order details
         var now = DateTime.UtcNow;
-        var submittedTime = (complaint != null && complaint.SubmittedAtUtc != default)
-            ? complaint.SubmittedAtUtc
-            : (stop != null && stop.CreatedAtUtc != default ? stop.CreatedAtUtc : now.AddMinutes(-15));
-        var diffMinutes = (int)Math.Max(1, (now - submittedTime).TotalMinutes);
-        var reportedTimeText = isAr ? $"منذ {diffMinutes} دقيقة" : $"{diffMinutes} mins ago";
+        var submittedTime = complaint != null
+            ? complaint.SubmittedAtUtc != default ? complaint.SubmittedAtUtc : complaint.CreatedAtUtc
+            : stop?.CreatedAtUtc ?? default;
+        var hasSubmittedTime = submittedTime != default;
+        var diffMinutes = hasSubmittedTime ? (int)Math.Max(1, (now - submittedTime).TotalMinutes) : (int?)null;
+        var reportedTimeText = diffMinutes.HasValue
+            ? isAr ? $"منذ {diffMinutes.Value} دقيقة" : $"{diffMinutes.Value} mins ago"
+            : _messages.GetMessage("dispatcher_support.data_unavailable", isAr ? "غير متوفر" : "Unavailable");
 
-        var customerName = stop?.CustomerName ?? (isAr ? "محمد الفضلي" : "Mohammed Al-Fadhli");
-        var mealsCount = 2;
-        var mealsCountText = isAr ? $"{mealsCount} وجبة" : $"{mealsCount} Meals";
-        var expectedFromUtc = now.Date.AddHours(9).AddMinutes(30);
-        var expectedToUtc = now.Date.AddHours(11).AddMinutes(0);
-        var expectedDeliveryTimeText = isAr ? "12:30 م - 02:00 م" : "12:30 PM - 02:00 PM";
-        var boxCode = stop != null ? (stop.OrderCode.StartsWith("#") ? stop.OrderCode : $"#{stop.OrderCode}") : "#BX-10256";
-        var areaName = stop != null && !string.IsNullOrWhiteSpace(stop.ZoneNameAr)
-            ? (isAr ? stop.ZoneNameAr : (stop.ZoneNameEn ?? stop.ZoneNameAr))
-            : ResolveAreaFromText(complaint != null ? $"{complaint.Title} {complaint.Description}" : "", isAr);
-
-        var (pickupLocation, deliveryAddress) = ResolveLocations(areaName, isAr);
+        var customerName = NonBlank(stop?.CustomerName);
+        var mealsSummary = NonBlank(isAr ? stop?.MealSummaryAr : stop?.MealSummaryEn);
+        var unavailableText = _messages.GetMessage("dispatcher_support.data_unavailable", isAr ? "غير متوفر" : "Unavailable");
+        var expectedDeliveryTimeText = NonBlank(stop?.SlotLabel);
+        var boxCode = FormatOrderCode(stop?.OrderCode);
+        var areaName = NonBlank(isAr ? stop?.ZoneNameAr : stop?.ZoneNameEn)
+            ?? NonBlank(isAr ? stop?.ZoneNameEn : stop?.ZoneNameAr);
+        var deliveryAddress = NonBlank(stop?.FullAddress);
 
         var tripInfo = new SupportProblemTripInfoDto(
             CustomerName: customerName,
-            MealsCount: mealsCount,
-            MealsCountText: mealsCountText,
-            ExpectedDeliveryFromUtc: expectedFromUtc,
-            ExpectedDeliveryToUtc: expectedToUtc,
-            ExpectedDeliveryTimeText: expectedDeliveryTimeText,
-            PickupLocation: pickupLocation,
-            DeliveryAddress: deliveryAddress);
+            MealsCount: null,
+            MealsCountText: unavailableText,
+            ExpectedDeliveryFromUtc: null,
+            ExpectedDeliveryToUtc: null,
+            ExpectedDeliveryTimeText: expectedDeliveryTimeText ?? unavailableText,
+            PickupLocation: null,
+            DeliveryAddress: deliveryAddress,
+            MealSummary: mealsSummary);
 
         // 4. Issue category, priority, status
         var category = !string.IsNullOrWhiteSpace(complaint?.Category) ? complaint.Category : "DeliveryIssue";
@@ -166,10 +185,10 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
             _ => "#EF4444"
         };
 
-        var title = complaint?.Title ?? stop?.FailureReason ?? (isAr ? "العميل لم يستجب للاتصال بعد 3 محاولات" : "Customer unresponsive after 3 attempts");
-        var description = complaint?.Description ?? (isAr
-            ? "العميل لم يستجب للاتصال بعد 3 محاولات متتالية، تم الانتظار لمدة 10 دقائق عند مدخل البناية دون أي استجابة."
-            : "Customer unresponsive after 3 consecutive call attempts, waited for 10 minutes at the entrance without response.");
+        var title = NonBlank(complaint?.Title) ?? NonBlank(stop?.FailureReason)
+            ?? (isAr ? "مشكلة دعم" : "Support issue");
+        var description = NonBlank(complaint?.Description)
+            ?? _messages.GetMessage("dispatcher_support.data_unavailable", isAr ? "غير متوفر" : "Unavailable");
 
         var status = complaint != null
             ? (complaint.Status switch
@@ -190,11 +209,13 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         var metadata = new SupportProblemMetadataDto(
             BoxCode: boxCode,
             Area: areaName,
-            AffectedBoxesCount: 1,
-            AffectedBoxesText: isAr ? "1 بوكس متأثر" : "1 box affected",
-            Priority: "High",
-            PriorityText: isAr ? "أولوية عالية" : "High Priority",
-            PriorityColor: "#EF4444");
+            AffectedBoxesCount: stop?.BoxCount,
+            AffectedBoxesText: stop != null
+                ? isAr ? $"{stop.BoxCount} بوكس متأثر" : $"{stop.BoxCount} box affected"
+                : unavailableText,
+            Priority: GetComplaintSeverity(complaint),
+            PriorityText: GetPriorityLabel(GetComplaintSeverity(complaint), unavailableText, isAr),
+            PriorityColor: GetPriorityColor(GetComplaintSeverity(complaint)));
 
         // 5. Photos
         var photos = new List<SupportEvidencePhotoDto>();
@@ -202,14 +223,11 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         {
             foreach (var p in complaint.EvidencePhotos)
             {
-                var photoUrl = p.StoragePath.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                    ? p.StoragePath
-                    : $"https://cdn.mealmate.app/evidence/{p.StoragePath}";
-                var thumbUrl = photoUrl.Replace("/evidence/", "/evidence/thumb_");
+                var photoUrl = CatalogImageStorage.ToContentUrl(p.StoragePath);
                 photos.Add(new SupportEvidencePhotoDto(
                     Id: p.Id,
-                    Url: photoUrl,
-                    ThumbnailUrl: thumbUrl,
+                    Url: photoUrl ?? string.Empty,
+                    ThumbnailUrl: null,
                     UploadedAtUtc: p.UploadedAtUtc == default ? submittedTime : p.UploadedAtUtc));
             }
         }
@@ -224,8 +242,8 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
                 .OrderByDescending(a => a.OccurredAtUtc)
                 .FirstOrDefaultAsync(cancellationToken);
 
-            var resNotes = auditLog?.Reason ?? (isAr ? "تم التواصل مع العميل" : "Customer contacted and resolved");
-            var resolvedTime = auditLog?.OccurredAtUtc ?? complaint?.ModifiedAtUtc ?? now;
+            var resNotes = NonBlank(auditLog?.Reason) ?? unavailableText;
+            var resolvedTime = auditLog?.OccurredAtUtc ?? complaint?.ModifiedAtUtc ?? stop?.ModifiedAtUtc ?? default;
             var resolvedById = auditLog?.ActorUserId;
             string? resolvedByName = null;
 
@@ -255,57 +273,59 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
             VehicleInfo: vehicleInfoText));
     }
 
-    private static string ResolveAreaFromText(string text, bool isAr)
+    private static string? NonBlank(string? value)
     {
-        var t = text.ToLowerInvariant();
-        if (t.Contains("عاصمة") || t.Contains("capital") || t.Contains("شرق") || t.Contains("دسمان") || t.Contains("المرقاب") || t.Contains("القبلة") || t.Contains("مدينة الكويت") || t.Contains("الحمراء") || t.Contains("الراية"))
-        {
-            return isAr ? "العاصمة" : "Capital";
-        }
-        if (t.Contains("حولي") || t.Contains("hawally") || t.Contains("الجابرية") || t.Contains("تونس") || t.Contains("بيان") || t.Contains("مشرف"))
-        {
-            return isAr ? "حولي" : "Hawally";
-        }
-        if (t.Contains("فروانية") || t.Contains("farwaniya") || t.Contains("خيطان") || t.Contains("العارضية") || t.Contains("الرحاب"))
-        {
-            return isAr ? "الفروانية" : "Farwaniya";
-        }
-        if (t.Contains("سالمية") || t.Contains("salmiya") || t.Contains("البدع") || t.Contains("البلاجات"))
-        {
-            return isAr ? "السالمية" : "Salmiya";
-        }
-
-        return isAr ? "العاصمة" : "Capital";
+        return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
-    private static (string pickup, string delivery) ResolveLocations(string areaName, bool isAr)
+    private static string? BuildVehicleInfo(string? identity, string? color)
     {
-        var a = areaName.ToLowerInvariant();
-        if (a.Contains("عاصمة") || a.Contains("capital") || a.Contains("شرق"))
+        var parts = new[] { NonBlank(identity), NonBlank(color) }
+            .Where(part => part is not null);
+        var value = string.Join(" • ", parts);
+        return value.Length == 0 ? null : value;
+    }
+
+    private static string? FormatOrderCode(string? orderCode)
+    {
+        var value = NonBlank(orderCode);
+        if (value is null || value.StartsWith("#", StringComparison.Ordinal))
         {
-            return (
-                isAr ? "مطعم دايت كير - فرع شرق (العاصمة)" : "Diet Care - Sharq Branch (Capital)",
-                isAr ? "العاصمة، شرق، برج الراية، الدور 18" : "Capital, Sharq, Arraya Tower, Floor 18"
-            );
-        }
-        if (a.Contains("حولي") || a.Contains("hawally") || a.Contains("جابرية"))
-        {
-            return (
-                isAr ? "مطعم دايت كير - فرع حولي" : "Diet Care - Hawally Branch",
-                isAr ? "حولي، شارع تونس، مجمع 8، شقة 12" : "Hawally, Tunis Street, Complex 8, Apt 12"
-            );
-        }
-        if (a.Contains("فروانية") || a.Contains("farwaniya") || a.Contains("خيطان"))
-        {
-            return (
-                isAr ? "مطعم دايت كير - فرع الفروانية" : "Diet Care - Farwaniya Branch",
-                isAr ? "الفروانية، قطعة 1، شارع حبيب مناور، مبنى 5" : "Farwaniya, Block 1, Habib Munawer St, Building 5"
-            );
+            return value;
         }
 
-        return (
-            isAr ? "مطعم دايت كير - فرع السالمية" : "Diet Care - Salmiya Branch",
-            isAr ? "السالمية، قطعة 4، شارع 12، منزل 15" : "Salmiya, Block 4, Street 12, House 15"
-        );
+        return $"#{value}";
     }
+
+    private static string? GetComplaintSeverity(Complaint? complaint)
+        => complaint?.Classifications
+            .OrderByDescending(classification => classification.ClassifiedAtUtc)
+            .Select(classification => NonBlank(classification.Severity))
+            .FirstOrDefault(severity => severity is not null);
+
+    private static string GetPriorityLabel(string? severity, string unavailableText, bool isAr)
+    {
+        if (severity is null)
+        {
+            return unavailableText;
+        }
+
+        return severity.ToLowerInvariant() switch
+        {
+            "urgent" => isAr ? "عاجلة" : "Urgent",
+            "high" => isAr ? "عالية" : "High",
+            "medium" => isAr ? "متوسطة" : "Medium",
+            "low" => isAr ? "منخفضة" : "Low",
+            _ => severity
+        };
+    }
+
+    private static string? GetPriorityColor(string? severity)
+        => severity?.ToLowerInvariant() switch
+        {
+            "urgent" or "high" => "#EF4444",
+            "medium" => "#F59E0B",
+            "low" => "#6B7280",
+            _ => null
+        };
 }

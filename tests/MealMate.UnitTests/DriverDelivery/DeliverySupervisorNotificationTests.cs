@@ -4,6 +4,7 @@ using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Features.DriverDelivery.DriverApp;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Application.Features.DriverDelivery.SupervisorNotifications;
 using MealMate.Application.Features.IdentityAccess.DeliveryManagerApp;
 using MealMate.Domain.AdminDashboard;
@@ -343,7 +344,18 @@ public class DeliverySupervisorNotificationTests
         trip.Stops.Add(deliveredStop);
         await db.SaveChangesAsync();
 
-        // Fixed clock: 11:30 Kuwait = 08:30 UTC → late stop window ended 10:30+15m grace = 45 minutes late.
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = OperationalPolicyService.SettingKey,
+            ValueJson = System.Text.Json.JsonSerializer.Serialize(new OperationalPolicySettings
+            {
+                DeliveryDelay = new DeliveryDelayPolicySettings(30)
+            }),
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
+
+        // The dispatcher threshold is 30 minutes; at 08:30 UTC this stop is 60 minutes late.
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(new DateTime(2026, 10, 2, 8, 30, 0, DateTimeKind.Utc));
 
@@ -354,7 +366,7 @@ public class DeliverySupervisorNotificationTests
 
         await notifier.Received(1).NotifyStopDelayedAsync(
             trip.RestaurantId, lateStop.Id, trip.Id, "TRP-7001", "سائق التجربة", "Test Driver",
-            "#BX-1111", "#BX-1111", Arg.Any<string>(), Arg.Any<string>(), 45, Arg.Any<CancellationToken>());
+            "#BX-1111", "#BX-1111", Arg.Any<string>(), Arg.Any<string>(), 60, Arg.Any<CancellationToken>());
         await notifier.DidNotReceive().NotifyStopDelayedAsync(
             trip.RestaurantId, onTimeStop.Id, Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
@@ -370,8 +382,8 @@ public class DeliverySupervisorNotificationTests
             Type = DeliveryDelayEscalationService.DelayNotificationType,
             TitleAr = "تأخير في التسليم",
             TitleEn = "Delivery delay",
-            BodyAr = "تأخير 45 دقيقة في تسليم الطلب.",
-            BodyEn = "Order is 45 minutes late.",
+            BodyAr = "تأخير 60 دقيقة في تسليم الطلب.",
+            BodyEn = "Order is 60 minutes late.",
             SubjectId = lateStop.Id,
             SentAtUtc = new DateTime(2026, 10, 2, 8, 30, 0, DateTimeKind.Utc)
         });

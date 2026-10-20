@@ -22,6 +22,7 @@ public static class OperationalPolicyRules
         if (s.Freeze.LeadDaysNotice is < 0 or > 365 || s.Freeze.MinDays is < 1 or > 365 || s.Freeze.MaxDays < s.Freeze.MinDays || s.Freeze.MaxDays > 365 || s.Freeze.MaxOccurrences is < 0 or > 1000 || s.Freeze.MinGapDays is < 0 or > 365 || s.Freeze.MaxTotalDays is < 0 or > 3650) return "Freeze duration, notice, occurrence, gap or total allowance is invalid.";
         if (s.AutoSelection?.MinutesBeforeCutoff is < 0 or > 10080) return "Automatic selection lead must be between 0 minutes and 7 days.";
         if (s.Renewal?.AvailableDaysBeforeEnd is < 0 or > 365) return "Renewal availability must be between 0 and 365 days.";
+        if (s.DeliveryDelay?.SevereDelayThresholdMinutes is < 1 or > 240) return "Severe delivery delay threshold must be between 1 and 240 minutes.";
         if (s.ChangeReason?.Length > 1000) return "Change reason must not exceed 1000 characters.";
         return null;
     }
@@ -29,7 +30,7 @@ public static class OperationalPolicyRules
     public static OperationalPolicySettings Parse(string json)
     {
         var s = JsonSerializer.Deserialize<OperationalPolicySettings>(json, JsonOptions) ?? throw new InvalidOperationException("Stored operational policy is empty.");
-        return s with { AutoSelection = s.AutoSelection ?? new(), Renewal = s.Renewal ?? new() };
+        return s with { AutoSelection = s.AutoSelection ?? new(), Renewal = s.Renewal ?? new(), DeliveryDelay = s.DeliveryDelay ?? new() };
     }
 
     public static async Task<OperationalPolicySettings> ReadAsync(IAppDbContext db, CancellationToken ct = default)
@@ -49,7 +50,7 @@ public static class OperationalPolicyRules
     {
         // Keep the actual legacy freeze behavior until the administrator publishes a policy.
         var f = SubscriptionFreezePolicyDefaults.Deserialize(legacy);
-        return new OperationalPolicySettings() with { Freeze = new FreezePolicySettings(f.StartDelayDays, 1, f.DefaultDurationDays, 1000, f.ExtendSubscriptionEnd), AutoSelection = new(), Renewal = new() };
+        return new OperationalPolicySettings() with { Freeze = new FreezePolicySettings(f.StartDelayDays, 1, f.DefaultDurationDays, 1000, f.ExtendSubscriptionEnd), AutoSelection = new(), Renewal = new(), DeliveryDelay = new() };
     }
     public static bool IsRenewalAvailable(OperationalPolicySettings settings, DateOnly endDate, DateOnly today)
         => settings.Renewal?.Enabled != false && (settings.Renewal?.AvailableDaysBeforeEnd is not { } days || today >= endDate.AddDays(-days));

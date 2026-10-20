@@ -1,6 +1,7 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.Enums;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.DriverDelivery.SupervisorNotifications;
@@ -17,7 +18,7 @@ public sealed class DeliveryDelayEscalationService(
     IDeliverySupervisorNotifier notifier)
 {
     public const string DelayEventKey = "delivery.stop.delayed";
-    public const int GracePeriodMinutes = 15;
+    public const int DefaultGracePeriodMinutes = 15;
 
     /// <summary>Notification <see cref="Domain.IdentityAccess.DeliveryManagerNotification.Type"/> written for each raised delay alert.</summary>
     public const string DelayNotificationType = "delivery-stop-delayed";
@@ -25,6 +26,8 @@ public sealed class DeliveryDelayEscalationService(
     public async Task DetectAndNotifyAsync(CancellationToken cancellationToken = default)
     {
         var nowUtc = clock.UtcNow;
+        var settings = await OperationalPolicyRules.ReadAsync(db, cancellationToken);
+        var gracePeriodMinutes = settings.DeliveryDelay?.SevereDelayThresholdMinutes ?? DefaultGracePeriodMinutes;
         var kuwaitNow = nowUtc.AddHours(DeliveryWindowParser.KuwaitUtcOffsetHours);
         var todayKuwait = DateOnly.FromDateTime(kuwaitNow);
         var todayStartUtc = DateTime.SpecifyKind(kuwaitNow.Date.AddHours(-DeliveryWindowParser.KuwaitUtcOffsetHours), DateTimeKind.Utc);
@@ -58,8 +61,8 @@ public sealed class DeliveryDelayEscalationService(
             if (!DeliveryWindowParser.TryGetExpectedEndTimeUtc(stop.SlotLabel, trip.ShiftName, nowUtc, out var expectedEndUtc))
                 continue;
 
-            var lateMinutes = (int)Math.Floor((nowUtc - expectedEndUtc.AddMinutes(GracePeriodMinutes)).TotalMinutes);
-            if (lateMinutes <= 0)
+            var lateMinutes = (int)Math.Floor((nowUtc - expectedEndUtc).TotalMinutes);
+            if (lateMinutes < gracePeriodMinutes)
                 continue;
 
             if (alertedStopIdSet.Contains(stop.Id))

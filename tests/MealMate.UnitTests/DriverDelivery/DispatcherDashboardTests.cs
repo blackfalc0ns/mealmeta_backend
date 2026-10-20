@@ -1,4 +1,5 @@
 using FluentAssertions;
+using FluentAssertions.Execution;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
@@ -123,7 +124,6 @@ public class DispatcherDashboardTests
             IsAvailable = true
         };
         db.DriverProfiles.Add(driver);
-
         var trip = new Trip
         {
             RestaurantId = restaurantId,
@@ -2388,6 +2388,19 @@ public class DispatcherDashboardTests
             IsAvailable = true
         };
         db.DriverProfiles.Add(driver);
+        db.DriverRegistrations.Add(new DriverRegistration
+        {
+            FullNameAr = driver.FullNameAr,
+            FullNameEn = driver.FullNameEn,
+            Phone = "+96550123456",
+            LicenseNumber = "DR-1025",
+            VehicleType = "سيارة",
+            VehicleModel = "تويوتا كامري",
+            VehicleColor = "أبيض",
+            VehiclePlate = "12345",
+            Status = VerificationStatus.Approved,
+            ResultingDriverProfileId = driver.Id
+        });
 
         var trip = new Trip
         {
@@ -2423,8 +2436,16 @@ public class DispatcherDashboardTests
             Title = "العميل لم يستجب للاتصال",
             Description = "انتظار 10 دقائق دون رد",
             Category = "DeliveryIssue",
-            Status = ComplaintStatus.Submitted
+            Status = ComplaintStatus.Submitted,
+            SubmittedAtUtc = DateTime.UtcNow
         };
+        complaint.Classifications.Add(new ComplaintClassification
+        {
+            ComplaintId = complaint.Id,
+            CategoryCode = "DeliveryIssue",
+            Severity = "High",
+            ClassifiedAtUtc = DateTime.UtcNow
+        });
         complaint.EvidencePhotos.Add(new ComplaintEvidencePhoto
         {
             ComplaintId = complaint.Id,
@@ -2448,6 +2469,9 @@ public class DispatcherDashboardTests
         result.Value.Driver.FullName.Should().Be("أحمد السعيد");
         result.Value.Driver.Status.Should().Be("OnTask");
         result.Value.Driver.VehicleInfo.Should().Contain("تويوتا كامري");
+        result.Value.Driver.PhoneNumber.Should().Be("+96550123456");
+        result.Value.Driver.Vehicle!.PlateNumber.Should().Be("12345");
+        result.Value.Metadata.Priority.Should().Be("High");
         result.Value.EvidencePhotos.Should().HaveCount(1);
         result.Value.EvidencePhotos[0].Url.Should().Be("https://cdn.mealmate.local/evidence/photo1.jpg");
         result.Value.TripInfo.CustomerName.Should().Be("محمد الفضلي");
@@ -2459,6 +2483,142 @@ public class DispatcherDashboardTests
         result.Value.Resolution.Should().BeNull();
         result.Value.CreatedAtUtc.Should().NotBe(default);
         result.Value.ReportedTimeText.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task GetProblemDetails_DoesNotInventBusinessData_WhenDriverAndStopAreMissing()
+    {
+        await using var db = CreateDb();
+        var complaint = new Complaint
+        {
+            CustomerUserId = Guid.NewGuid(),
+            Category = "DeliveryIssue",
+            Title = "Address needs clarification",
+            Description = "The driver cannot identify the entrance.",
+            Status = ComplaintStatus.Submitted,
+            SubmittedAtUtc = DateTime.UtcNow
+        };
+        db.Complaints.Add(complaint);
+        await db.SaveChangesAsync();
+
+        var handler = new GetDispatcherProblemDetailsQueryHandler(db, new ArabicTestMessageProvider());
+        var result = await handler.Handle(new GetDispatcherProblemDetailsQuery(complaint.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        using (new AssertionScope())
+        {
+            result.Value.Metadata.BoxCode.Should().BeNull();
+            result.Value.Metadata.Area.Should().BeNull();
+            result.Value.Metadata.Priority.Should().BeNull();
+            ((object?)result.Value.Driver.DriverId).Should().BeNull();
+            result.Value.Driver.DriverCode.Should().BeNull();
+            result.Value.Driver.FullName.Should().BeNull();
+            result.Value.Driver.AvatarUrl.Should().BeNull();
+            result.Value.Driver.PhoneNumber.Should().BeNull();
+            result.Value.Driver.VehicleInfo.Should().BeNull();
+            result.Value.Driver.Vehicle.Should().BeNull();
+            result.Value.VehicleInfo.Should().BeNull();
+            result.Value.TripInfo.CustomerName.Should().BeNull();
+            ((object?)result.Value.TripInfo.MealsCount).Should().BeNull();
+            result.Value.TripInfo.MealsCountText.Should().Be("غير متوفر");
+            result.Value.TripInfo.ExpectedDeliveryFromUtc.Should().BeNull();
+            result.Value.TripInfo.ExpectedDeliveryToUtc.Should().BeNull();
+            result.Value.TripInfo.ExpectedDeliveryTimeText.Should().Be("غير متوفر");
+            result.Value.TripInfo.PickupLocation.Should().BeNull();
+            result.Value.TripInfo.DeliveryAddress.Should().BeNull();
+        }
+    }
+
+    [Fact]
+    public async Task GetSupportIssues_DoesNotInventDriverVehicleAreaOrOrder_WhenComplaintHasNoLinkedRecords()
+    {
+        await using var db = CreateDb();
+        var restaurant = new RestaurantProfile
+        {
+            LegalNameAr = "مطعم الاختبار",
+            LegalNameEn = "Test Restaurant",
+            TradeNameAr = "مطعم الاختبار",
+            TradeNameEn = "Test Restaurant",
+            UserId = Guid.NewGuid()
+        };
+        db.RestaurantProfiles.Add(restaurant);
+        var complaint = new Complaint
+        {
+            RestaurantId = restaurant.Id,
+            CustomerUserId = Guid.NewGuid(),
+            Title = "Address needs clarification",
+            Description = "The address cannot be identified.",
+            Category = "DeliveryIssue",
+            Status = ComplaintStatus.Submitted,
+            SubmittedAtUtc = DateTime.UtcNow
+        };
+        db.Complaints.Add(complaint);
+        await db.SaveChangesAsync();
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.RestaurantId.Returns(restaurant.Id);
+        var handler = new GetDispatcherSupportIssuesQueryHandler(db, currentUser, new ArabicTestMessageProvider());
+        var result = await handler.Handle(new GetDispatcherSupportIssuesQuery(restaurant.Id, Status: "All"), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var issue = result.Value.Issues.Should().ContainSingle().Subject;
+        using (new AssertionScope())
+        {
+            issue.BoxCode.Should().BeNull();
+            issue.IssueCode.Should().BeNull();
+            ((object?)issue.DriverId).Should().BeNull();
+            issue.DriverCode.Should().BeNull();
+            issue.DriverName.Should().BeNull();
+            issue.DriverAvatarUrl.Should().BeNull();
+            issue.Area.Should().BeNull();
+            issue.VehicleText.Should().BeNull();
+            issue.VehicleInfo.Should().BeNull();
+            issue.Priority.Should().BeNull();
+        }
+    }
+
+    [Fact]
+    public async Task ReassignReplacementDriver_DoesNotInventCodeOrVehicle_WhenReplacementFieldsAreMissing()
+    {
+        await using var db = CreateDb();
+        var replacementDriver = new DriverProfile
+        {
+            UserId = Guid.NewGuid(),
+            FullNameAr = "سائق بديل",
+            FullNameEn = "Replacement Driver",
+            IsAvailable = true
+        };
+        db.DriverProfiles.Add(replacementDriver);
+        var complaint = new Complaint
+        {
+            CustomerUserId = Guid.NewGuid(),
+            Category = "VehicleBreakdown",
+            Title = "Vehicle breakdown",
+            Description = "Driver requested reassignment.",
+            Status = ComplaintStatus.Submitted,
+            SubmittedAtUtc = DateTime.UtcNow
+        };
+        db.Complaints.Add(complaint);
+        await db.SaveChangesAsync();
+
+        var handler = new ReassignReplacementDriverCommandHandler(
+            db,
+            new ArabicTestMessageProvider(),
+            Substitute.For<IAuditLogger>());
+        var result = await handler.Handle(
+            new ReassignReplacementDriverCommand(complaint.Id, replacementDriver.Id),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        using (new AssertionScope())
+        {
+            result.Value.ReplacementDriverCode.Should().BeNull();
+            result.Value.ReplacementDriver.DriverCode.Should().BeNull();
+            result.Value.ReplacementDriver.AvatarUrl.Should().BeNull();
+            result.Value.ReplacementDriver.PhoneNumber.Should().BeNull();
+            result.Value.ReplacementDriver.VehicleInfo.Should().BeNull();
+            result.Value.ReplacementDriver.Vehicle.Should().BeNull();
+        }
     }
 
     [Fact]
@@ -3088,7 +3248,7 @@ public class DispatcherDashboardTests
         details.Driver.Should().NotBeNull();
         details.Driver.FullName.Should().NotBeNullOrWhiteSpace();
         details.VehicleInfo.Should().NotBeNullOrWhiteSpace();
-        details.TripInfo.DeliveryAddress.Should().Contain("العاصمة");
+        details.TripInfo.DeliveryAddress.Should().BeNull();
         details.EvidencePhotos.Should().NotBeEmpty();
     }
 

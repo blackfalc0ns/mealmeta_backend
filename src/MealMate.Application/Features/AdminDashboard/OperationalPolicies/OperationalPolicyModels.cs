@@ -48,6 +48,7 @@ public sealed record FreezePolicySettings(
 
 public sealed record AutoSelectionPolicySettings(bool Enabled = true, int MinutesBeforeCutoff = 0);
 public sealed record RenewalPolicySettings(bool Enabled = true, int? AvailableDaysBeforeEnd = null);
+public sealed record DeliveryDelayPolicySettings(int SevereDelayThresholdMinutes = 15);
 public sealed record PolicyPublication(long Version, Guid ActorId, DateTime PublishedAtUtc, string Reason,
     OperationalPolicySettings Before, OperationalPolicySettings After);
 
@@ -57,6 +58,7 @@ public sealed record OperationalPolicySettings(
     FreezePolicySettings Freeze,
     AutoSelectionPolicySettings? AutoSelection = null,
     RenewalPolicySettings? Renewal = null,
+    DeliveryDelayPolicySettings? DeliveryDelay = null,
     long Version = 0,
     string? ChangeReason = null,
     Guid? PublishedBy = null,

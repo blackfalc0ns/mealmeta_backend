@@ -25,8 +25,8 @@ public sealed record SupportPaginationDto(
 public sealed record SupportIssueCardDto(
     Guid Id,
     Guid IssueId,
-    string BoxCode,
-    string IssueCode,
+    string? BoxCode,
+    string? IssueCode,
     string Title,
     string Category,
     string IssueCategory,
@@ -36,16 +36,16 @@ public sealed record SupportIssueCardDto(
     string ReportedTimeText,
     string TimeAgo,
     DateTime CreatedAtUtc,
-    Guid DriverId,
-    string DriverCode,
-    string DriverName,
+    Guid? DriverId,
+    string? DriverCode,
+    string? DriverName,
     string? DriverAvatarUrl,
-    string Area,
-    string VehicleText,
-    string VehicleInfo,
-    string Priority,
+    string? Area,
+    string? VehicleText,
+    string? VehicleInfo,
+    string? Priority,
     string PriorityLabel,
-    string PriorityColor,
+    string? PriorityColor,
     string Status,
     string StatusLabel);
 
@@ -59,53 +59,54 @@ public sealed record DispatcherSupportIssuesResponseDto(
     string? SelectedStatus = null);
 
 public sealed record DriverVehicleDto(
-    string Type,
-    string Model,
-    string Color,
-    string PlateNumber);
+    string? Type,
+    string? Model,
+    string? Color,
+    string? PlateNumber);
 
 public sealed record SupportEvidencePhotoDto(
     Guid Id,
-    string Url,
-    string ThumbnailUrl,
+    string? Url,
+    string? ThumbnailUrl,
     DateTime UploadedAtUtc);
 
 public sealed record SupportProblemResolutionDto(
     string Notes,
-    DateTime ResolvedAtUtc,
+    DateTime? ResolvedAtUtc,
     Guid? ResolvedById,
     string? ResolvedByName);
 
 public sealed record SupportProblemMetadataDto(
-    string BoxCode,
-    string Area,
-    int AffectedBoxesCount,
-    string AffectedBoxesText,
-    string Priority,
+    string? BoxCode,
+    string? Area,
+    int? AffectedBoxesCount,
+    string? AffectedBoxesText,
+    string? Priority,
     string PriorityText,
-    string PriorityColor);
+    string? PriorityColor);
 
 public sealed record SupportProblemDriverDto(
-    Guid DriverId,
-    string DriverCode,
-    string FullName,
+    Guid? DriverId,
+    string? DriverCode,
+    string? FullName,
     string? AvatarUrl,
     string Status,
     string StatusText,
     string StatusColor,
     string? PhoneNumber,
-    string VehicleInfo,
+    string? VehicleInfo,
     DriverVehicleDto? Vehicle = null);
 
 public sealed record SupportProblemTripInfoDto(
-    string CustomerName,
-    int MealsCount,
+    string? CustomerName,
+    int? MealsCount,
     string MealsCountText,
     DateTime? ExpectedDeliveryFromUtc,
     DateTime? ExpectedDeliveryToUtc,
-    string ExpectedDeliveryTimeText,
-    string PickupLocation,
-    string DeliveryAddress);
+    string? ExpectedDeliveryTimeText,
+    string? PickupLocation,
+    string? DeliveryAddress,
+    string? MealSummary = null);
 
 public sealed record SupportProblemDetailsDto(
     Guid IssueId,
@@ -201,8 +202,8 @@ public sealed record ReassignReplacementDriverResponseDto(
     DateTime ReassignedAtUtc,
     string Message,
     Guid ReplacementDriverId,
-    string ReplacementDriverCode,
-    string DriverName);
+    string? ReplacementDriverCode,
+    string? DriverName);
 
 public sealed record ResolveSupportIssueRequest(
     string? ResolutionNotes = null);

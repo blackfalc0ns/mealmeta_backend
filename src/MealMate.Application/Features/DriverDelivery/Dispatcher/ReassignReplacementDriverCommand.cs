@@ -2,6 +2,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Storage;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
@@ -122,8 +123,8 @@ public sealed class ReassignReplacementDriverCommandHandler : ICommandHandler<Re
                 isAr ? "السائق المحدد لم يعد متاحًا، اختر سائقًا آخر" : "The selected driver is no longer available, please choose another driver.");
         }
 
-        var driverName = isAr ? driver.FullNameAr : driver.FullNameEn;
-        var driverCode = !string.IsNullOrWhiteSpace(driver.LicenseNumber) ? driver.LicenseNumber : "DR-1012";
+        var driverName = NonBlank(isAr ? driver.FullNameAr : driver.FullNameEn);
+        var driverCode = NonBlank(driver.LicenseNumber);
         var now = DateTime.UtcNow;
 
         // 5. Apply Reassignment Transaction
@@ -185,27 +186,35 @@ public sealed class ReassignReplacementDriverCommandHandler : ICommandHandler<Re
             MessageCodes.DispatcherSupport.ReassignSuccess,
             isAr ? "تم تعيين السائق البديل وإسناد المهمة بنجاح" : "Replacement driver assigned and task reallocated successfully");
 
-        var driverPhone = await _db.DriverRegistrations
+        var registration = await _db.DriverRegistrations
             .AsNoTracking()
             .Where(r => r.ResultingDriverProfileId == driver.Id || (r.SubmittedByUserId.HasValue && r.SubmittedByUserId.Value == driver.UserId))
-            .Select(r => r.Phone)
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? string.Empty;
+            .Select(r => new
+            {
+                r.Phone,
+                r.VehicleType,
+                r.VehicleModel,
+                r.VehicleColor,
+                r.VehiclePlate
+            })
+            .FirstOrDefaultAsync(cancellationToken);
 
-        var vehicleType = driver.VehicleType ?? (isAr ? "سيارة" : "Car");
-        var vehicleModel = driver.VehicleModel ?? (isAr ? "مركبة توصيل" : "Delivery Vehicle");
-        var vehicleColor = driver.VehicleColor ?? string.Empty;
-        var vehiclePlate = driver.VehiclePlate ?? string.Empty;
-        var vehicleInfoText = !string.IsNullOrWhiteSpace(vehicleColor)
-            ? $"{vehicleModel} • {vehicleColor}"
-            : vehicleModel;
-        var vehicleDto = new DriverVehicleDto(vehicleType, vehicleModel, vehicleColor, vehiclePlate);
+        var driverPhone = NonBlank(registration?.Phone);
+        var vehicleType = NonBlank(driver.VehicleType) ?? NonBlank(registration?.VehicleType);
+        var vehicleModel = NonBlank(driver.VehicleModel) ?? NonBlank(registration?.VehicleModel);
+        var vehicleColor = NonBlank(driver.VehicleColor) ?? NonBlank(registration?.VehicleColor);
+        var vehiclePlate = NonBlank(driver.VehiclePlate) ?? NonBlank(registration?.VehiclePlate);
+        var vehicleIdentity = vehicleModel ?? vehicleType;
+        var vehicleInfoText = BuildVehicleInfo(vehicleIdentity, vehicleColor);
+        var vehicleDto = vehicleType is null && vehicleModel is null && vehicleColor is null && vehiclePlate is null
+            ? null
+            : new DriverVehicleDto(vehicleType, vehicleModel, vehicleColor, vehiclePlate);
 
         var replacementDriverDto = new SupportProblemDriverDto(
             DriverId: driver.Id,
             DriverCode: driverCode,
             FullName: driverName,
-            AvatarUrl: driver.ProfileImageStorageKey,
+            AvatarUrl: CatalogImageStorage.ToContentUrl(driver.ProfileImageStorageKey),
             Status: "OnTask",
             StatusText: isAr ? "متصل على المهمة" : "Online on duty",
             StatusColor: "#10B981",
@@ -224,5 +233,16 @@ public sealed class ReassignReplacementDriverCommandHandler : ICommandHandler<Re
             ReplacementDriverId: request.ReplacementDriverId,
             ReplacementDriverCode: driverCode,
             DriverName: driverName));
+    }
+
+    private static string? NonBlank(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static string? BuildVehicleInfo(string? identity, string? color)
+    {
+        var parts = new[] { NonBlank(identity), NonBlank(color) }
+            .Where(part => part is not null);
+        var value = string.Join(" • ", parts);
+        return value.Length == 0 ? null : value;
     }
 }

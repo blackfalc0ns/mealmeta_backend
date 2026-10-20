@@ -111,6 +111,21 @@ public class OperationalPolicyServiceTests
     }
 
     [Fact]
+    public async Task LegacyPublication_WithoutDelayField_PreservesAdministratorThreshold()
+    {
+        var sut = CreateSut();
+        var first = await sut.UpdateSettingsAsync(
+            new OperationalPolicySettings { DeliveryDelay = new DeliveryDelayPolicySettings(45) }, Guid.NewGuid());
+        first.IsSuccess.Should().BeTrue();
+
+        var legacySettings = new OperationalPolicySettings { Version = first.Value.Version };
+        var second = await sut.UpdateSettingsAsync(legacySettings, Guid.NewGuid());
+
+        second.IsSuccess.Should().BeTrue();
+        second.Value.DeliveryDelay!.SevereDelayThresholdMinutes.Should().Be(45);
+    }
+
+    [Fact]
     public async Task InvalidFreezeRange_IsRejectedWithoutPersisting()
     {
         var settings = new OperationalPolicySettings() with { Freeze = new FreezePolicySettings(MinDays: 10, MaxDays: 2) };
@@ -132,6 +147,9 @@ public class OperationalPolicyServiceTests
     public void OverflowedLegacyHours_AreInvalid()
     {
         OperationalPolicyRules.Validate(new OperationalPolicySettings() with { Cutoff = new CutoffPolicySettings(71582789) }).Should().NotBeNull();
+        OperationalPolicyRules.Validate(new OperationalPolicySettings() with { DeliveryDelay = new DeliveryDelayPolicySettings(241) }).Should().NotBeNull();
+        OperationalPolicyRules.Validate(new OperationalPolicySettings() with { DeliveryDelay = new DeliveryDelayPolicySettings(0) }).Should().NotBeNull();
+        OperationalPolicyRules.Validate(new OperationalPolicySettings() with { DeliveryDelay = new DeliveryDelayPolicySettings(90) }).Should().BeNull();
     }
 
     [Fact]

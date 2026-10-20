@@ -32,7 +32,16 @@ public sealed class OperationalPolicyService : IOperationalPolicyService
         var before = await GetSettingsAsync(cancellationToken);
         if (newSettings.Version != before.Version) return Result<OperationalPolicySettings>.Failure("Policy version changed. Refresh before publishing.");
         var now = _clock?.UtcNow ?? DateTime.UtcNow;
-        var published = newSettings with { Version = before.Version + 1, PublishedBy = adminUserId, PublishedAtUtc = now, ChangeReason = newSettings.ChangeReason?.Trim(), AutoSelection = newSettings.AutoSelection ?? new(), Renewal = newSettings.Renewal ?? new() };
+        var published = newSettings with
+        {
+            Version = before.Version + 1,
+            PublishedBy = adminUserId,
+            PublishedAtUtc = now,
+            ChangeReason = newSettings.ChangeReason?.Trim(),
+            AutoSelection = newSettings.AutoSelection ?? new(),
+            Renewal = newSettings.Renewal ?? new(),
+            DeliveryDelay = newSettings.DeliveryDelay ?? before.DeliveryDelay ?? new()
+        };
         var publication = new PolicyPublication(published.Version, adminUserId, now, published.ChangeReason ?? "Policy update", before, published);
         if (existing is null)
         {
