@@ -6,6 +6,7 @@ using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
@@ -309,6 +310,34 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             durationDays, includeFriday, startDate,
             page.HasValue || pageSize.HasValue ? new PageRequest { Page = page ?? 1, PageSize = pageSize ?? 20 } : null,
             ct));
+    }
+
+    /// <summary>
+    /// Returns earliest eligible delivery date and calendar dates matching the 72h operational lead time.
+    /// Consumed by the mobile DatePicker before checkout to select StartDate.
+    /// </summary>
+    [HttpGet("eligible-start-dates")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult EligibleStartDates([FromQuery] bool includeFriday = false, [FromQuery] int lookaheadDays = 14)
+    {
+        if (!IsCustomer()) return Forbid();
+
+        var snapshot = new TimingSnapshot(1, 72);
+
+        var nowUtc = DateTimeOffset.UtcNow;
+        var eligibleDates = ServiceTimingPolicy.GetEligibleFirstDeliveryDates(
+            nowUtc, snapshot, includeFriday, new TimeOnly(12, 0), TimeSpan.FromHours(3), lookaheadDays).ToList();
+
+        var earliest = eligibleDates.FirstOrDefault();
+
+        return Ok(new
+        {
+            OperationalLeadHours = 72,
+            EarliestEligibleDeliveryDate = earliest,
+            EligibleFirstDeliveryDates = eligibleDates,
+            IncludeFriday = includeFriday,
+            ServerTimeUtc = DateTime.UtcNow
+        });
     }
 
     [HttpGet("payment-methods")]

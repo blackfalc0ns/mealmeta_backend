@@ -82,6 +82,8 @@ public sealed class CustomerCompensationService : ICustomerCompensationService
                 ServerTimeUtc: now,
                 RemainingSeconds: remainingSeconds,
                 Status: c.Status,
+                EligibleForAlternativeDay: c.EligibleForAlternativeDay,
+                EligibleForFreeDay: c.EligibleForAlternativeDay,
                 SelectedAlternativeDate: c.SelectedAlternativeDate));
         }
 
@@ -196,7 +198,7 @@ public sealed class CustomerCompensationService : ICustomerCompensationService
 
             return Result.Failure<ChooseCompensationResultDto>(Error.Conflict(
                 "COMPENSATION_CHOICE_WINDOW_EXPIRED",
-                "انتهت مهلة اختيار التعويض (48 ساعة). تم تحويل المبلغ تلقائياً كاسترداد نقدي."));
+                "انتهت مهلة اختيار التعويض (48 ساعة). جاري تنفيذ الاسترداد التلقائي إلى وسائل الدفع الأصلية."));
         }
 
         if (string.Equals(request.Choice, "CashRefund", StringComparison.OrdinalIgnoreCase))
@@ -216,6 +218,13 @@ public sealed class CustomerCompensationService : ICustomerCompensationService
 
         if (string.Equals(request.Choice, "AlternativeDay", StringComparison.OrdinalIgnoreCase))
         {
+            if (!compensation.EligibleForAlternativeDay)
+            {
+                return Result.Failure<ChooseCompensationResultDto>(Error.Validation(
+                    "ALTERNATIVE_DAY_NOT_ELIGIBLE",
+                    "هذا التعويض مؤهل للاسترداد المالي فقط ولا يدعم اختيار يوم بديل."));
+            }
+
             if (!request.TargetDate.HasValue)
             {
                 return Result.Failure<ChooseCompensationResultDto>(Error.Validation(
@@ -243,6 +252,15 @@ public sealed class CustomerCompensationService : ICustomerCompensationService
                 return Result.Failure<ChooseCompensationResultDto>(Error.Validation(
                     "FRIDAY_EXCLUDED_BY_PLAN",
                     "باقة الاشتراك الحالية لا تشمل أيام الجمعة. يرجى اختيار يوم آخر في الأسبوع."));
+            }
+
+            var existingCommitmentsCount = await _db.ServiceCapacityCommitments
+                .CountAsync(c => c.ServiceDate == targetDate && c.Status == CapacityCommitmentStatus.Reserved, cancellationToken);
+            if (existingCommitmentsCount >= 1000)
+            {
+                return Result.Failure<ChooseCompensationResultDto>(Error.Conflict(
+                    "CAPACITY_DEPLETED_FOR_DATE",
+                    "اكتملت السعة التشغيلية لهذا التاريخ بالتزامن مع طلبك. يرجى اختيار تاريخ بديل آخر."));
             }
 
             // Create guaranteed independent capacity commitment for the alternative day

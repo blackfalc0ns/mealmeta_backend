@@ -21,6 +21,8 @@ public sealed record CustomerCompensationSummaryDto(
     DateTime ServerTimeUtc,
     long RemainingSeconds,
     CustomerCompensationStatus Status,
+    bool EligibleForAlternativeDay,
+    bool EligibleForFreeDay,
     DateOnly? SelectedAlternativeDate);
 
 public sealed record EligibleAlternativeDateDto(

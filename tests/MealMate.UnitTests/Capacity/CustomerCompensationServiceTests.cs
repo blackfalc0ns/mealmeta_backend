@@ -277,4 +277,94 @@ public sealed class CustomerCompensationServiceTests
         var dbRecord = await _db.CustomerServiceCompensations.FindAsync(compensation.Id);
         dbRecord!.Status.Should().Be(CustomerCompensationStatus.AutoRefundInitiated);
     }
+
+    [Fact]
+    public async Task ChooseCompensation_WhenNotEligibleForAlternativeDay_ReturnsValidationError()
+    {
+        // Arrange
+        var customerId = Guid.NewGuid();
+        var now = new DateTime(2026, 10, 21, 10, 0, 0, DateTimeKind.Utc);
+        _clock.UtcNow.Returns(now);
+
+        var compensation = new CustomerServiceCompensation
+        {
+            Id = Guid.NewGuid(),
+            CustomerUserId = customerId,
+            SubscriptionId = Guid.NewGuid(),
+            FailedServiceDate = new DateOnly(2026, 10, 20),
+            ChoiceDeadlineUtc = now.AddHours(24),
+            Status = CustomerCompensationStatus.PendingChoice,
+            EligibleForAlternativeDay = false // Strictly cash refund only!
+        };
+        _db.CustomerServiceCompensations.Add(compensation);
+        await _db.SaveChangesAsync();
+
+        // Act
+        var result = await _service.ChooseCompensationAsync(
+            compensation.Id,
+            customerId,
+            new ChooseCompensationRequest("AlternativeDay", new DateOnly(2026, 10, 26)));
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("ALTERNATIVE_DAY_NOT_ELIGIBLE");
+    }
+
+    [Fact]
+    public async Task ChooseCompensation_WhenCapacityDepletedOnDate_ReturnsConflict()
+    {
+        // Arrange
+        var customerId = Guid.NewGuid();
+        var subscriptionId = Guid.NewGuid();
+        var now = new DateTime(2026, 10, 21, 10, 0, 0, DateTimeKind.Utc);
+        _clock.UtcNow.Returns(now);
+
+        var targetDate = new DateOnly(2026, 10, 26);
+
+        var subscription = new Subscription
+        {
+            Id = subscriptionId,
+            CustomerUserId = customerId,
+            IncludeFriday = true,
+            StartDate = new DateOnly(2026, 10, 15),
+            EndDate = new DateOnly(2026, 11, 15)
+        };
+        _db.Subscriptions.Add(subscription);
+
+        var compensation = new CustomerServiceCompensation
+        {
+            Id = Guid.NewGuid(),
+            CustomerUserId = customerId,
+            SubscriptionId = subscriptionId,
+            FailedServiceDate = new DateOnly(2026, 10, 20),
+            ChoiceDeadlineUtc = now.AddHours(24),
+            Status = CustomerCompensationStatus.PendingChoice,
+            EligibleForAlternativeDay = true
+        };
+        _db.CustomerServiceCompensations.Add(compensation);
+
+        // Pre-fill 1000 commitments to simulate exhausted capacity
+        for (int i = 0; i < 1000; i++)
+        {
+            _db.ServiceCapacityCommitments.Add(new ServiceCapacityCommitment
+            {
+                Id = Guid.NewGuid(),
+                ServiceDate = targetDate,
+                CustomerUserId = Guid.NewGuid(),
+                SubscriptionId = subscriptionId,
+                Status = CapacityCommitmentStatus.Reserved
+            });
+        }
+        await _db.SaveChangesAsync();
+
+        // Act
+        var result = await _service.ChooseCompensationAsync(
+            compensation.Id,
+            customerId,
+            new ChooseCompensationRequest("AlternativeDay", targetDate));
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("CAPACITY_DEPLETED_FOR_DATE");
+    }
 }

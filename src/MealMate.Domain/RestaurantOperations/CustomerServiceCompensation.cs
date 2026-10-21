@@ -55,6 +55,8 @@ public sealed class CustomerServiceCompensation : AuditableEntity
 
     public CustomerCompensationStatus Status { get; set; } = CustomerCompensationStatus.PendingChoice;
 
+    public bool EligibleForAlternativeDay { get; set; } = true;
+
     public DateOnly? SelectedAlternativeDate { get; set; }
 
     public Guid? AlternativeCommitmentId { get; set; }
