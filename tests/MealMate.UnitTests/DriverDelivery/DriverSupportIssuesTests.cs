@@ -1,6 +1,7 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.DriverDelivery.DriverApp;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using MealMate.Domain.ComplaintsSupport;
@@ -196,11 +197,31 @@ public sealed class DriverSupportIssuesTests
             new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db), storage);
 
         var first = await handler.Handle(new AddDriverSupportIssuePhotosCommand(issue.Id, [key, key]), default);
+        first.IsSuccess.Should().BeTrue();
+        db.ChangeTracker.Clear();
         var retry = await handler.Handle(new AddDriverSupportIssuePhotosCommand(issue.Id, [key]), default);
         first.IsSuccess.Should().BeTrue(); retry.IsSuccess.Should().BeTrue();
         first.Value.Status.Should().Be("AwaitingReply"); first.Value.EvidenceUrls.Should().ContainSingle(); retry.Value.EvidenceUrls.Should().ContainSingle();
+        db.ChangeTracker.Clear();
         var persistedPhotos = (await db.Complaints.Include(x => x.EvidencePhotos).SingleAsync(x => x.Id == issue.Id)).EvidencePhotos;
         persistedPhotos.Should().ContainSingle(); persistedPhotos.Single().Id.Should().NotBeEmpty();
+        persistedPhotos.Single().StoragePath.Should().Be(key);
+        persistedPhotos.Single().ComplaintId.Should().Be(issue.Id);
+
+        db.ChangeTracker.Clear();
+        var driverDetail = await new DriverSupportIssueQueries(db, user, NullLocalizedMessageProvider.Instance)
+            .Handle(new GetDriverSupportIssueQuery(issue.Id), default);
+        driverDetail.IsSuccess.Should().BeTrue();
+        driverDetail.Value.EvidenceUrls.Should().Equal(CatalogImageStorage.ToContentUrl(key));
+        var manager = Substitute.For<ICurrentUser>();
+        manager.IsAuthenticated.Returns(true); manager.UserId.Returns(Guid.NewGuid());
+        manager.UserType.Returns(UserType.DeliveryManager); manager.RestaurantId.Returns(restaurantId);
+        var managerDetail = await new GetDispatcherProblemDetailsQueryHandler(db, NullLocalizedMessageProvider.Instance, manager)
+            .Handle(new GetDispatcherProblemDetailsQuery(issue.Id), default);
+        managerDetail.IsSuccess.Should().BeTrue();
+        var managerPhoto = managerDetail.Value.EvidencePhotos.Should().ContainSingle().Subject;
+        managerPhoto.Id.Should().Be(persistedPhotos.Single().Id);
+        managerPhoto.Url.Should().Be(driverDetail.Value.EvidenceUrls.Single());
         (await db.OutboxMessages.CountAsync(x => x.EventType == "driver-support-issue-changed.v1")).Should().Be(1);
         (await db.AuditLogs.CountAsync(x => x.Action == "DriverSupportPhotosAdded")).Should().Be(1);
     }

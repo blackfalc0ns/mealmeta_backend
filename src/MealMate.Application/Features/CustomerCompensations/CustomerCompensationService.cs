@@ -1,5 +1,6 @@
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
@@ -30,11 +31,16 @@ public sealed class CustomerCompensationService : ICustomerCompensationService
 {
     private readonly IAppDbContext _db;
     private readonly IDateTimeProvider _clock;
+    private readonly IOperationalPolicyService? _policyService;
 
-    public CustomerCompensationService(IAppDbContext db, IDateTimeProvider clock)
+    public CustomerCompensationService(
+        IAppDbContext db,
+        IDateTimeProvider clock,
+        IOperationalPolicyService? policyService = null)
     {
         _db = db;
         _clock = clock;
+        _policyService = policyService;
     }
 
     public async Task<Result<IReadOnlyList<CustomerCompensationSummaryDto>>> GetCompensationsAsync(
@@ -118,7 +124,21 @@ public sealed class CustomerCompensationService : ICustomerCompensationService
             .FirstOrDefaultAsync(x => x.Id == compensation.SubscriptionId, cancellationToken);
 
         var includeFriday = subscription?.IncludeFriday ?? true;
-        var timingPolicy = new TimingSnapshot(1, 72); // 72-hour unified operational lead time
+
+        var leadTimeHours = 72;
+        var policyVersion = 1L;
+
+        if (_policyService is not null)
+        {
+            var settings = await _policyService.GetSettingsAsync(cancellationToken);
+            if (settings?.Cutoff is not null)
+            {
+                leadTimeHours = settings.Cutoff.CutoffLeadHours;
+                policyVersion = settings.Version;
+            }
+        }
+
+        var timingPolicy = new TimingSnapshot(policyVersion, leadTimeHours);
 
         var eligibleDates = ServiceTimingPolicy.GetEligibleFirstDeliveryDates(
             paidAt: now,
@@ -233,13 +253,24 @@ public sealed class CustomerCompensationService : ICustomerCompensationService
             }
 
             var targetDate = request.TargetDate.Value;
-            var earliestEligibleDate = DateOnly.FromDateTime(now.AddHours(72));
+
+            var leadTimeHours = 72;
+            if (_policyService is not null)
+            {
+                var settings = await _policyService.GetSettingsAsync(cancellationToken);
+                if (settings?.Cutoff is not null)
+                {
+                    leadTimeHours = settings.Cutoff.CutoffLeadHours;
+                }
+            }
+
+            var earliestEligibleDate = DateOnly.FromDateTime(now.AddHours(leadTimeHours));
 
             if (targetDate < earliestEligibleDate)
             {
                 return Result.Failure<ChooseCompensationResultDto>(Error.Validation(
                     "TARGET_DATE_TOO_EARLY",
-                    $"تاريخ اليوم البديل يجب أن يكون بعد مهلة التشغيل المعتمدة (72 ساعة) على الأقل من {earliestEligibleDate:yyyy-MM-dd}."));
+                    $"تاريخ اليوم البديل يجب أن يكون بعد مهلة التشغيل المعتمدة ({leadTimeHours} ساعة) على الأقل من {earliestEligibleDate:yyyy-MM-dd}."));
             }
 
             var subscription = await _db.Subscriptions
@@ -254,9 +285,18 @@ public sealed class CustomerCompensationService : ICustomerCompensationService
                     "باقة الاشتراك الحالية لا تشمل أيام الجمعة. يرجى اختيار يوم آخر في الأسبوع."));
             }
 
+            // Read dynamic daily ceiling from platform capacity policy
+            var platformPolicy = await _db.PlatformCapacityPolicies
+                .AsNoTracking()
+                .Where(p => p.IsActive)
+                .OrderByDescending(p => p.Version)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var maxDailyCapacity = platformPolicy?.PlatformDailyBoxCeiling ?? 500;
+
             var existingCommitmentsCount = await _db.ServiceCapacityCommitments
                 .CountAsync(c => c.ServiceDate == targetDate && c.Status == CapacityCommitmentStatus.Reserved, cancellationToken);
-            if (existingCommitmentsCount >= 1000)
+            if (existingCommitmentsCount >= maxDailyCapacity)
             {
                 return Result.Failure<ChooseCompensationResultDto>(Error.Conflict(
                     "CAPACITY_DEPLETED_FOR_DATE",

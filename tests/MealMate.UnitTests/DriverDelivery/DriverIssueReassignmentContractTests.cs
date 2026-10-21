@@ -4,6 +4,7 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.DriverDelivery.DriverApp;
+using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using MealMate.Domain.Common;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
@@ -353,8 +354,11 @@ public class DriverIssueReassignmentContractTests
             EvidencePhotoStorageKey: "uploads/drivers/issue-evidence/legacy-1.jpg"), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
+        db.ChangeTracker.Clear();
         var saved = await db.Complaints.Include(c => c.EvidencePhotos).SingleAsync();
         var photo = saved.EvidencePhotos.Should().ContainSingle().Subject;
+        photo.Id.Should().NotBeEmpty();
+        photo.ComplaintId.Should().Be(result.Value);
         photo.StoragePath.Should().Be("uploads/drivers/issue-evidence/legacy-1.jpg");
         photo.ContentType.Should().Be("image/jpeg");
     }
@@ -387,6 +391,7 @@ public class DriverIssueReassignmentContractTests
             }), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
+        db.ChangeTracker.Clear();
         var saved = await db.Complaints.Include(c => c.EvidencePhotos).SingleAsync();
         saved.EvidencePhotos.Select(p => p.StoragePath).Should().BeEquivalentTo(new[]
         {
@@ -394,6 +399,22 @@ public class DriverIssueReassignmentContractTests
             "uploads/drivers/issue-evidence/b.png",
             "uploads/drivers/issue-evidence/c.webp"
         });
+        saved.EvidencePhotos.Should().OnlyContain(p => p.Id != Guid.Empty && p.ComplaintId == result.Value);
+        var expectedUrls = saved.EvidencePhotos.Select(p => CatalogImageStorage.ToContentUrl(p.StoragePath)).ToArray();
+
+        db.ChangeTracker.Clear();
+        var driverDetail = await new DriverSupportIssueQueries(db, currentUser, NullLocalizedMessageProvider.Instance)
+            .Handle(new GetDriverSupportIssueQuery(result.Value), default);
+        driverDetail.IsSuccess.Should().BeTrue();
+        driverDetail.Value.EvidenceUrls.Should().BeEquivalentTo(expectedUrls);
+        var manager = Substitute.For<ICurrentUser>();
+        manager.IsAuthenticated.Returns(true); manager.UserId.Returns(Guid.NewGuid());
+        manager.UserType.Returns(UserType.DeliveryManager); manager.RestaurantId.Returns(saved.RestaurantId);
+        var managerDetail = await new GetDispatcherProblemDetailsQueryHandler(db, NullLocalizedMessageProvider.Instance, manager)
+            .Handle(new GetDispatcherProblemDetailsQuery(result.Value), default);
+        managerDetail.IsSuccess.Should().BeTrue();
+        managerDetail.Value.EvidencePhotos.Select(p => p.Url).Should().BeEquivalentTo(expectedUrls);
+        managerDetail.Value.EvidencePhotos.Select(p => p.Id).Should().BeEquivalentTo(saved.EvidencePhotos.Select(p => p.Id));
     }
 
     [Fact]

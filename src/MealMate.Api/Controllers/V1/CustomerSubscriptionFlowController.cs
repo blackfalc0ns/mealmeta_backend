@@ -6,6 +6,7 @@ using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.ProgramsSubscriptions.Flow;
 using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Application.Features.ProgramsSubscriptions.Upgrade;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
 using MediatR;
@@ -25,16 +26,19 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private readonly ICurrentUser _currentUser;
     private readonly ISubscriptionFlowQueryService _queryService;
     private readonly ISubscriptionCatalogAvailabilityService? _catalogAvailability;
+    private readonly IOperationalPolicyService? _policyService;
 
     [ActivatorUtilitiesConstructor]
     public CustomerSubscriptionFlowController(
         ICurrentUser currentUser,
         ISubscriptionFlowQueryService queryService,
-        ISubscriptionCatalogAvailabilityService catalogAvailability)
+        ISubscriptionCatalogAvailabilityService catalogAvailability,
+        IOperationalPolicyService? policyService = null)
     {
         _currentUser = currentUser;
         _queryService = queryService;
         _catalogAvailability = catalogAvailability;
+        _policyService = policyService;
     }
 
     /// <summary>Backward-compatible constructor for existing tests and call sites.</summary>
@@ -313,16 +317,31 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     }
 
     /// <summary>
-    /// Returns earliest eligible delivery date and calendar dates matching the 72h operational lead time.
+    /// <summary>
+    /// Returns earliest eligible delivery date and calendar dates matching the operational lead time
+    /// configured dynamically by the platform administrator.
     /// Consumed by the mobile DatePicker before checkout to select StartDate.
     /// </summary>
     [HttpGet("eligible-start-dates")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public IActionResult EligibleStartDates([FromQuery] bool includeFriday = false, [FromQuery] int lookaheadDays = 14)
+    public async Task<IActionResult> EligibleStartDates(
+        [FromQuery] bool includeFriday = false,
+        [FromQuery] int lookaheadDays = 14,
+        CancellationToken ct = default)
     {
         if (!IsCustomer()) return Forbid();
 
-        var snapshot = new TimingSnapshot(1, 72);
+        var leadTimeHours = 72;
+        var policyVersion = 1L;
+
+        if (_policyService is not null)
+        {
+            var settings = await _policyService.GetSettingsAsync(ct);
+            leadTimeHours = settings.Cutoff.CutoffLeadHours;
+            policyVersion = settings.Version;
+        }
+
+        var snapshot = new TimingSnapshot(policyVersion, leadTimeHours);
 
         var nowUtc = DateTimeOffset.UtcNow;
         var eligibleDates = ServiceTimingPolicy.GetEligibleFirstDeliveryDates(
@@ -332,7 +351,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
 
         return Ok(new
         {
-            OperationalLeadHours = 72,
+            PolicyVersion = policyVersion,
+            OperationalLeadHours = leadTimeHours,
             EarliestEligibleDeliveryDate = earliest,
             EligibleFirstDeliveryDates = eligibleDates,
             IncludeFriday = includeFriday,

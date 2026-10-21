@@ -1,5 +1,6 @@
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Application.Features.CustomerCompensations;
 using MealMate.Domain.Enums;
 using MealMate.Domain.ProgramsSubscriptions;
@@ -15,6 +16,7 @@ public sealed class CustomerCompensationServiceTests
 {
     private readonly AppDbContext _db;
     private readonly IDateTimeProvider _clock;
+    private readonly IOperationalPolicyService _policyService;
     private readonly CustomerCompensationService _service;
 
     public CustomerCompensationServiceTests()
@@ -24,8 +26,11 @@ public sealed class CustomerCompensationServiceTests
             .Options;
 
         _clock = Substitute.For<IDateTimeProvider>();
+        _policyService = Substitute.For<IOperationalPolicyService>();
+        _policyService.GetSettingsAsync(Arg.Any<CancellationToken>())
+            .Returns(new OperationalPolicySettings());
         _db = new AppDbContext(options, Substitute.For<IDomainEventDispatcher>(), _clock);
-        _service = new CustomerCompensationService(_db, _clock);
+        _service = new CustomerCompensationService(_db, _clock, _policyService);
     }
 
     [Fact]
@@ -366,5 +371,52 @@ public sealed class CustomerCompensationServiceTests
         // Assert
         result.IsSuccess.Should().BeFalse();
         result.Error.Code.Should().Be("CAPACITY_DEPLETED_FOR_DATE");
+    }
+
+    [Fact]
+    public async Task GetAlternativeDates_WhenAdminUpdatesPolicyLeadTimeTo48Hours_HonorsAdminConfiguredHours()
+    {
+        // Arrange
+        var customerId = Guid.NewGuid();
+        var subscriptionId = Guid.NewGuid();
+        // Tuesday 08:00 UTC -> with 48h lead, threshold is Thursday 08:00 UTC (before 09:00 UTC delivery start)
+        var now = new DateTime(2026, 10, 20, 8, 0, 0, DateTimeKind.Utc); // Tuesday
+        _clock.UtcNow.Returns(now);
+
+        _policyService.GetSettingsAsync(Arg.Any<CancellationToken>())
+            .Returns(new OperationalPolicySettings(
+                Cutoff: new CutoffPolicySettings(CutoffLeadHours: 48),
+                Cancellation: new CancellationPolicySettings(),
+                Freeze: new FreezePolicySettings(),
+                Version: 5));
+
+        var subscription = new Subscription
+        {
+            Id = subscriptionId,
+            CustomerUserId = customerId,
+            IncludeFriday = true,
+            StartDate = new DateOnly(2026, 10, 20),
+            EndDate = new DateOnly(2026, 11, 20)
+        };
+        _db.Subscriptions.Add(subscription);
+
+        var compensation = new CustomerServiceCompensation
+        {
+            Id = Guid.NewGuid(),
+            CustomerUserId = customerId,
+            SubscriptionId = subscriptionId,
+            Status = CustomerCompensationStatus.PendingChoice,
+            EligibleForAlternativeDay = true
+        };
+        _db.CustomerServiceCompensations.Add(compensation);
+        await _db.SaveChangesAsync();
+
+        // Act
+        var result = await _service.GetAlternativeDatesAsync(compensation.Id, customerId, count: 7);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        // With 48h lead time configured by admin, Thursday 2026-10-22 is eligible!
+        result.Value[0].Date.Should().Be(new DateOnly(2026, 10, 22)); // Thursday
     }
 }
