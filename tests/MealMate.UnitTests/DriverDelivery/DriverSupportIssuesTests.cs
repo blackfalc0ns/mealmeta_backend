@@ -181,14 +181,16 @@ public sealed class DriverSupportIssuesTests
         outOfScope.Error.Code.Should().Be("DISPATCHER_SCOPE_FORBIDDEN");
     }
 
-    [Fact]
-    public async Task PhotoBindingChecksOwnershipAndIsIdempotent()
+    [Theory]
+    [InlineData("uploads/drivers/issue-evidence/evidence.webp")]
+    [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/evidence.webp")]
+    [InlineData("https://cdn.example/uploads/drivers/delivery/evidence.webp")]
+    public async Task PhotoBindingChecksOwnershipAndIsIdempotent(string key)
     {
         await using var db = CreateDb();
         var userId = Guid.NewGuid(); var restaurantId = Guid.NewGuid();
         var profile = new DriverProfile { UserId = userId, RestaurantId = restaurantId, FullNameEn = "Driver", FullNameAr = "سائق" };
         var issue = Issue(profile.Id, ComplaintStatus.Submitted, "photos"); issue.RestaurantId = restaurantId;
-        var key = "uploads/drivers/issue-evidence/evidence.webp";
         db.AddRange(profile, issue, new MealMate.Domain.Common.UploadFileRecord { StorageKey = key, UploadedByUserId = userId, ContentType = "image/webp", FileName = "evidence.webp", SizeBytes = 10 });
         await db.SaveChangesAsync();
         var user = Substitute.For<ICurrentUser>(); user.IsAuthenticated.Returns(true); user.UserId.Returns(userId); user.UserType.Returns(UserType.Driver);
@@ -253,6 +255,51 @@ public sealed class DriverSupportIssuesTests
         (await handler.Handle(new AddDriverSupportIssuePhotosCommand(issue.Id, [publicKey]), default)).Error.Code.Should().Be("DRIVER_SUPPORT_PHOTO_UPLOAD_INVALID");
         (await handler.Handle(new AddDriverSupportIssuePhotosCommand(terminal.Id, [key]), default)).Error.Code.Should().Be("DRIVER_SUPPORT_ISSUE_TERMINAL");
         (await handler.Handle(new AddDriverSupportIssuePhotosCommand(foreignIssue.Id, [key]), default)).Error.Code.Should().Be("DRIVER_SUPPORT_ISSUE_NOT_FOUND");
+    }
+
+    [Theory]
+    [InlineData("https://cdn.example/account/uploads/catalog/file.jpg")]
+    [InlineData("https://cdn.example/file.jpg?folder=/uploads/drivers/issue-evidence/")]
+    [InlineData("https://cdn.example/file.jpg#/uploads/drivers/issue-evidence/")]
+    [InlineData("https://user@cdn.example/account/uploads/drivers/issue-evidence/file.jpg")]
+    [InlineData("http://cdn.example/account/uploads/drivers/issue-evidence/file.jpg")]
+    [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/../other.jpg")]
+    [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/%2e%2e/other.jpg")]
+    [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/%252e%252e/other.jpg")]
+    [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/dir%2ffile.jpg")]
+    [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/dir%5cfile.jpg")]
+    [InlineData("uploads/drivers/issue-evidence/../other.jpg")]
+    public async Task PhotoBindingRejectsUnsafeOwnedKeyBeforeStorageAccess(string key)
+    {
+        await AssertRejectedUpload(key, owned: true, recordExists: true);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task PhotoBindingRejectsForeignOrUnrecordedAbsoluteKeyBeforeStorageAccess(bool owned, bool recordExists)
+    {
+        await AssertRejectedUpload("https://cdn.example/account/uploads/drivers/issue-evidence/file.jpg", owned, recordExists);
+    }
+
+    private static async Task AssertRejectedUpload(string key, bool owned, bool recordExists)
+    {
+        await using var db = CreateDb();
+        var userId = Guid.NewGuid(); var restaurantId = Guid.NewGuid();
+        var profile = new DriverProfile { UserId = userId, RestaurantId = restaurantId, FullNameEn = "Driver", FullNameAr = "سائق" };
+        var issue = Issue(profile.Id, ComplaintStatus.Submitted, "photos"); issue.RestaurantId = restaurantId;
+        db.AddRange(profile, issue);
+        if (recordExists) db.Add(new MealMate.Domain.Common.UploadFileRecord { StorageKey = key, UploadedByUserId = owned ? userId : Guid.NewGuid(), ContentType = "image/jpeg", FileName = "file.jpg", SizeBytes = 10 });
+        await db.SaveChangesAsync();
+        var user = Substitute.For<ICurrentUser>(); user.IsAuthenticated.Returns(true); user.UserId.Returns(userId); user.UserType.Returns(UserType.Driver);
+        var storage = Substitute.For<IFileStorage>();
+        var handler = new AddDriverSupportIssuePhotosHandler(db, user, NullLocalizedMessageProvider.Instance,
+            new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db), storage);
+        var result = await handler.Handle(new AddDriverSupportIssuePhotosCommand(issue.Id, [key]), default);
+        result.Error.Code.Should().Be("DRIVER_SUPPORT_PHOTO_UPLOAD_INVALID");
+        await storage.DidNotReceive().ExistsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        (await db.Set<ComplaintEvidencePhoto>().CountAsync()).Should().Be(0);
+        (await db.OutboxMessages.CountAsync()).Should().Be(0);
     }
 
     [Fact]

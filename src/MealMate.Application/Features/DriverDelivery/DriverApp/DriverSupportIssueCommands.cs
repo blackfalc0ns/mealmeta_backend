@@ -42,7 +42,7 @@ public sealed class AddDriverSupportIssuePhotosHandler : ICommandHandler<AddDriv
         var keys = request.StorageKeys!.Distinct(StringComparer.Ordinal).ToArray();
         var records = await db.UploadFileRecords.Where(x => keys.Contains(x.StorageKey) && x.UploadedByUserId == user.UserId).ToListAsync(ct);
         if (records.Count != keys.Length || records.Any(x => x.ContentType is not ("image/jpeg" or "image/png" or "image/webp")
-            || !(x.StorageKey.StartsWith("uploads/drivers/issue-evidence/", StringComparison.Ordinal) || x.StorageKey.StartsWith("uploads/drivers/delivery/", StringComparison.Ordinal))))
+            || !IsDriverEvidenceKey(x.StorageKey)))
             return Error.Validation("DRIVER_SUPPORT_PHOTO_UPLOAD_INVALID", messages.GetMessage("driver_support_issue.photo_upload_invalid"));
         foreach (var record in records) if (!await storage.ExistsAsync(record.StorageKey, ct)) return Error.Validation("DRIVER_SUPPORT_PHOTO_MISSING", messages.GetMessage("driver_support_issue.photo_missing"));
         var existing = complaint.EvidencePhotos.Select(x => x.StoragePath).ToHashSet(StringComparer.Ordinal);
@@ -60,6 +60,34 @@ public sealed class AddDriverSupportIssuePhotosHandler : ICommandHandler<AddDriv
             await db.SaveChangesAsync(ct);
         }
         return Result.Success(new DriverSupportIssueMutationDto(complaint.Id, DriverSupportIssueProjection.Bucket(complaint.Status, hasContactStage), complaint.EvidencePhotos.Select(x => MealMate.Application.Common.Storage.CatalogImageStorage.ToContentUrl(x.StoragePath) ?? string.Empty).ToArray()));
+    }
+    // The owned UploadFileRecord is matched by the original key before validating its folder.
+    // CDN providers may persist an HTTPS URL rather than a relative storage path.
+    private static bool IsDriverEvidenceKey(string key)
+    {
+        if (key.Any(char.IsWhiteSpace) || key.Contains('\\') || key.Contains('?') || key.Contains('#')) return false;
+        var path = key;
+        if (Uri.TryCreate(key, UriKind.Absolute, out var uri))
+        {
+            if (uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo)
+                || !Uri.IsWellFormedUriString(key, UriKind.Absolute)) return false;
+            // Read the original path: Uri.AbsolutePath canonicalizes away traversal segments.
+            var pathStart = key.IndexOf('/', key.IndexOf("://", StringComparison.Ordinal) + 3);
+            if (pathStart < 0) return false;
+            path = key[(pathStart + 1)..];
+        }
+        var segments = path.Split('/');
+        foreach (var segment in segments)
+        {
+            var decoded = Uri.UnescapeDataString(segment);
+            if (decoded.Length == 0 || decoded is "." or ".." || decoded.Contains('/')
+                || decoded.Contains('\\') || decoded.Contains('%') || decoded.Any(char.IsControl)) return false;
+        }
+        var offset = segments[0] == "uploads" ? 0 : 1;
+        return segments.Length > offset + 3 && segments[offset] == "uploads"
+            && segments[offset + 1] == "drivers"
+            && segments[offset + 2] is "issue-evidence" or "delivery"
+            && (offset == 0 || Uri.TryCreate(key, UriKind.Absolute, out _));
     }
     private Result<DriverSupportIssueMutationDto> NotFound() => Error.NotFound("DRIVER_SUPPORT_ISSUE_NOT_FOUND", messages.GetMessage("driver_support_issue.not_found"));
 }

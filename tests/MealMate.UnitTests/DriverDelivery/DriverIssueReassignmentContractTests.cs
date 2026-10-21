@@ -363,14 +363,16 @@ public class DriverIssueReassignmentContractTests
         photo.ContentType.Should().Be("image/jpeg");
     }
 
-    [Fact]
-    public async Task ReportIssue_MultipleKeys_PersistUpToThree_MergedWithLegacyAndDeduped()
+    [Theory]
+    [InlineData("uploads/drivers/issue-evidence/a.jpg")]
+    [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/a.jpg")]
+    public async Task ReportIssue_MultipleKeys_PersistUpToThree_MergedWithLegacyAndDeduped(string firstKey)
     {
         await using var db = CreateDb();
         var (currentUser, messages) = CreateMocks();
         var driver = SeedDriver(db, currentUser);
         var (_, stop) = SeedAssignedStop(db, driver);
-        SeedUpload(db, driver.UserId, "uploads/drivers/issue-evidence/a.jpg");
+        SeedUpload(db, driver.UserId, firstKey);
         SeedUpload(db, driver.UserId, "uploads/drivers/issue-evidence/b.png");
         SeedUpload(db, driver.UserId, "uploads/drivers/issue-evidence/c.webp");
         await db.SaveChangesAsync();
@@ -381,10 +383,10 @@ public class DriverIssueReassignmentContractTests
             stop.Id,
             IssueType: "TrafficAccident",
             Description: "حادث",
-            EvidencePhotoStorageKey: "uploads/drivers/issue-evidence/a.jpg",
+            EvidencePhotoStorageKey: firstKey,
             EvidencePhotoStorageKeys: new[]
             {
-                "uploads/drivers/issue-evidence/a.jpg",
+                firstKey,
                 "",
                 "uploads/drivers/issue-evidence/b.png",
                 "uploads/drivers/issue-evidence/c.webp"
@@ -395,7 +397,7 @@ public class DriverIssueReassignmentContractTests
         var saved = await db.Complaints.Include(c => c.EvidencePhotos).SingleAsync();
         saved.EvidencePhotos.Select(p => p.StoragePath).Should().BeEquivalentTo(new[]
         {
-            "uploads/drivers/issue-evidence/a.jpg",
+            firstKey,
             "uploads/drivers/issue-evidence/b.png",
             "uploads/drivers/issue-evidence/c.webp"
         });
