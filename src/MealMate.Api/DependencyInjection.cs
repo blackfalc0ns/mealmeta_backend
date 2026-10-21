@@ -2,6 +2,7 @@ using System.Text;
 using System.Threading.RateLimiting;
 using MealMate.Api.Authorization;
 using MealMate.Api.Common;
+using MealMate.Api.Filters;
 using MealMate.Api.Localization;
 using MealMate.Api.Middleware;
 using MealMate.Api.Security;
@@ -22,7 +23,11 @@ public static class DependencyInjection
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.AddControllers()
+        services.AddDataProtection();
+        services.AddSingleton(TimeProvider.System);
+        services.AddScoped<DriverEvidenceReadLinks>();
+        services.AddScoped<DriverEvidenceReadLinksFilter>();
+        services.AddControllers(options => options.Filters.Add<DriverEvidenceReadLinksFilter>())
             .AddJsonOptions(options => MealMateJsonSerializer.Configure(options.JsonSerializerOptions));
         services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
             MealMateJsonSerializer.Configure(options.SerializerOptions));

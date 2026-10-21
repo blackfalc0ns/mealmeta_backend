@@ -63,23 +63,27 @@ public class UploadsControllerPrivacyTests
         return (controller, storage, db);
     }
 
-    [Fact]
-    public async Task Read_DeliveryProof_Anonymous_Is_Unauthorized()
+    [Theory]
+    [InlineData(ProofKey)]
+    [InlineData("uploads/drivers/issue-evidence/evidence-123.jpg")]
+    public async Task Read_DeliveryProof_Anonymous_Is_Unauthorized(string key)
     {
         var (controller, storage, db) = Build();
 
-        var result = await controller.Read(ProofKey, storage, db, CancellationToken.None);
+        var result = await controller.Read(key, storage, db, CancellationToken.None);
 
         result.Should().BeOfType<UnauthorizedResult>();
     }
 
-    [Fact]
-    public async Task Read_DeliveryProof_RecordOwnedBySomeoneElse_Is_Forbidden()
+    [Theory]
+    [InlineData(ProofKey)]
+    [InlineData("uploads/drivers/issue-evidence/evidence-123.jpg")]
+    public async Task Read_DeliveryProof_RecordOwnedBySomeoneElse_Is_Forbidden(string key)
     {
         var (controller, storage, db) = Build(callerUserId: Guid.NewGuid());
         db.UploadFileRecords.Add(new UploadFileRecord
         {
-            StorageKey = ProofKey,
+            StorageKey = key,
             FileName = "proof.jpg",
             ContentType = "image/jpeg",
             SizeBytes = 100,
@@ -88,19 +92,21 @@ public class UploadsControllerPrivacyTests
         });
         await db.SaveChangesAsync();
 
-        var result = await controller.Read(ProofKey, storage, db, CancellationToken.None);
+        var result = await controller.Read(key, storage, db, CancellationToken.None);
 
         result.Should().BeOfType<ForbidResult>();
     }
 
-    [Fact]
-    public async Task Read_DeliveryProof_OwnUploader_Is_Allowed()
+    [Theory]
+    [InlineData(ProofKey)]
+    [InlineData("uploads/drivers/issue-evidence/evidence-123.jpg")]
+    public async Task Read_DeliveryProof_OwnUploader_Is_Allowed(string key)
     {
         var uploaderId = Guid.NewGuid();
         var (controller, storage, db) = Build(callerUserId: uploaderId);
         db.UploadFileRecords.Add(new UploadFileRecord
         {
-            StorageKey = ProofKey,
+            StorageKey = key,
             FileName = "proof.jpg",
             ContentType = "image/jpeg",
             SizeBytes = 100,
@@ -109,20 +115,22 @@ public class UploadsControllerPrivacyTests
         });
         await db.SaveChangesAsync();
 
-        var result = await controller.Read(ProofKey, storage, db, CancellationToken.None);
+        var result = await controller.Read(key, storage, db, CancellationToken.None);
 
         result.Should().BeOfType<FileStreamResult>();
     }
 
-    [Fact]
-    public async Task Read_DeliveryProof_DeliveryStaff_Is_Allowed_Even_For_Foreign_Upload()
+    [Theory]
+    [InlineData(ProofKey)]
+    [InlineData("uploads/drivers/issue-evidence/evidence-123.jpg")]
+    public async Task Read_DeliveryProof_DeliveryStaff_Is_Allowed_Even_For_Foreign_Upload(string key)
     {
         var (controller, storage, db) = Build(
             callerUserId: Guid.NewGuid(),
             roles: new[] { AppRoles.DeliveryManager });
         db.UploadFileRecords.Add(new UploadFileRecord
         {
-            StorageKey = ProofKey,
+            StorageKey = key,
             FileName = "proof.jpg",
             ContentType = "image/jpeg",
             SizeBytes = 100,
@@ -131,7 +139,7 @@ public class UploadsControllerPrivacyTests
         });
         await db.SaveChangesAsync();
 
-        var result = await controller.Read(ProofKey, storage, db, CancellationToken.None);
+        var result = await controller.Read(key, storage, db, CancellationToken.None);
 
         result.Should().BeOfType<FileStreamResult>();
     }

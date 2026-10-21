@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using MealMate.Api.Common;
+using MealMate.Api.Security;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Security;
 using MealMate.Application.Features.Uploads;
@@ -46,15 +47,15 @@ public sealed class UploadsController : ApiControllerBase
             return NotFound();
         }
 
-        // Delivery proofs (pickup-condition / delivery photos) and driver issue
-        // evidence document private doorsteps and field incidents: they are no
-        // longer anonymously readable. When an upload metadata record exists, only
-        // the uploader or delivery staff may read it; legacy files without a record
-        // stay available to authenticated callers until a backfill (documented gap
-        // in the screens-07 contract).
+        // Private evidence requires the uploader/staff session or a short-lived
+        // capability issued in an authorized response for this exact file.
         if (normalizedKey.StartsWith(DriversDeliveryPrefix, StringComparison.OrdinalIgnoreCase)
             || normalizedKey.StartsWith(DriverIssueEvidencePrefix, StringComparison.OrdinalIgnoreCase))
         {
+            Response.Headers.CacheControl = "no-store";
+            Response.Headers["Referrer-Policy"] = "no-referrer";
+            var links = HttpContext.RequestServices.GetService<DriverEvidenceReadLinks>();
+            var hasReadCapability = links?.Validate(normalizedKey, Request.Query["readToken"].ToString()) == true;
             var userId = User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.UserId)
                 ?? User?.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier
                     && Guid.TryParse(c.Value, out _))?.Value;
@@ -63,7 +64,7 @@ public sealed class UploadsController : ApiControllerBase
                     || User.IsInRole(AppRoles.OperationsAdmin)
                     || User.IsInRole(AppRoles.SuperAdmin));
 
-            if (!isStaff)
+            if (!hasReadCapability && !isStaff)
             {
                 if (User?.Identity?.IsAuthenticated != true
                     || !Guid.TryParse(userId, out var callerUserId))
