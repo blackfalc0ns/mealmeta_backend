@@ -90,7 +90,12 @@ public sealed class FamilyCheckoutServiceTests
         schedule.ResolveFirstDeliveryDate(Arg.Any<DateOnly>(), Arg.Any<bool>()).Returns(new DateOnly(2026, 9, 5));
         DateOnly resolvedStart = new(2026, 9, 5);
         string? startError = null;
-        schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError).ReturnsForAnyArgs(true);
+        schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError)
+            .ReturnsForAnyArgs(ci =>
+            {
+                ci[2] = new DateOnly(2026, 9, 5);
+                return true;
+            });
 
         var restaurantId = Guid.NewGuid();
         var menuVersionId = Guid.NewGuid();
@@ -291,7 +296,12 @@ public sealed class FamilyCheckoutServiceTests
         schedule.ResolveFirstDeliveryDate(Arg.Any<DateOnly>(), Arg.Any<bool>()).Returns(new DateOnly(2026, 9, 5));
         DateOnly resolvedStart = new(2026, 9, 5);
         string? startError = null;
-        schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError).ReturnsForAnyArgs(true);
+        schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError)
+            .ReturnsForAnyArgs(ci =>
+            {
+                ci[2] = new DateOnly(2026, 9, 5);
+                return true;
+            });
 
         var restaurantId = Guid.NewGuid();
         var menuVersionId = Guid.NewGuid();
@@ -475,7 +485,12 @@ public sealed class FamilyCheckoutServiceTests
         schedule.ResolveFirstDeliveryDate(Arg.Any<DateOnly>(), Arg.Any<bool>()).Returns(new DateOnly(2026, 9, 5));
         DateOnly resolvedStart = new(2026, 9, 5);
         string? startError = null;
-        schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError).ReturnsForAnyArgs(true);
+        schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError)
+            .ReturnsForAnyArgs(ci =>
+            {
+                ci[2] = new DateOnly(2026, 9, 5);
+                return true;
+            });
 
         var restaurantId = Guid.NewGuid();
         var menuVersionId = Guid.NewGuid();
@@ -959,7 +974,7 @@ public sealed class FamilyCheckoutServiceTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(new DateTime(2026, 8, 19, 12, 0, 0, DateTimeKind.Utc));
 
-        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        var schedule = CreateConfiguredSchedule();
         var startDate = new DateOnly(2026, 8, 19);
         var serviceDates = new List<DateOnly> { startDate, startDate.AddDays(1) };
         schedule.GetServiceDates(Arg.Any<DateOnly>(), Arg.Any<int>(), Arg.Any<bool>()).Returns(serviceDates);
@@ -1233,7 +1248,7 @@ public sealed class FamilyCheckoutServiceTests
         var clock = Substitute.For<IDateTimeProvider>();
         clock.UtcNow.Returns(new DateTime(2026, 8, 19, 12, 0, 0, DateTimeKind.Utc));
 
-        var schedule = Substitute.For<ISubscriptionScheduleService>();
+        var schedule = CreateConfiguredSchedule();
         var startDate = new DateOnly(2026, 8, 19);
         var serviceDates = new List<DateOnly> { startDate, startDate.AddDays(1) };
         schedule.GetServiceDates(Arg.Any<DateOnly>(), Arg.Any<int>(), Arg.Any<bool>()).Returns(serviceDates);
@@ -1587,7 +1602,11 @@ public sealed class FamilyCheckoutServiceTests
         DateOnly resolvedStart = new(2026, 9, 5);
         string? startError = null;
         schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError)
-            .ReturnsForAnyArgs(true);
+            .ReturnsForAnyArgs(ci =>
+            {
+                ci[2] = new DateOnly(2026, 9, 5);
+                return true;
+            });
         return schedule;
     }
 

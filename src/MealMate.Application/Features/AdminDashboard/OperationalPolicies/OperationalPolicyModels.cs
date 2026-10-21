@@ -1,4 +1,4 @@
-﻿namespace MealMate.Application.Features.AdminDashboard.OperationalPolicies;
+namespace MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 
 public enum CancellationFeeType
 {
@@ -43,8 +43,12 @@ public sealed record FreezePolicySettings(
     bool ExtendSubscriptionEnd = true,
     int MinGapDays = 0,
     int? MaxTotalDays = null,
-    bool Enabled = true
-);
+    bool Enabled = true,
+    int? FreezeDeadlineHours = null
+)
+{
+    public int EffectiveFreezeDeadlineHours => FreezeDeadlineHours ?? (LeadDaysNotice * 24);
+}
 
 public sealed record AutoSelectionPolicySettings(bool Enabled = true, int MinutesBeforeCutoff = 0);
 public sealed record RenewalPolicySettings(bool Enabled = true, int? AvailableDaysBeforeEnd = null);

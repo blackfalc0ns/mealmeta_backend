@@ -100,22 +100,24 @@ public sealed class RestaurantTierClassificationService : IRestaurantTierClassif
         var dailyPrices = assignments.Select(x => x.Amount / 26m).ToList();
         var mean = dailyPrices.Average();
         var variance = dailyPrices.Sum(value => (value - mean) * (value - mean)) / dailyPrices.Count;
-        var standardDeviation = (decimal)Math.Sqrt((double)variance);
-        var lowerBound = mean - (2m * standardDeviation);
-        var upperBound = mean + (2m * standardDeviation);
+        var standardDeviation = DecimalPricingMath.Sqrt(variance);
+        var lowerBound = mean - (0.5m * standardDeviation);
+        var upperBound = mean + (0.5m * standardDeviation);
+        var outlierLowerBound = mean - (2m * standardDeviation);
+        var outlierUpperBound = mean + (2m * standardDeviation);
 
         var resultAssignments = assignments
             .Select(x =>
             {
                 var daily = x.Amount / 26m;
-                var isOutlier = daily < lowerBound || daily > upperBound;
+                var isOutlier = daily < outlierLowerBound || daily > outlierUpperBound;
                 return new RestaurantTierAssignment(
                     x.RestaurantId,
                     SubscriptionPackagePricingCalculator.ResolveTier(daily, assignments.Count, mean, standardDeviation),
                     x.Amount,
                     daily,
                     isOutlier,
-                    isOutlier ? $"Daily reference price {daily:F3} KWD is outside 2-sigma bounds [{lowerBound:F3}, {upperBound:F3}]" : null);
+                    isOutlier ? $"Daily reference price {daily:F3} KWD is outside 2-sigma bounds [{outlierLowerBound:F3}, {outlierUpperBound:F3}]" : null);
             })
             .ToList();
 

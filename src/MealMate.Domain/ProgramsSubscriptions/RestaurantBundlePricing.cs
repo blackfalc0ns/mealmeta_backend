@@ -28,6 +28,8 @@ public sealed class RestaurantBundlePricing : AuditableEntity
 
     public Guid? ApprovedByUserId { get; set; }
 
+    public int RowVersion { get; set; }
+
     public string? ChangeRequestReason { get; set; }
 
     public Guid? PreviousPricingId { get; set; }

@@ -20,7 +20,9 @@ public sealed record PricingEngineRequest(
     decimal ContractedSupplyDailyPrice = 0m,
     IReadOnlyDictionary<int, decimal>? DurationRatesPct = null,
     int FridayDays = 0,
-    decimal FridayRatePct = 0m);
+    decimal FridayRatePct = 0m,
+    decimal CashWalletTenderKwd = 0m,
+    decimal? MinimumContributionKwd = null);
 
 public sealed record PricingEngineResult(
     decimal A_t,
@@ -37,12 +39,33 @@ public sealed record PricingEngineResult(
     decimal EstimatedPlatformMargin,
     decimal EstimatedPlatformMarginPct,
     bool IsProfitabilityAlertTriggered,
-    string CurrencyCode = "KWD");
+    string CurrencyCode = "KWD",
+    decimal ListPrice = 0m,
+    decimal CustomerNetPrice = 0m,
+    decimal ExternalCaptureAmount = 0m,
+    decimal ExpectedGatewayCost = 0m,
+    decimal CashWalletTenderApplied = 0m,
+    bool? ContributionBelowMinimum = null);
 
 public static class PricingEngine
 {
     public static PricingEngineResult Calculate(PricingEngineRequest request)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.CashWalletTenderKwd != 0m)
+            throw new NotSupportedException("Cash wallet tender requires an authorized settlement flow.");
+
+        var discountSources = new[]
+        {
+            request.CampaignDiscountKwd,
+            request.PromoCodeDiscountKwd,
+            request.WalletPromoCreditKwd,
+        };
+        if (discountSources.Any(x => x < 0m))
+            throw new ArgumentOutOfRangeException(nameof(request), "Discount amounts cannot be negative.");
+        if (discountSources.Count(x => x > 0m) > 1)
+            throw new ArgumentException("Only one campaign, promo code, or promotional wallet discount may be selected.", nameof(request));
+
         var d = Math.Max(6, request.DurationDays);
         var fridayDays = Math.Max(0, request.FridayDays);
         var pricedServiceDays = d + fridayDays;
@@ -68,7 +91,7 @@ public static class PricingEngine
         }
         else
         {
-            var fraction = (decimal)Math.Pow((double)(dLong - d) / (double)(dLong - dShort), (double)gamma);
+            var fraction = DecimalPricingMath.Pow((decimal)(dLong - d) / (dLong - dShort), gamma);
             rD = rMin + (rMax - rMin) * fraction;
         }
 
@@ -77,37 +100,29 @@ public static class PricingEngine
         var unroundedCore = request.MeanReferenceDailyPrice * d * (1m + rD)
             + request.MeanReferenceDailyPrice * fridayDays * (1m + fridayRate);
 
-        // 3. Discount ordering sequence
-        var campaignDiscount = Math.Min(unroundedCore, request.CampaignDiscountKwd);
-        var priceAfterCampaign = Math.Max(0m, unroundedCore - campaignDiscount);
-
-        var promoDiscount = Math.Min(priceAfterCampaign, request.PromoCodeDiscountKwd);
-        var priceAfterPromo = Math.Max(0m, priceAfterCampaign - promoDiscount);
-
-        var walletCredit = Math.Min(priceAfterPromo, request.WalletPromoCreditKwd);
-        var priceAfterDiscounts = Math.Max(0m, priceAfterPromo - walletCredit);
-
-        // 4. Gateway Cost Recovery
-        decimal grossWithGateway = 0m;
-        if (priceAfterDiscounts > 0m)
-        {
-            var feePct = Math.Clamp(request.GatewayFeePct, 0m, 0.50m);
-            grossWithGateway = (priceAfterDiscounts + request.GatewayFeeFixedKwd) / (1m - feePct);
-        }
-
-        // 5. Final Rounding (RoundUp to RoundingStepKwd)
+        // The list amount is established before a discount or a payment cost is evaluated.
         var step = request.RoundingStepKwd > 0m ? request.RoundingStepKwd : 0.250m;
-        var finalCustomerPrice = Math.Ceiling(grossWithGateway / step) * step;
+        var listPrice = unroundedCore <= 0m ? 0m : Math.Ceiling(unroundedCore / step) * step;
+        var selectedDiscount = discountSources.SingleOrDefault(x => x > 0m);
+        var appliedDiscount = Math.Min(listPrice, selectedDiscount);
+        var priceAfterDiscounts = Math.Max(0m, listPrice - appliedDiscount);
+        var campaignDiscount = request.CampaignDiscountKwd > 0m ? appliedDiscount : 0m;
+        var promoDiscount = request.PromoCodeDiscountKwd > 0m ? appliedDiscount : 0m;
+        var walletCredit = request.WalletPromoCreditKwd > 0m ? appliedDiscount : 0m;
 
-        var gatewayFeeAmount = grossWithGateway - priceAfterDiscounts;
+        // Gateway charge is an estimate of actual processing cost, never a customer-price recovery.
+        var externalCaptureAmount = priceAfterDiscounts;
+        var expectedGatewayCost = externalCaptureAmount > 0m
+            ? (externalCaptureAmount * Math.Clamp(request.GatewayFeePct, 0m, 0.50m)) + Math.Max(0m, request.GatewayFeeFixedKwd)
+            : 0m;
 
-        // 6. Platform margin calculation & profitability guardrail
+        // Contribution is an estimate; a policy threshold is optional and must be supplied by governance.
         var totalSupplyCost = request.ContractedSupplyDailyPrice * pricedServiceDays;
-        var estimatedPlatformMargin = finalCustomerPrice - totalSupplyCost - gatewayFeeAmount;
-        var estimatedPlatformMarginPct = finalCustomerPrice > 0m ? (estimatedPlatformMargin / finalCustomerPrice) : 0m;
-
-        // Guardrail alert triggers if estimated margin percentage < 5% (and total customer price > 0)
-        var isProfitabilityAlertTriggered = finalCustomerPrice > 0m && estimatedPlatformMarginPct < 0.05m;
+        var estimatedPlatformMargin = priceAfterDiscounts - totalSupplyCost - expectedGatewayCost;
+        var estimatedPlatformMarginPct = priceAfterDiscounts > 0m ? (estimatedPlatformMargin / priceAfterDiscounts) : 0m;
+        var contributionBelowMinimum = request.MinimumContributionKwd is decimal minimum
+            ? estimatedPlatformMargin < minimum
+            : (bool?)null;
 
         return new PricingEngineResult(
             A_t: request.MeanReferenceDailyPrice,
@@ -118,11 +133,17 @@ public static class PricingEngine
             PromoCodeDiscountApplied: Math.Round(promoDiscount, 3),
             WalletCreditApplied: Math.Round(walletCredit, 3),
             PriceAfterDiscounts: Math.Round(priceAfterDiscounts, 3),
-            GatewayCostRecoveryAmount: Math.Round(gatewayFeeAmount, 3),
-            FinalCustomerPrice: Math.Round(finalCustomerPrice, 3),
+            GatewayCostRecoveryAmount: 0m,
+            FinalCustomerPrice: Math.Round(priceAfterDiscounts, 3),
             TotalSupplyCost: Math.Round(totalSupplyCost, 3),
             EstimatedPlatformMargin: Math.Round(estimatedPlatformMargin, 3),
             EstimatedPlatformMarginPct: Math.Round(estimatedPlatformMarginPct, 6),
-            IsProfitabilityAlertTriggered: isProfitabilityAlertTriggered);
+            IsProfitabilityAlertTriggered: contributionBelowMinimum ?? false,
+            ListPrice: Math.Round(listPrice, 3),
+            CustomerNetPrice: Math.Round(priceAfterDiscounts, 3),
+            ExternalCaptureAmount: Math.Round(externalCaptureAmount, 3),
+            ExpectedGatewayCost: expectedGatewayCost,
+            CashWalletTenderApplied: 0m,
+            ContributionBelowMinimum: contributionBelowMinimum);
     }
 }

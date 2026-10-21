@@ -72,6 +72,19 @@ public static class PermissionCodes
     public const string SubscriptionsManage = "subscriptions.manage";
     public const string SubscriptionsPricing = "subscriptions.pricing";
 
+    // M15 Finance governance
+    public const string FinanceGovernanceView = "finance.governance.view";
+    public const string FinanceGovernanceManage = "finance.governance.manage";
+    public const string FinanceGovernanceApprove = "finance.governance.approve";
+    public const string FinancePricingView = "finance.pricing.view";
+    public const string FinancePricingManage = "finance.pricing.manage";
+    public const string FinancePricingApprove = "finance.pricing.approve";
+
+    public const string LedgerView = "ledger.view";
+    public const string LedgerManage = "ledger.manage";
+    public const string LedgerApprove = "ledger.approve";
+    public const string LedgerPeriodsManage = "ledger.periods.manage";
+
     // M04 Restaurant Meals & Ingredients
     public const string RestaurantMealsView = "restaurant.meals.view";
     public const string RestaurantMealsManage = "restaurant.meals.manage";
@@ -131,6 +144,13 @@ public static class PermissionCodes
         (SubscriptionsView, "View subscriptions catalog", "عرض كتالوج الاشتراكات", ModulePrograms),
         (SubscriptionsManage, "Manage subscriptions catalog", "إدارة كتالوج الاشتراكات", ModulePrograms),
         (SubscriptionsPricing, "Manage subscription pricing", "إدارة تسعير الاشتراكات", ModulePrograms),
+        (FinanceGovernanceView, "View finance governance", "عرض حوكمة الشؤون المالية", "M15"),
+        (FinanceGovernanceManage, "Manage finance governance drafts", "إدارة مسودات الحوكمة المالية", "M15"),
+        (FinanceGovernanceApprove, "Approve finance governance rules", "اعتماد قواعد الحوكمة المالية", "M15"),
+        (LedgerView, "View governed ledger", "عرض دفتر الأستاذ المحكوم", "M15"),
+        (LedgerManage, "Manage chart, periods, and source drafts", "إدارة الحسابات والفترات ومسودات المستندات", "M15"),
+        (LedgerApprove, "Approve ledger source documents", "اعتماد مستندات دفتر الأستاذ", "M15"),
+        (LedgerPeriodsManage, "Manage accounting period lifecycle", "إدارة دورة حياة الفترات المحاسبية", "M15"),
         (RestaurantMealsView, "View restaurant menus & meals", "عرض قوائم ووجبات المطاعم", Module),
         (RestaurantMealsManage, "Manage restaurant menus & meals", "إدارة قوائم ووجبات المطاعم", Module),
         (RestaurantMealsApprove, "Approve restaurant meals", "اعتماد وجبات المطاعم", Module),

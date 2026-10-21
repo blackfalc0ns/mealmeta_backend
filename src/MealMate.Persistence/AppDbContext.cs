@@ -15,6 +15,7 @@ using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.Influencers;
 using MealMate.Domain.Offers;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.RestaurantFinance;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Domain.VoiceCalls;
@@ -145,6 +146,11 @@ public sealed class AppDbContext
     public DbSet<ClassificationRun> ClassificationRuns => Set<ClassificationRun>();
     public DbSet<RestaurantClassification> RestaurantClassifications => Set<RestaurantClassification>();
     public DbSet<PricingRuleVersion> PricingRuleVersions => Set<PricingRuleVersion>();
+    public DbSet<PricingQuote> PricingQuotes => Set<PricingQuote>();
+    public DbSet<PricingQuoteConsumption> PricingQuoteConsumptions => Set<PricingQuoteConsumption>();
+    public DbSet<AcquisitionBudget> AcquisitionBudgets => Set<AcquisitionBudget>();
+    public DbSet<AcquisitionBudgetReservation> AcquisitionBudgetReservations => Set<AcquisitionBudgetReservation>();
+    public DbSet<PricingRiskException> PricingRiskExceptions => Set<PricingRiskException>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<SubscriptionSnapshot> SubscriptionSnapshots => Set<SubscriptionSnapshot>();
     public DbSet<SubscriptionOperation> SubscriptionOperations => Set<SubscriptionOperation>();
@@ -202,6 +208,10 @@ public sealed class AppDbContext
     public DbSet<IngredientFoodPreference> IngredientFoodPreferences => Set<IngredientFoodPreference>();
     public DbSet<MealFoodPreference> MealFoodPreferences => Set<MealFoodPreference>();
     public DbSet<CapacityHold> CapacityHolds => Set<CapacityHold>();
+    public DbSet<RestaurantCapacityPolicy> RestaurantCapacityPolicies => Set<RestaurantCapacityPolicy>();
+    public DbSet<PlatformCapacityPolicy> PlatformCapacityPolicies => Set<PlatformCapacityPolicy>();
+    public DbSet<ServiceCapacityCommitment> ServiceCapacityCommitments => Set<ServiceCapacityCommitment>();
+    public DbSet<CapacityReductionRequest> CapacityReductionRequests => Set<CapacityReductionRequest>();
     public DbSet<RestaurantServiceRegion> RestaurantServiceRegions => Set<RestaurantServiceRegion>();
     public DbSet<DailyCapacity> DailyCapacities => Set<DailyCapacity>();
     public DbSet<BusyStatus> BusyStatuses => Set<BusyStatus>();
@@ -265,6 +275,11 @@ public sealed class AppDbContext
 
     // â”€â”€ M07 Central Accounting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<ChartOfAccount> ChartOfAccounts => Set<ChartOfAccount>();
+    public DbSet<AccountingPeriod> AccountingPeriods => Set<AccountingPeriod>();
+    public DbSet<PostingIdentity> PostingIdentities => Set<PostingIdentity>();
+    public DbSet<JournalSourceDocument> JournalSourceDocuments => Set<JournalSourceDocument>();
+    public DbSet<JournalSourceLink> JournalSourceLinks => Set<JournalSourceLink>();
+    public DbSet<JournalReversal> JournalReversals => Set<JournalReversal>();
     public DbSet<FinancialSetting> FinancialSettings => Set<FinancialSetting>();
     public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
     public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>();
@@ -281,12 +296,21 @@ public sealed class AppDbContext
     public DbSet<FinancialSettlement> FinancialSettlements => Set<FinancialSettlement>();
     public DbSet<FinancialAuditTrail> FinancialAuditTrails => Set<FinancialAuditTrail>();
 
+    public DbSet<LegalEntity> LegalEntities => Set<LegalEntity>();
+
+    public DbSet<ReportingProfile> ReportingProfiles => Set<ReportingProfile>();
+
+    public DbSet<RegulatoryRequirement> RegulatoryRequirements => Set<RegulatoryRequirement>();
+
     // â”€â”€ M08 Customer Finance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<CustomerCashWallet> CustomerCashWallets => Set<CustomerCashWallet>();
     public DbSet<CustomerPromotionalWallet> CustomerPromotionalWallets => Set<CustomerPromotionalWallet>();
     public DbSet<WalletTransaction> WalletTransactions => Set<WalletTransaction>();
     public DbSet<SubscriptionPayment> SubscriptionPayments => Set<SubscriptionPayment>();
     public DbSet<SubscriptionCancellation> SubscriptionCancellations => Set<SubscriptionCancellation>();
+    public DbSet<CancellationSettlementDecision> CancellationSettlementDecisions => Set<CancellationSettlementDecision>();
+    public DbSet<RefundSourceAllocation> RefundSourceAllocations => Set<RefundSourceAllocation>();
+    public DbSet<CarriedOverServiceObligation> CarriedOverServiceObligations => Set<CarriedOverServiceObligation>();
     public DbSet<RefundCalculation> RefundCalculations => Set<RefundCalculation>();
     public DbSet<RefundOperation> RefundOperations => Set<RefundOperation>();
     public DbSet<CancellationFeeRecord> CancellationFeeRecords => Set<CancellationFeeRecord>();
@@ -403,6 +427,9 @@ public sealed class AppDbContext
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        ChangeTracker.DetectChanges();
+        FinanceLedgerPersistenceGuard.Validate(this);
+        ValidateGovernedRuleVersionImmutability();
         var stagedOutbox = StageCustomerDeliveryInvalidations();
 
         try
@@ -421,6 +448,9 @@ public sealed class AppDbContext
 
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        ChangeTracker.DetectChanges();
+        FinanceLedgerPersistenceGuard.Validate(this);
+        ValidateGovernedRuleVersionImmutability();
         var stagedOutbox = StageCustomerDeliveryInvalidations();
         var domainEvents = CollectDomainEvents();
 
@@ -444,6 +474,77 @@ public sealed class AppDbContext
 
     private IReadOnlyList<OutboxMessage> StageCustomerDeliveryInvalidations()
         => CustomerDeliveryChangeOutboxCapture.Stage(this, _dateTimeProvider?.UtcNow ?? DateTime.UtcNow);
+
+    private void ValidateGovernedRuleVersionImmutability()
+    {
+        var immutableProperties = new[]
+        {
+            nameof(RuleVersion.RuleKey), nameof(RuleVersion.VersionCode), nameof(RuleVersion.ScopeType),
+            nameof(RuleVersion.ScopeEntityId), nameof(RuleVersion.NormalizedScopeId), nameof(RuleVersion.LegalEntityId),
+            nameof(RuleVersion.EffectiveFromUtc), nameof(RuleVersion.EffectiveToUtc), nameof(RuleVersion.SchemaVersion),
+            nameof(RuleVersion.PreviousVersionId),
+            nameof(RuleVersion.PayloadJson), nameof(RuleVersion.PayloadHash), nameof(RuleVersion.SubmittedPayloadHash),
+            nameof(RuleVersion.SubmittedContentHash), nameof(RuleVersion.SubmittedAtUtc), nameof(RuleVersion.ApprovedAtUtc),
+            nameof(RuleVersion.RejectedAtUtc), nameof(RuleVersion.CheckerUserId), nameof(RuleVersion.OwnerUserId),
+            nameof(RuleVersion.CreatedByUserId), nameof(RuleVersion.Reason),
+        };
+
+        foreach (var entry in ChangeTracker.Entries<RuleVersion>())
+        {
+            if (entry.Property(x => x.LegalEntityId).OriginalValue == Guid.Empty)
+            {
+                continue;
+            }
+
+            var originalStatus = entry.Property(x => x.ApprovalStatus).OriginalValue;
+            if (originalStatus is not (MealMate.Domain.Enums.RuleApprovalStatus.Approved
+                or MealMate.Domain.Enums.RuleApprovalStatus.Active
+                or MealMate.Domain.Enums.RuleApprovalStatus.Superseded))
+            {
+                continue;
+            }
+
+            if (entry.State == EntityState.Deleted
+                || entry.State == EntityState.Modified && entry.Property(x => x.IsDeleted).CurrentValue)
+            {
+                throw new InvalidOperationException($"Governed RuleVersion {entry.Entity.Id} cannot be deleted or archived after approval.");
+            }
+
+            if (entry.State != EntityState.Modified)
+            {
+                continue;
+            }
+
+            var currentStatus = entry.Property(x => x.ApprovalStatus).CurrentValue;
+            var statusIsForward = currentStatus == originalStatus
+                || originalStatus == MealMate.Domain.Enums.RuleApprovalStatus.Approved && currentStatus == MealMate.Domain.Enums.RuleApprovalStatus.Active
+                || originalStatus == MealMate.Domain.Enums.RuleApprovalStatus.Active && currentStatus == MealMate.Domain.Enums.RuleApprovalStatus.Superseded;
+            if (!statusIsForward)
+            {
+                throw new InvalidOperationException($"Governed RuleVersion {entry.Entity.Id} cannot move from {originalStatus} to {currentStatus}.");
+            }
+
+            var changedProperty = immutableProperties.FirstOrDefault(name =>
+            {
+                var property = entry.Property(name);
+                return property.IsModified && !Equals(property.OriginalValue, property.CurrentValue);
+            });
+            if (changedProperty is not null)
+            {
+                throw new InvalidOperationException($"Governed RuleVersion {entry.Entity.Id} is immutable after approval; field '{changedProperty}' cannot change.");
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<FinancialAuditTrail>())
+        {
+            if (entry.State is not (EntityState.Modified or EntityState.Deleted)) continue;
+            var action = entry.Property(x => x.Action).OriginalValue;
+            if (action.StartsWith("FinancialRule", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Financial rule audit entries are append-only.");
+            }
+        }
+    }
 
     private List<IDomainEvent> CollectDomainEvents()
         => ChangeTracker

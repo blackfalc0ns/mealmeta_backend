@@ -25,6 +25,15 @@ public static class DependencyInjection
 
         services.AddValidatorsFromAssembly(AssemblyReference, includeInternalTypes: true);
         services.AddScoped<Features.CustomerNotifications.ICustomerNotificationWriter, Features.CustomerNotifications.CustomerNotificationWriter>();
+        services.AddScoped<Features.Finance.Ledger.LedgerAccess>();
+        services.AddScoped<Features.Finance.Ledger.IJournalSourceService, Features.Finance.Ledger.JournalSourceService>();
+        services.AddScoped<Features.Finance.Ledger.JournalReversalService>();
+        services.AddScoped<Features.Finance.Ledger.PostingSourceFactory>();
+        services.AddScoped<Features.Finance.Ledger.IPostingService, Features.Finance.Ledger.PostingService>();
+        services.AddScoped<Features.Finance.Ledger.ILedgerEventPostingProcessor>(sp => (Features.Finance.Ledger.ILedgerEventPostingProcessor)sp.GetRequiredService<Features.Finance.Ledger.IPostingService>());
+        services.AddScoped<Features.Finance.Ledger.IPeriodLifecycleService, Features.Finance.Ledger.PeriodLifecycleService>();
+        services.AddScoped<Features.Finance.Ledger.ITrialBalanceQuery, Features.Finance.Ledger.TrialBalanceQuery>();
+        services.AddScoped<Features.Finance.Ledger.LedgerQueries>();
         services.AddScoped<Features.VoiceCalls.Abstractions.IVoiceCallAuthorizationService, Features.VoiceCalls.Services.VoiceCallAuthorizationService>();
         services.AddScoped<Features.VoiceCalls.Abstractions.IDeliveryContactEligibilityService, Features.VoiceCalls.Services.DeliveryContactEligibilityService>();
         services.AddScoped<Features.VoiceCalls.Abstractions.IVoiceCallDeviceSessionService, Features.VoiceCalls.Services.VoiceCallDeviceSessionService>();
@@ -149,6 +158,15 @@ public static class DependencyInjection
 
         // Customer Finance Services
         services.AddScoped<Features.CustomerFinance.IWalletSpendingService, Features.CustomerFinance.WalletSpendingService>();
+
+        // Finance Governance
+        services.AddScoped<Features.Finance.Governance.IGovernedFinancialRuleService, Features.Finance.Governance.GovernedFinancialRuleService>();
+        services.AddScoped<Features.Finance.Governance.IFinancialRuleResolver, Features.Finance.Governance.FinancialRuleResolver>();
+        services.AddScoped<Features.Finance.Governance.IFinanceGovernanceQueries, Features.Finance.Governance.FinanceGovernanceQueries>();
+        services.AddScoped<Features.Finance.Governance.IReportingReadinessEvaluator, Features.Finance.Governance.ReportingReadinessEvaluator>();
+
+        // Governed subscription pricing and immutable quote workflows.
+        services.AddScoped<Features.Finance.Governance.FinancialRulePayloadValidator>();
 
         return services;
     }

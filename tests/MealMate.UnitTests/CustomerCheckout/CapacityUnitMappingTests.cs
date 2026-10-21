@@ -295,6 +295,14 @@ public sealed class CapacityUnitMappingTests
 
         var schedule = Substitute.For<ISubscriptionScheduleService>();
         schedule.GetServiceDates(Arg.Any<DateOnly>(), Arg.Any<int>(), Arg.Any<bool>()).Returns(serviceDates);
+        DateOnly resolvedStart = ServiceDate;
+        string? startError = null;
+        schedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError)
+            .ReturnsForAnyArgs(ci =>
+            {
+                ci[2] = ServiceDate;
+                return true;
+            });
 
         var menuVersionId = Guid.NewGuid();
         var eligibility = Substitute.For<IRestaurantEligibilityService>();

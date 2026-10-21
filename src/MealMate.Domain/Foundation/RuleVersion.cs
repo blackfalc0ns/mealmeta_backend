@@ -33,4 +33,31 @@ public sealed class RuleVersion : AuditableEntity
 
     /// <summary>JSON payload of rule parameters (rates, limits, curve coeffs, etc.).</summary>
     public string PayloadJson { get; set; } = "{}";
+
+    /// <summary>Legal entity this rule governs (Guid.Empty for pre-governance legacy rows).</summary>
+    public Guid LegalEntityId { get; set; } = Guid.Empty;
+
+    /// <summary>Server-normalized scope identity ("global" or the N-format scope entity id).</summary>
+    public string NormalizedScopeId { get; set; } = RuleVersionScope.GlobalScopeId;
+
+    /// <summary>Payload schema version interpreted by typed readers.</summary>
+    public int SchemaVersion { get; set; } = 1;
+
+    /// <summary>SHA-256 hex hash of PayloadJson (pinned when the rule is submitted).</summary>
+    public string? PayloadHash { get; set; }
+
+    public DateTime? SubmittedAtUtc { get; set; }
+
+    public string? SubmittedPayloadHash { get; set; }
+
+    /// <summary>Fingerprint of every governed field pinned when the version is submitted.</summary>
+    public string? SubmittedContentHash { get; set; }
+
+    public DateTime? ApprovedAtUtc { get; set; }
+
+    public DateTime? RejectedAtUtc { get; set; }
+
+    public Guid? CheckerUserId { get; set; }
+
+    public int RowVersion { get; set; }
 }

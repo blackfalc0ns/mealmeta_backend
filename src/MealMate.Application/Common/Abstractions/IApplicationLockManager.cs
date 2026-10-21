@@ -1,3 +1,5 @@
+using MealMate.Domain.Enums;
+
 namespace MealMate.Application.Common.Abstractions;
 
 /// <summary>
@@ -41,4 +43,13 @@ public interface IApplicationLockManager
     Task LockDriverAsync(Guid driverProfileId, CancellationToken cancellationToken = default);
     Task LockSupportHandoverKeyAsync(Guid userId, string idempotencyKey, CancellationToken cancellationToken = default);
     Task LockSupportComplaintAsync(Guid complaintId, CancellationToken cancellationToken = default);
+    Task LockFinancialRuleScopeAsync(Guid legalEntityId, string ruleKey, RuleScopeType scopeType, Guid? scopeEntityId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    Task LockLedgerPeriodCatalogAsync(Guid legalEntityId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task LockLedgerPeriodAsync(Guid periodId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task LockLedgerPostingIdentityAsync(Guid legalEntityId, string sourceType, Guid sourceId, Guid serviceDayKey,
+        int effect, Guid adjustmentKey, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task LockRestaurantPricingBundleAsync(Guid bundleId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task LockPricingQuoteAsync(Guid quoteId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task LockAcquisitionBudgetAsync(Guid budgetId, CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

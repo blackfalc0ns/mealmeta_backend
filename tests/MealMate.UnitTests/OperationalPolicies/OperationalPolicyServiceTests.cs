@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.AdminDashboard.OperationalPolicies;
 using MealMate.Domain.AdminDashboard;
@@ -248,4 +248,46 @@ public class OperationalPolicyServiceTests
         refreshed.Cutoff.CutoffLeadHours.Should().Be(48);
         refreshed.Cancellation.FeeValue.Should().Be(5.0m);
     }
+
+    [Theory]
+    [InlineData(11, "Freeze deadline hours must be between 12 and 168.")]
+    [InlineData(169, "Freeze deadline hours must be between 12 and 168.")]
+    public void Validate_FreezeDeadlineHours_MustBeBetween12And168(int hours, string expectedError)
+    {
+        var settings = new OperationalPolicySettings(
+            Cutoff: new CutoffPolicySettings(CutoffLeadHours: 10),
+            Cancellation: new CancellationPolicySettings(),
+            Freeze: new FreezePolicySettings(FreezeDeadlineHours: hours)
+        );
+
+        var error = OperationalPolicyRules.Validate(settings);
+        error.Should().Be(expectedError);
+    }
+
+    [Fact]
+    public void Validate_FreezeDeadlineHours_CannotBeCloserThanSelectionCutoff()
+    {
+        // Spec Section 14 / Decision Log:
+        // Freeze deadline 12h with cutoff 24h is strictly rejected:
+        // "مثال مرفوض: تجميد حتى 12 ساعة قبل التوصيل مع إغلاق اختيارات قبله بـ24 ساعة."
+        var invalidSettings = new OperationalPolicySettings(
+            Cutoff: new CutoffPolicySettings(CutoffLeadHours: 24),
+            Cancellation: new CancellationPolicySettings(),
+            Freeze: new FreezePolicySettings(FreezeDeadlineHours: 12)
+        );
+
+        var error = OperationalPolicyRules.Validate(invalidSettings);
+        error.Should().Be("Freeze deadline notice must not be less than the selection lock cutoff.");
+
+        // Valid setting: 48h freeze deadline with 24h cutoff
+        var validSettings = new OperationalPolicySettings(
+            Cutoff: new CutoffPolicySettings(CutoffLeadHours: 24),
+            Cancellation: new CancellationPolicySettings(),
+            Freeze: new FreezePolicySettings(FreezeDeadlineHours: 48)
+        );
+
+        var validError = OperationalPolicyRules.Validate(validSettings);
+        validError.Should().BeNull();
+    }
 }
+

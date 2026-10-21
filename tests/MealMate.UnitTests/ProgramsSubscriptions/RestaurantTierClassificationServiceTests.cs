@@ -17,10 +17,10 @@ public class RestaurantTierClassificationServiceTests
     private static readonly DateTime Now = new(2026, 8, 14, 12, 0, 0, DateTimeKind.Utc);
 
     [Theory]
-    [InlineData(104.000, RestaurantTier.Basic)]    // 4.000 KWD / day
-    [InlineData(143.000, RestaurantTier.Platinum)] // 5.500 KWD / day
-    [InlineData(169.000, RestaurantTier.Elite)]    // 6.500 KWD / day
-    public async Task Single_restaurant_uses_absolute_thresholds(decimal reference26, RestaurantTier expected)
+    [InlineData(104.000, RestaurantTier.Platinum)] // one-item cohort is all Plus
+    [InlineData(143.000, RestaurantTier.Platinum)]
+    [InlineData(169.000, RestaurantTier.Platinum)]
+    public async Task Single_restaurant_cohort_is_plus_without_invented_thresholds(decimal reference26, RestaurantTier expected)
     {
         await using var db = CreateDb();
         var programId = Guid.NewGuid();
@@ -78,7 +78,7 @@ public class RestaurantTierClassificationServiceTests
         var allResult = await service.ResolveAsync(programId, bundleId, eligibleOnly: false, CancellationToken.None);
 
         eligibleResult.Assignments.Should().ContainSingle().Which.RestaurantId.Should().Be(eligible);
-        eligibleResult.Assignments[0].Tier.Should().Be(RestaurantTier.Basic);
+        eligibleResult.Assignments[0].Tier.Should().Be(RestaurantTier.Platinum);
         allResult.Assignments.Should().HaveCount(4);
     }
 
@@ -113,7 +113,7 @@ public class RestaurantTierClassificationServiceTests
 
         var assignment = result.Assignments.Should().ContainSingle().Subject;
         assignment.ReferencePrice26.Should().Be(104.000m);
-        assignment.Tier.Should().Be(RestaurantTier.Basic);
+        assignment.Tier.Should().Be(RestaurantTier.Platinum);
     }
 
     private static RestaurantTierClassificationService CreateService(AppDbContext db)

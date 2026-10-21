@@ -1542,6 +1542,95 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("SubscriptionFreezes", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.AccountingPeriod", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("CloseCreditTotal")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("CloseDebitTotal")
+                        .HasColumnType("numeric");
+
+                    b.Property<long?>("ClosePostedJournalCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CloseReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<long>("CloseVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("CloseWatermarkUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("EndDateExclusive")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("LegalEntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("PendingCloseAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PendingCloseByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PendingCloseReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegalEntityId", "StartDate", "EndDateExclusive")
+                        .IsUnique();
+
+                    b.HasIndex("LegalEntityId", "State", "StartDate");
+
+                    b.ToTable("AccountingPeriods", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingPeriods_CloseTotals", "(\"CloseDebitTotal\" IS NULL AND \"CloseCreditTotal\" IS NULL) OR (\"CloseDebitTotal\" >= 0 AND \"CloseDebitTotal\" = \"CloseCreditTotal\")");
+
+                            t.HasCheckConstraint("CK_AccountingPeriods_DateWindow", "\"EndDateExclusive\" > \"StartDate\"");
+                        });
+                });
+
             modelBuilder.Entity("MealMate.Domain.CentralAccounting.ChartOfAccount", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1568,11 +1657,23 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("DeletedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateOnly?>("EffectiveFrom")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("EffectiveToExclusive")
+                        .HasColumnType("date");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPostable")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("LegalEntityId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime?>("ModifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -1590,21 +1691,47 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<int?>("NormalBalance")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("ParentId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("ReportingLineCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("RequiresParty")
+                        .HasColumnType("boolean");
 
                     b.HasKey("Id");
 
                     b.HasIndex("AccountType");
 
                     b.HasIndex("Code")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("IX_ChartOfAccounts_LegacyCode")
+                        .HasFilter("\"LegalEntityId\" IS NULL");
 
                     b.HasIndex("IsActive");
 
                     b.HasIndex("ParentId");
 
-                    b.ToTable("ChartOfAccounts", (string)null);
+                    b.HasIndex("LegalEntityId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ChartOfAccounts_LegalEntity_Code")
+                        .HasFilter("\"LegalEntityId\" IS NOT NULL");
+
+                    b.HasIndex("LegalEntityId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ChartOfAccounts_Entity_Id");
+
+                    b.ToTable("ChartOfAccounts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ChartOfAccounts_EffectiveWindow", "\"EffectiveToExclusive\" IS NULL OR \"EffectiveFrom\" IS NULL OR \"EffectiveToExclusive\" > \"EffectiveFrom\"");
+
+                            t.HasCheckConstraint("CK_ChartOfAccounts_GovernedNormalBalance", "\"LegalEntityId\" IS NULL OR \"NormalBalance\" IS NOT NULL");
+                        });
                 });
 
             modelBuilder.Entity("MealMate.Domain.CentralAccounting.DailyRevenueRecognition", b =>
@@ -1887,9 +2014,19 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("AccountingPeriodId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly?>("BusinessDate")
+                        .HasColumnType("date");
+
                     b.Property<string>("CorrelationId")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
 
                     b.Property<string>("Description")
                         .IsRequired()
@@ -1901,7 +2038,17 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<Guid?>("LegalEntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PayloadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime?>("PostedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("SourceOccurredAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("SourceReference")
@@ -1913,10 +2060,14 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AccountingPeriodId");
+
                     b.HasIndex("CorrelationId");
 
                     b.HasIndex("EntryNumber")
                         .IsUnique();
+
+                    b.HasIndex("LegalEntityId");
 
                     b.HasIndex("PostedAtUtc");
 
@@ -1924,7 +2075,16 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("JournalEntries", (string)null);
+                    b.HasIndex("LegalEntityId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("UX_JournalEntries_Entity_Id");
+
+                    b.HasIndex("LegalEntityId", "AccountingPeriodId", "BusinessDate", "Status");
+
+                    b.ToTable("JournalEntries", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_JournalEntries_GovernedFields", "\"LegalEntityId\" IS NULL OR (\"AccountingPeriodId\" IS NOT NULL AND \"BusinessDate\" IS NOT NULL AND \"CurrencyCode\" = 'KWD' AND \"PayloadHash\" IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("MealMate.Domain.CentralAccounting.JournalEntryLine", b =>
@@ -1936,12 +2096,25 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("AllocationId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("LegalEntityId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Memo")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<Guid?>("PartyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PartyType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
 
@@ -1949,7 +2122,278 @@ namespace MealMate.Persistence.Migrations
 
                     b.HasIndex("JournalEntryId");
 
-                    b.ToTable("JournalEntryLines", (string)null);
+                    b.HasIndex("LegalEntityId");
+
+                    b.HasIndex("LegalEntityId", "Id")
+                        .IsUnique()
+                        .HasDatabaseName("UX_JournalEntryLines_Entity_Id");
+
+                    b.ToTable("JournalEntryLines", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_JournalEntryLines_GovernedAmount", "\"LegalEntityId\" IS NULL OR ((\"Debit_Amount\" > 0 AND \"Credit_Amount\" IS NULL) OR (\"Credit_Amount\" > 0 AND \"Debit_Amount\" IS NULL))");
+                        });
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.JournalReversal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EvidenceReference")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("LegalEntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("OriginalBusinessDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("OriginalJournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateOnly>("ReversalBusinessDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("ReversalJournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SourceDocumentId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegalEntityId");
+
+                    b.HasIndex("OriginalJournalEntryId")
+                        .IsUnique();
+
+                    b.HasIndex("ReversalJournalEntryId")
+                        .IsUnique();
+
+                    b.HasIndex("SourceDocumentId")
+                        .IsUnique();
+
+                    b.ToTable("JournalReversals", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.JournalSourceDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("BusinessDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("ContentFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ContentJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<string>("DocumentNumber")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("EvidenceReference")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("LegalEntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("OriginalJournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PostedJournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("RejectedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RejectedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<long>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SubmittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("SubmittedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SubmittedFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentNumber")
+                        .IsUnique();
+
+                    b.HasIndex("OriginalJournalEntryId");
+
+                    b.HasIndex("PostedJournalEntryId")
+                        .IsUnique()
+                        .HasFilter("\"PostedJournalEntryId\" IS NOT NULL");
+
+                    b.HasIndex("LegalEntityId", "Status", "BusinessDate");
+
+                    b.ToTable("JournalSourceDocuments", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_JournalSourceDocuments_Currency", "\"CurrencyCode\" = 'KWD'");
+
+                            t.HasCheckConstraint("CK_JournalSourceDocuments_Fingerprints", "length(\"ContentFingerprint\") = 64 AND (\"SubmittedFingerprint\" IS NULL OR length(\"SubmittedFingerprint\") = 64)");
+                        });
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.JournalSourceLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("LegalEntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("LinkedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SourceDocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JournalEntryId")
+                        .IsUnique();
+
+                    b.HasIndex("LegalEntityId");
+
+                    b.HasIndex("SourceDocumentId")
+                        .IsUnique();
+
+                    b.ToTable("JournalSourceLinks", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.LegalEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BusinessTimezone")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LegalNameAr")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("LegalNameEn")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RegistrationNo")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RegistrationNo")
+                        .IsUnique();
+
+                    b.ToTable("LegalEntities", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.CentralAccounting.OperatingExpense", b =>
@@ -2069,6 +2513,189 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("Weight");
 
                     b.ToTable("PaymentGatewayConfigs", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.PostingIdentity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AdjustmentKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EconomicHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Effect")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("JournalEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("LegalEntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ServiceDayKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JournalEntryId")
+                        .IsUnique();
+
+                    b.HasIndex("LegalEntityId", "SourceType", "SourceId", "ServiceDayKey", "Effect", "AdjustmentKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PostingIdentities_EconomicKey");
+
+                    b.ToTable("PostingIdentities", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PostingIdentities_Hash", "length(\"EconomicHash\") = 64");
+                        });
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.RegulatoryRequirement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Authority")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("CapturedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("EffectiveFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EffectiveToUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EvidenceHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RequirementCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("SourceUrl")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid?>("VerifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EffectiveFromUtc");
+
+                    b.HasIndex("Authority", "RequirementCode")
+                        .IsUnique();
+
+                    b.ToTable("RegulatoryRequirements", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.ReportingProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Applicability")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EntryPointId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("LegalEntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PackageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReportType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ValidatorProfile")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegalEntityId", "Code", "ReportType")
+                        .IsUnique();
+
+                    b.ToTable("ReportingProfiles", (string)null);
                 });
 
             modelBuilder.Entity("MealMate.Domain.CentralAccounting.RestaurantPayableLedger", b =>
@@ -3410,10 +4037,19 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("EventId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("FinancePayloadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime>("ProcessedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("ResultJournalEntryId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("ResultJournalEntryId");
 
                     b.HasIndex("ConsumerName", "EventId")
                         .IsUnique();
@@ -4236,6 +4872,135 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("CancellationFeeRecords", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.CustomerFinance.CancellationSettlementDecision", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("CancelFeeApplied")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("CancelFeeCalculated")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime>("ConfirmedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ConfirmedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("ExecutedRepriceShare")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("FinalDaySetHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FinancialState")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsZeroRefund")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("JournalRef")
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("ListUnused")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("LockedRepriceShare")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("NetUnused")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("OperationId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("OtherFees")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid>("QuoteId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("RefundDue")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("RepriceApplied")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("RepriceCalculated")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("RepriceUnapplied")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("SourceAllocationsJson")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("SubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("CancellationSettlementDecisions");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CustomerFinance.CarriedOverServiceObligation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BeneficiaryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ExecutedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("JournalRef")
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("LiabilityAmount")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid>("OriginalDayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("OriginalServiceDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Reason")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly?>("TargetDate")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("CarriedOverServiceObligations");
+                });
+
             modelBuilder.Entity("MealMate.Domain.CustomerFinance.CustomerBankDetails", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4548,6 +5313,54 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("PaymentProvider", "PaymentId");
 
                     b.ToTable("RefundOperations", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CustomerFinance.RefundSourceAllocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric");
+
+                    b.Property<long>("ConcurrencyVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("JournalRef")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("OriginalSourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProviderRef")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RefundOperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RestoredExpiryUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("SettledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("SourceType")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("RefundSourceAllocations");
                 });
 
             modelBuilder.Entity("MealMate.Domain.CustomerFinance.SubscriptionCancellation", b =>
@@ -6728,6 +7541,12 @@ namespace MealMate.Persistence.Migrations
                     b.Property<int>("ApprovalStatus")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CheckerUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -6749,14 +7568,26 @@ namespace MealMate.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<Guid>("LegalEntityId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("ModifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("ModifiedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("NormalizedScopeId")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.Property<Guid?>("OwnerUserId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("PayloadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("PayloadJson")
                         .IsRequired()
@@ -6769,10 +7600,20 @@ namespace MealMate.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<DateTime?>("RejectedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
                     b.Property<string>("RuleKey")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("integer");
 
                     b.Property<Guid?>("ScopeEntityId")
                         .HasColumnType("uuid");
@@ -6780,12 +7621,25 @@ namespace MealMate.Persistence.Migrations
                     b.Property<int>("ScopeType")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("SubmittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SubmittedContentHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SubmittedPayloadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("VersionCode")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("LegalEntityId");
 
                     b.HasIndex("PreviousVersionId");
 
@@ -6795,6 +7649,8 @@ namespace MealMate.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("RuleKey", "ApprovalStatus", "EffectiveFromUtc");
+
+                    b.HasIndex("RuleKey", "ScopeType", "NormalizedScopeId");
 
                     b.ToTable("RuleVersions", (string)null);
                 });
@@ -10230,8 +11086,17 @@ namespace MealMate.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AlgorithmVersion")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
                     b.Property<Guid>("BundleId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("CohortHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("ConfidenceLevel")
                         .IsRequired()
@@ -10250,16 +11115,19 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("DeletedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("InputsJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
                     b.Property<decimal>("LowerBound")
-                        .HasPrecision(18, 3)
-                        .HasColumnType("numeric(18,3)");
+                        .HasPrecision(27, 15)
+                        .HasColumnType("numeric(27,15)");
 
                     b.Property<decimal>("MeanReferenceDaily")
-                        .HasPrecision(18, 3)
-                        .HasColumnType("numeric(18,3)");
+                        .HasPrecision(27, 15)
+                        .HasColumnType("numeric(27,15)");
 
                     b.Property<DateTime?>("ModifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -10274,6 +11142,11 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid>("ProgramId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("QuartileMethod")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
                     b.Property<int>("RestaurantCount")
                         .HasColumnType("integer");
 
@@ -10284,12 +11157,12 @@ namespace MealMate.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<decimal>("SdReferenceDaily")
-                        .HasPrecision(18, 3)
-                        .HasColumnType("numeric(18,3)");
+                        .HasPrecision(27, 15)
+                        .HasColumnType("numeric(27,15)");
 
                     b.Property<decimal>("UpperBound")
-                        .HasPrecision(18, 3)
-                        .HasColumnType("numeric(18,3)");
+                        .HasPrecision(27, 15)
+                        .HasColumnType("numeric(27,15)");
 
                     b.HasKey("Id");
 
@@ -11559,6 +12432,387 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("PaymentWebhookReceipts", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Pricing.AcquisitionBudget", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ApprovalReason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("AuthorizedLimitKwd")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<Guid>("BundleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CheckerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("EffectiveFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EffectiveToUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("LegalEntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("MakerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("MaximumSales")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("RuleVersionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RuleVersionId");
+
+                    b.HasIndex("CampaignId", "LegalEntityId", "IsActive");
+
+                    b.ToTable("PricingAcquisitionBudgets", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Pricing.AcquisitionBudgetReservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AmountKwd")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<Guid>("BudgetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("QuoteId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("QuoteSnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("ReservedSales")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("QuoteId")
+                        .IsUnique();
+
+                    b.HasIndex("BudgetId", "Status", "ExpiresAtUtc");
+
+                    b.ToTable("PricingAcquisitionBudgetReservations", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Pricing.PricingQuote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BundleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ClassificationRunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("CohortMeanReferencePrice26Kwd")
+                        .HasPrecision(38, 18)
+                        .HasColumnType("numeric(38,18)");
+
+                    b.Property<DateTime?>("ConsumedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("ContractedSupplyPrice26Kwd")
+                        .HasPrecision(38, 18)
+                        .HasColumnType("numeric(38,18)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("CustomerListPriceKwd")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<decimal>("CustomerNetPriceKwd")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<int>("DurationDays")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<decimal>("ExpectedGatewayCostKwd")
+                        .HasPrecision(38, 18)
+                        .HasColumnType("numeric(38,18)");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("ExternalCaptureAmountKwd")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<Guid?>("FamilyGroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FinancialSnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("FinancialSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid?>("OfferId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProgramId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("ReferencePrice26Kwd")
+                        .HasPrecision(38, 18)
+                        .HasColumnType("numeric(38,18)");
+
+                    b.PrimitiveCollection<string[]>("RiskBlockerCodes")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.Property<byte>("RiskState")
+                        .HasColumnType("smallint");
+
+                    b.Property<byte>("Route")
+                        .HasColumnType("smallint");
+
+                    b.Property<int>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RuleVersionContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("RuleVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("SelectedDiscountKwd")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<string>("SelectedDiscountSource")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SelectionHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SelectionSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.PrimitiveCollection<DateOnly[]>("ServiceDates")
+                        .IsRequired()
+                        .HasColumnType("date[]");
+
+                    b.Property<string>("SourceVersionsHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SourceVersionsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<int>("Tier")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClassificationRunId");
+
+                    b.HasIndex("RuleVersionId");
+
+                    b.HasIndex("CustomerId", "CreatedAtUtc");
+
+                    b.HasIndex("CustomerId", "FinancialSnapshotHash");
+
+                    b.HasIndex("Route", "Status", "ExpiresAtUtc");
+
+                    b.ToTable("PricingQuotes", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Pricing.PricingQuoteConsumption", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AcceptedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AcceptedSnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("ConsumerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConsumerType")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("QuoteId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("QuoteId")
+                        .IsUnique();
+
+                    b.ToTable("PricingQuoteConsumptions", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Pricing.PricingRiskException", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AuthorizedLossKwd")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<Guid>("BudgetReservationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CheckerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DecidedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool?>("IsApproved")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MakerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("QuoteId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("QuoteSnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("RequestedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BudgetReservationId");
+
+                    b.HasIndex("QuoteId");
+
+                    b.ToTable("PricingRiskExceptions", (string)null);
+                });
+
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.PricingRuleVersion", b =>
                 {
                     b.Property<Guid>("Id")
@@ -12040,6 +13294,10 @@ namespace MealMate.Persistence.Migrations
 
                     b.Property<Guid>("RestaurantId")
                         .HasColumnType("uuid");
+
+                    b.Property<int>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
@@ -13598,6 +14856,69 @@ namespace MealMate.Persistence.Migrations
                     b.HasIndex("RestaurantId", "ServiceDate", "Status");
 
                     b.ToTable("CapacityHolds", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.RestaurantOperations.CapacityReductionRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly?>("ApprovedEffectiveDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CurrentCapacity")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("RequestedCapacity")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("RequestedEffectiveDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReviewNotes")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReviewedByAdminUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("CapacityReductionRequests");
                 });
 
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.DailyCapacity", b =>
@@ -15467,6 +16788,56 @@ namespace MealMate.Persistence.Migrations
                     b.ToTable("OrderHandoverRevocations", (string)null);
                 });
 
+            modelBuilder.Entity("MealMate.Domain.RestaurantOperations.PlatformCapacityPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("EffectiveFromDate")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("PlatformDailyBoxCeiling")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("RenewalReserveMinimumPercent")
+                        .HasColumnType("numeric");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PlatformCapacityPolicies");
+                });
+
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.ProgramMealSlotRequirement", b =>
                 {
                     b.Property<Guid>("Id")
@@ -15865,6 +17236,56 @@ namespace MealMate.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("RestaurantBranches");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.RestaurantOperations.RestaurantCapacityPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("DailyBoxLimit")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("EffectiveFromDate")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("RestaurantCapacityPolicies");
                 });
 
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.RestaurantConfirmation", b =>
@@ -16649,6 +18070,71 @@ namespace MealMate.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("RestaurantServiceRegions", (string)null);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.RestaurantOperations.ServiceCapacityCommitment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DeliveryAddressId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DietaryRestrictionsSnapshot")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("FamilyMemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<long>("LeadPolicyVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("ModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ModifiedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RegionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RestaurantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("ServiceDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ServiceCapacityCommitments");
                 });
 
             modelBuilder.Entity("MealMate.Domain.RestaurantOperations.StaffInvitation", b =>
@@ -17491,8 +18977,22 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("SourceFamilyDeliveryAmendment");
                 });
 
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.AccountingPeriod", b =>
+                {
+                    b.HasOne("MealMate.Domain.CentralAccounting.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("MealMate.Domain.CentralAccounting.ChartOfAccount", b =>
                 {
+                    b.HasOne("MealMate.Domain.CentralAccounting.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("MealMate.Domain.CentralAccounting.ChartOfAccount", "Parent")
                         .WithMany("Children")
                         .HasForeignKey("ParentId")
@@ -17682,6 +19182,21 @@ namespace MealMate.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.JournalEntry", b =>
+                {
+                    b.HasOne("MealMate.Domain.CentralAccounting.AccountingPeriod", "AccountingPeriod")
+                        .WithMany()
+                        .HasForeignKey("AccountingPeriodId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MealMate.Domain.CentralAccounting.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AccountingPeriod");
+                });
+
             modelBuilder.Entity("MealMate.Domain.CentralAccounting.JournalEntryLine", b =>
                 {
                     b.HasOne("MealMate.Domain.CentralAccounting.ChartOfAccount", "Account")
@@ -17695,6 +19210,11 @@ namespace MealMate.Persistence.Migrations
                         .HasForeignKey("JournalEntryId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("MealMate.Domain.CentralAccounting.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.OwnsOne("MealMate.Domain.ValueObjects.Money", "Credit", b1 =>
                         {
@@ -17751,6 +19271,81 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("Debit");
 
                     b.Navigation("JournalEntry");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.JournalReversal", b =>
+                {
+                    b.HasOne("MealMate.Domain.CentralAccounting.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.CentralAccounting.JournalEntry", "OriginalJournalEntry")
+                        .WithMany()
+                        .HasForeignKey("OriginalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.CentralAccounting.JournalEntry", "ReversalJournalEntry")
+                        .WithMany()
+                        .HasForeignKey("ReversalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.CentralAccounting.JournalSourceDocument", null)
+                        .WithMany()
+                        .HasForeignKey("SourceDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("OriginalJournalEntry");
+
+                    b.Navigation("ReversalJournalEntry");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.JournalSourceDocument", b =>
+                {
+                    b.HasOne("MealMate.Domain.CentralAccounting.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.CentralAccounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("OriginalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MealMate.Domain.CentralAccounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("PostedJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.JournalSourceLink", b =>
+                {
+                    b.HasOne("MealMate.Domain.CentralAccounting.JournalEntry", "JournalEntry")
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.CentralAccounting.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.CentralAccounting.JournalSourceDocument", "SourceDocument")
+                        .WithMany()
+                        .HasForeignKey("SourceDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("JournalEntry");
+
+                    b.Navigation("SourceDocument");
                 });
 
             modelBuilder.Entity("MealMate.Domain.CentralAccounting.OperatingExpense", b =>
@@ -17862,6 +19457,34 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("MaxFee");
 
                     b.Navigation("MinFee");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.PostingIdentity", b =>
+                {
+                    b.HasOne("MealMate.Domain.CentralAccounting.JournalEntry", "JournalEntry")
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.CentralAccounting.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("JournalEntry");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.CentralAccounting.ReportingProfile", b =>
+                {
+                    b.HasOne("MealMate.Domain.CentralAccounting.LegalEntity", "LegalEntity")
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("LegalEntity");
                 });
 
             modelBuilder.Entity("MealMate.Domain.CentralAccounting.RestaurantPayableLedger", b =>
@@ -18451,6 +20074,14 @@ namespace MealMate.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Campaign");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.Common.InboxProcessedEvent", b =>
+                {
+                    b.HasOne("MealMate.Domain.CentralAccounting.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ResultJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("MealMate.Domain.ComplaintsSupport.AdminComplaintReview", b =>
@@ -19835,6 +21466,72 @@ namespace MealMate.Persistence.Migrations
                     b.Navigation("Bundle");
 
                     b.Navigation("Program");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Pricing.AcquisitionBudget", b =>
+                {
+                    b.HasOne("MealMate.Domain.Foundation.RuleVersion", null)
+                        .WithMany()
+                        .HasForeignKey("RuleVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Pricing.AcquisitionBudgetReservation", b =>
+                {
+                    b.HasOne("MealMate.Domain.ProgramsSubscriptions.Pricing.AcquisitionBudget", "Budget")
+                        .WithMany()
+                        .HasForeignKey("BudgetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.ProgramsSubscriptions.Pricing.PricingQuote", null)
+                        .WithMany()
+                        .HasForeignKey("QuoteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Budget");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Pricing.PricingQuote", b =>
+                {
+                    b.HasOne("MealMate.Domain.ProgramsSubscriptions.ClassificationRun", null)
+                        .WithMany()
+                        .HasForeignKey("ClassificationRunId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("MealMate.Domain.Foundation.RuleVersion", null)
+                        .WithMany()
+                        .HasForeignKey("RuleVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Pricing.PricingQuoteConsumption", b =>
+                {
+                    b.HasOne("MealMate.Domain.ProgramsSubscriptions.Pricing.PricingQuote", "Quote")
+                        .WithMany()
+                        .HasForeignKey("QuoteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Quote");
+                });
+
+            modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.Pricing.PricingRiskException", b =>
+                {
+                    b.HasOne("MealMate.Domain.ProgramsSubscriptions.Pricing.AcquisitionBudgetReservation", null)
+                        .WithMany()
+                        .HasForeignKey("BudgetReservationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MealMate.Domain.ProgramsSubscriptions.Pricing.PricingQuote", null)
+                        .WithMany()
+                        .HasForeignKey("QuoteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("MealMate.Domain.ProgramsSubscriptions.PricingRuleVersion", b =>

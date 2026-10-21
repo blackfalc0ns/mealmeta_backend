@@ -39,7 +39,7 @@ public class PricingEngineAndClassificationTests
     }
 
     [Fact]
-    public void PricingEngine_AppliesDiscountsInCorrectSequence()
+    public void PricingEngine_RejectsStackedCampaignPromoAndWalletDiscountSources()
     {
         var req = new PricingEngineRequest(
             MeanReferenceDailyPrice: 4.000m,
@@ -48,12 +48,9 @@ public class PricingEngineAndClassificationTests
             PromoCodeDiscountKwd: 5.000m,
             WalletPromoCreditKwd: 2.000m);
 
-        var result = PricingEngine.Calculate(req);
+        var act = () => PricingEngine.Calculate(req);
 
-        result.CampaignDiscountApplied.Should().Be(10.000m);
-        result.PromoCodeDiscountApplied.Should().Be(5.000m);
-        result.WalletCreditApplied.Should().Be(2.000m);
-        result.FinalCustomerPrice.Should().BeGreaterThan(0m);
+        act.Should().Throw<ArgumentException>();
     }
 
     [Fact]
@@ -128,6 +125,8 @@ public class PricingEngineAndClassificationTests
         result.IsSuccess.Should().BeTrue();
         result.Value.MeanReferenceDaily.Should().Be(3.000m);
         result.Value.Classifications.Should().HaveCount(3);
+        result.Value.LowerBound.Should().BeApproximately(2.591751709536136997m, 0.000000000000001m);
+        result.Value.UpperBound.Should().BeApproximately(3.408248290463863003m, 0.000000000000001m);
 
         var basic = result.Value.Classifications.First(x => x.ReferenceDailyBox == 2.0m);
         basic.Tier.Should().Be(RestaurantTier.Basic);

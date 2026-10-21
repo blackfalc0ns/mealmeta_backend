@@ -16,15 +16,32 @@ public sealed class ChartOfAccountConfiguration : IEntityTypeConfiguration<Chart
         builder.Property(x => x.NameAr).HasMaxLength(200).IsRequired();
         builder.Property(x => x.NameEn).HasMaxLength(200).IsRequired();
 
-        builder.HasIndex(x => x.Code).IsUnique();
+        // Keep legacy accounts unique among themselves, while allowing each legal
+        // entity to use its own code namespace.
+        builder.HasIndex(x => x.Code).IsUnique().HasFilter("\"LegalEntityId\" IS NULL")
+            .HasDatabaseName("IX_ChartOfAccounts_LegacyCode");
+        builder.HasIndex(x => new { x.LegalEntityId, x.Code }).IsUnique()
+            .HasFilter("\"LegalEntityId\" IS NOT NULL")
+            .HasDatabaseName("IX_ChartOfAccounts_LegalEntity_Code");
+        builder.HasIndex(x => new { x.LegalEntityId, x.Id }).IsUnique().HasDatabaseName("UX_ChartOfAccounts_Entity_Id");
         builder.HasIndex(x => x.AccountType);
         builder.HasIndex(x => x.ParentId);
         builder.HasIndex(x => x.IsActive);
+        builder.Property(x => x.ReportingLineCode).HasMaxLength(100);
+        builder.Property(x => x.NormalBalance).HasConversion<int>();
+        builder.ToTable("ChartOfAccounts", table =>
+        {
+            table.HasCheckConstraint("CK_ChartOfAccounts_EffectiveWindow",
+                "\"EffectiveToExclusive\" IS NULL OR \"EffectiveFrom\" IS NULL OR \"EffectiveToExclusive\" > \"EffectiveFrom\"");
+            table.HasCheckConstraint("CK_ChartOfAccounts_GovernedNormalBalance",
+                "\"LegalEntityId\" IS NULL OR \"NormalBalance\" IS NOT NULL");
+        });
 
         builder.HasOne(x => x.Parent)
             .WithMany(x => x.Children)
             .HasForeignKey(x => x.ParentId)
             .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<LegalEntity>().WithMany().HasForeignKey(x => x.LegalEntityId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -56,8 +73,18 @@ public sealed class JournalEntryConfiguration : IEntityTypeConfiguration<Journal
         builder.Property(x => x.Description).HasMaxLength(2000).IsRequired();
         builder.Property(x => x.CorrelationId).HasMaxLength(100);
         builder.Property(x => x.SourceReference).HasMaxLength(200);
+        builder.Property(x => x.CurrencyCode).HasMaxLength(3);
+        builder.Property(x => x.PayloadHash).HasMaxLength(64);
+        builder.ToTable("JournalEntries", table =>
+            table.HasCheckConstraint("CK_JournalEntries_GovernedFields",
+                "\"LegalEntityId\" IS NULL OR (\"AccountingPeriodId\" IS NOT NULL AND \"BusinessDate\" IS NOT NULL AND \"CurrencyCode\" = 'KWD' AND \"PayloadHash\" IS NOT NULL)"));
 
         builder.HasIndex(x => x.EntryNumber).IsUnique();
+        builder.HasIndex(x => new { x.LegalEntityId, x.AccountingPeriodId, x.BusinessDate, x.Status });
+        builder.HasIndex(x => x.LegalEntityId);
+        builder.HasIndex(x => new { x.LegalEntityId, x.Id }).IsUnique().HasDatabaseName("UX_JournalEntries_Entity_Id");
+        builder.HasOne<LegalEntity>().WithMany().HasForeignKey(x => x.LegalEntityId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.AccountingPeriod).WithMany().HasForeignKey(x => x.AccountingPeriodId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.PostedAtUtc);
         builder.HasIndex(x => x.CorrelationId);
@@ -75,9 +102,17 @@ public sealed class JournalEntryLineConfiguration : IEntityTypeConfiguration<Jou
         builder.OwnsMoney(x => x.Debit, "Debit", required: false);
         builder.OwnsMoney(x => x.Credit, "Credit", required: false);
         builder.Property(x => x.Memo).HasMaxLength(1000);
+        builder.Property(x => x.PartyType).HasMaxLength(50);
 
         builder.HasIndex(x => x.JournalEntryId);
         builder.HasIndex(x => x.AccountId);
+        builder.HasIndex(x => x.LegalEntityId);
+        builder.HasIndex(x => new { x.LegalEntityId, x.Id }).IsUnique().HasDatabaseName("UX_JournalEntryLines_Entity_Id");
+        builder.HasOne<LegalEntity>().WithMany().HasForeignKey(x => x.LegalEntityId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.ToTable("JournalEntryLines", table => table.HasCheckConstraint(
+            "CK_JournalEntryLines_GovernedAmount",
+            "\"LegalEntityId\" IS NULL OR ((\"Debit_Amount\" > 0 AND \"Credit_Amount\" IS NULL) OR (\"Credit_Amount\" > 0 AND \"Debit_Amount\" IS NULL))"));
 
         builder.HasOne(x => x.JournalEntry)
             .WithMany(x => x.Lines)

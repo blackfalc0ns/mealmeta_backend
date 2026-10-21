@@ -903,6 +903,15 @@ public sealed class FamilyCheckoutSelectionTests
             Quote = new FamilyQuoteService(pricingSender, settings, schedule, Db, participation);
 
             var checkoutSchedule = Substitute.For<ISubscriptionScheduleService>();
+            DateOnly resolvedStart = new(2026, 9, 5);
+            string? startError = null;
+            checkoutSchedule.TryResolveCheckoutStart(default, default, out resolvedStart, out startError)
+                .ReturnsForAnyArgs(ci =>
+                {
+                    var inputDate = ci.ArgAt<DateOnly?>(0);
+                    ci[2] = inputDate ?? new DateOnly(2026, 9, 5);
+                    return true;
+                });
             var serviceDates = new List<DateOnly> { new(2026, 8, 19), new(2026, 8, 20) };
             checkoutSchedule.GetServiceDates(Arg.Any<DateOnly>(), Arg.Any<int>(), Arg.Any<bool>()).Returns(serviceDates);
             var restaurantId = Guid.NewGuid();

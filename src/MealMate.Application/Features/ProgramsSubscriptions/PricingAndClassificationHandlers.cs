@@ -211,6 +211,10 @@ public sealed class PricingAndClassificationHandlers :
 
     public async Task<Result<RestaurantBundlePricingDto>> Handle(LockRestaurantPricingCommand request, CancellationToken cancellationToken)
     {
+        // Activation must use the row-versioned maker/checker publication service.
+        if (RestaurantPricingActivation.IsCommerciallyActive(request.TargetStatus))
+            return Error.Validation("pricing.publication_use_workflow");
+
         var pricing = await _db.RestaurantBundlePricings.FirstOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
         if (pricing is null)
         {

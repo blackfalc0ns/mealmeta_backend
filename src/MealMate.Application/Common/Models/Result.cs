@@ -50,6 +50,10 @@ public class Result<TValue> : Result
         ? _value!
         : throw new InvalidOperationException("Cannot access the value of a failed result.");
 
+    public static new Result<TValue> Failure(Error error) => Failure<TValue>(error);
+
+    public static new Result<TValue> Success(TValue value) => Success<TValue>(value);
+
     public static implicit operator Result<TValue>(TValue value) => Success(value);
 
     public static implicit operator Result<TValue>(Error error) => Failure<TValue>(error);

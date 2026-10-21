@@ -30,3 +30,6 @@ tmp-*/
 *.log
 .superpowers/
 artifacts/
+
+outputs/
+

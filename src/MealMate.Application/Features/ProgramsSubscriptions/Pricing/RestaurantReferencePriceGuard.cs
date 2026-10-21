@@ -69,7 +69,7 @@ public static class RestaurantReferencePriceGuard
         // Degenerate IQR (many identical prices): fall back to mean + 2σ (same spirit as classification outlier).
         var mean = sortedDaily.Average();
         var variance = sortedDaily.Sum(x => (x - mean) * (x - mean)) / n;
-        var sd = (decimal)Math.Sqrt((double)variance);
+        var sd = DecimalPricingMath.Sqrt(variance);
         if (sd <= 0m)
         {
             // All equal — allow a modest headroom (15%) above the cohort so a new higher offer can enter review via pending change.
@@ -85,8 +85,8 @@ public static class RestaurantReferencePriceGuard
     {
         if (sorted.Count == 1) return sorted[0];
         var pos = percentile * (sorted.Count - 1);
-        var lo = (int)Math.Floor((double)pos);
-        var hi = (int)Math.Ceiling((double)pos);
+        var lo = (int)decimal.Floor(pos);
+        var hi = (int)decimal.Ceiling(pos);
         if (lo == hi) return sorted[lo];
         var weight = pos - lo;
         return sorted[lo] + (sorted[hi] - sorted[lo]) * weight;

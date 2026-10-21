@@ -442,3 +442,24 @@ public enum MealLabelKind
     Box = 1,
     Meal = 2,
 }
+
+public enum LegalEntityStatus
+{
+    Draft = 1,
+    Active = 2,
+    Suspended = 3,
+}
+
+public enum ReportingProfileStatus
+{
+    Draft = 1,
+    Approved = 2,
+    Archived = 3,
+}
+
+public enum ReportingApplicability
+{
+    Unknown = 0,
+    NotApplicable = 1,
+    Applicable = 2,
+}

@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
+using MealMate.Application.Features.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -216,7 +217,7 @@ public static class PricingProfileExtensions
         if (d >= CurveDLong) return Math.Round(rMin, 2, MidpointRounding.AwayFromZero);
         if (d <= CurveDShort) return Math.Round(rMax, 2, MidpointRounding.AwayFromZero);
 
-        var fraction = (decimal)Math.Pow((double)(CurveDLong - d) / (double)(CurveDLong - CurveDShort), (double)g);
+        var fraction = DecimalPricingMath.Pow((decimal)(CurveDLong - d) / (CurveDLong - CurveDShort), g);
         var rate = rMin + (rMax - rMin) * fraction;
         return Math.Round(rate, 2, MidpointRounding.AwayFromZero);
     }
@@ -530,6 +531,8 @@ public static class SubscriptionPricingSettingsValidator
             return Error.Validation("pricing_settings.rate_order", "The 6-day rate must be greater than the 12-day rate, which must be greater than the 26-day rate.");
         if (profile.CurveGamma is < 0.1m or > 5m)
             return Error.Validation("pricing_settings.curve_gamma", "Curve gamma must be between 0.1 and 5.");
+        if (profile.CurveGamma * 1000m != decimal.Truncate(profile.CurveGamma * 1000m))
+            return Error.Validation("pricing_settings.curve_gamma_precision", "Curve gamma supports at most three decimal places.");
         if (profile.CustomRateMode is not ("fixed" or "ranges"))
             return Error.Validation("pricing_settings.custom_rate_mode", "Custom duration rate mode must be fixed or ranges.");
         if (profile.CustomRateRanges.Any(x => x.FromDays < 6 || (x.ToDays.HasValue && x.ToDays.Value < x.FromDays) || x.Rate is < 0 or > 100))

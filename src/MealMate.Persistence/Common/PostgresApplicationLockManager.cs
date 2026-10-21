@@ -1,5 +1,7 @@
 using System.Data;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Domain.Enums;
+using MealMate.Domain.Foundation;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Persistence.Common;
@@ -24,6 +26,31 @@ public sealed class PostgresApplicationLockManager : IApplicationLockManager
     public PostgresApplicationLockManager(AppDbContext db)
     {
         _db = db;
+    }
+
+    public async Task LockRestaurantPricingBundleAsync(Guid bundleId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = $"restaurant-pricing-bundle:{bundleId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+    }
+
+    public async Task LockAcquisitionBudgetAsync(Guid budgetId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = $"pricing-acquisition-budget:{budgetId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+    }
+
+    public async Task LockPricingQuoteAsync(Guid quoteId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = $"pricing-quote:{quoteId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+        var entry = _db.ChangeTracker.Entries<MealMate.Domain.ProgramsSubscriptions.Pricing.PricingQuote>()
+            .SingleOrDefault(x => x.Entity.Id == quoteId);
+        if (entry is not null && entry.State != EntityState.Added)
+            await entry.ReloadAsync(cancellationToken);
     }
 
     public async Task LockTripAsync(Guid tripId, CancellationToken cancellationToken = default)
@@ -226,5 +253,39 @@ public sealed class PostgresApplicationLockManager : IApplicationLockManager
                      e.Entity is MealMate.Domain.CollaborativeCampaigns.CampaignRestaurantCapacity c && c.CampaignId == campaignId ||
                      e.Entity is MealMate.Domain.CollaborativeCampaigns.CampaignSubscriberCap cap && cap.CampaignId == campaignId).ToList())
             await entry.ReloadAsync(cancellationToken);
+    }
+
+    public async Task LockFinancialRuleScopeAsync(Guid legalEntityId, string ruleKey, RuleScopeType scopeType, Guid? scopeEntityId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var normalizedScopeId = RuleVersionScope.Normalize(scopeType, scopeEntityId);
+        var key = $"financial-rule:{legalEntityId:N}:{ruleKey}:{(int)scopeType}:{normalizedScopeId}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+    }
+
+    public async Task LockLedgerPeriodCatalogAsync(Guid legalEntityId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = $"ledger-period-catalog:{legalEntityId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+    }
+
+    public async Task LockLedgerPeriodAsync(Guid periodId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = $"ledger-period:{periodId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+        var entry = _db.ChangeTracker.Entries<MealMate.Domain.CentralAccounting.AccountingPeriod>()
+            .SingleOrDefault(x => x.Entity.Id == periodId);
+        if (entry is not null && entry.State != EntityState.Added)
+            await entry.ReloadAsync(cancellationToken);
+    }
+
+    public async Task LockLedgerPostingIdentityAsync(Guid legalEntityId, string sourceType, Guid sourceId,
+        Guid serviceDayKey, int effect, Guid adjustmentKey, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = $"ledger-economic:{legalEntityId:N}:{sourceType}:{sourceId:N}:{serviceDayKey:N}:{effect}:{adjustmentKey:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
     }
 }

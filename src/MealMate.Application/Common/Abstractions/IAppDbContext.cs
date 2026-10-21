@@ -11,6 +11,7 @@ using MealMate.Domain.CustomerFinance;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Offers;
 using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.ProgramsSubscriptions.Pricing;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
 
@@ -77,6 +78,11 @@ public interface IAppDbContext
     DbSet<RestaurantSettingsChangeRequest> RestaurantSettingsChangeRequests { get; }
     DbSet<IdempotencyRecord> IdempotencyRecords { get; }
     DbSet<SystemSetting> SystemSettings { get; }
+    DbSet<RuleVersion> RuleVersions { get; }
+    DbSet<MealMate.Domain.CentralAccounting.FinancialAuditTrail> FinancialAuditTrails { get; }
+    DbSet<MealMate.Domain.CentralAccounting.LegalEntity> LegalEntities { get; }
+    DbSet<MealMate.Domain.CentralAccounting.ReportingProfile> ReportingProfiles { get; }
+    DbSet<MealMate.Domain.CentralAccounting.RegulatoryRequirement> RegulatoryRequirements { get; }
     DbSet<MealMate.Domain.CustomerFinance.RefundOperation> RefundOperations { get; }
 
     // M02 Programs & Subscriptions
@@ -88,6 +94,11 @@ public interface IAppDbContext
     DbSet<ClassificationRun> ClassificationRuns { get; }
     DbSet<RestaurantClassification> RestaurantClassifications { get; }
     DbSet<PricingRuleVersion> PricingRuleVersions { get; }
+    DbSet<PricingQuote> PricingQuotes { get; }
+    DbSet<PricingQuoteConsumption> PricingQuoteConsumptions { get; }
+    DbSet<AcquisitionBudget> AcquisitionBudgets { get; }
+    DbSet<AcquisitionBudgetReservation> AcquisitionBudgetReservations { get; }
+    DbSet<PricingRiskException> PricingRiskExceptions { get; }
     DbSet<Subscription> Subscriptions { get; }
     DbSet<SubscriptionSnapshot> SubscriptionSnapshots { get; }
     DbSet<SubscriptionOperation> SubscriptionOperations { get; }
@@ -144,6 +155,10 @@ public interface IAppDbContext
     DbSet<RestaurantServiceRegion> RestaurantServiceRegions { get; }
     DbSet<DailyCapacity> DailyCapacities { get; }
     DbSet<CapacityHold> CapacityHolds { get; }
+    DbSet<RestaurantCapacityPolicy> RestaurantCapacityPolicies { get; }
+    DbSet<PlatformCapacityPolicy> PlatformCapacityPolicies { get; }
+    DbSet<ServiceCapacityCommitment> ServiceCapacityCommitments { get; }
+    DbSet<CapacityReductionRequest> CapacityReductionRequests { get; }
     DbSet<BusyStatus> BusyStatuses { get; }
     DbSet<RestaurantOperatingSchedule> RestaurantOperatingSchedules { get; }
     DbSet<RestaurantOperatingDayException> RestaurantOperatingDayExceptions { get; }
@@ -173,6 +188,9 @@ public interface IAppDbContext
     DbSet<WalletTransaction> WalletTransactions { get; }
     DbSet<SubscriptionPayment> SubscriptionPayments { get; }
     DbSet<SubscriptionCancellation> SubscriptionCancellations { get; }
+    DbSet<CancellationSettlementDecision> CancellationSettlementDecisions { get; }
+    DbSet<RefundSourceAllocation> RefundSourceAllocations { get; }
+    DbSet<CarriedOverServiceObligation> CarriedOverServiceObligations { get; }
     DbSet<RefundCalculation> RefundCalculations { get; }
     DbSet<CustomerBankDetails> CustomerBankDetails { get; }
 
@@ -282,6 +300,15 @@ public interface IAppDbContext
 
     DbSet<MealMate.Domain.DriverDelivery.DeliveryHold> DeliveryHolds { get; }
     DbSet<MealMate.Domain.Common.InboxProcessedEvent> InboxProcessedEvents { get; }
+
+    DbSet<MealMate.Domain.CentralAccounting.ChartOfAccount> ChartOfAccounts { get; }
+    DbSet<MealMate.Domain.CentralAccounting.JournalEntry> JournalEntries { get; }
+    DbSet<MealMate.Domain.CentralAccounting.JournalEntryLine> JournalEntryLines { get; }
+    DbSet<MealMate.Domain.CentralAccounting.AccountingPeriod> AccountingPeriods { get; }
+    DbSet<MealMate.Domain.CentralAccounting.PostingIdentity> PostingIdentities { get; }
+    DbSet<MealMate.Domain.CentralAccounting.JournalSourceDocument> JournalSourceDocuments { get; }
+    DbSet<MealMate.Domain.CentralAccounting.JournalSourceLink> JournalSourceLinks { get; }
+    DbSet<MealMate.Domain.CentralAccounting.JournalReversal> JournalReversals { get; }
 
     // Voice Calls
     DbSet<MealMate.Domain.VoiceCalls.CallSession> CallSessions { get; }

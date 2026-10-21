@@ -30,5 +30,13 @@ public sealed class ClassificationRun : AuditableEntity
 
     public string? Notes { get; set; }
 
+    public string? CohortHash { get; set; }
+
+    public string? InputsJson { get; set; }
+
+    public string AlgorithmVersion { get; set; } = "tier-mean-population-sd-half-v1";
+
+    public string QuartileMethod { get; set; } = "NotUsed";
+
     public ICollection<RestaurantClassification> Classifications { get; set; } = new List<RestaurantClassification>();
 }

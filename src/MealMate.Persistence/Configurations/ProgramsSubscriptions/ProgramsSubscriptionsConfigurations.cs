@@ -68,6 +68,7 @@ public sealed class RestaurantBundlePricingConfiguration : IEntityTypeConfigurat
     {
         builder.ToTable("RestaurantBundlePricings");
         builder.HasKey(x => x.Id);
+        builder.Property(x => x.RowVersion).IsConcurrencyToken();
 
         builder.OwnsRequiredMoney(x => x.ReferencePrice26, "ReferencePrice26");
         builder.OwnsRequiredMoney(x => x.ContractedSupplyPrice26, "ContractedSupplyPrice26");
@@ -115,11 +116,15 @@ public sealed class ClassificationRunConfiguration : IEntityTypeConfiguration<Cl
         builder.ToTable("ClassificationRuns");
         builder.HasKey(x => x.Id);
 
-        builder.Property(x => x.MeanReferenceDaily).HasPrecision(18, 3);
-        builder.Property(x => x.SdReferenceDaily).HasPrecision(18, 3);
-        builder.Property(x => x.LowerBound).HasPrecision(18, 3);
-        builder.Property(x => x.UpperBound).HasPrecision(18, 3);
+        builder.Property(x => x.MeanReferenceDaily).HasPrecision(27, 15);
+        builder.Property(x => x.SdReferenceDaily).HasPrecision(27, 15);
+        builder.Property(x => x.LowerBound).HasPrecision(27, 15);
+        builder.Property(x => x.UpperBound).HasPrecision(27, 15);
         builder.Property(x => x.ConfidenceLevel).HasMaxLength(50).IsRequired();
+        builder.Property(x => x.CohortHash).HasMaxLength(64);
+        builder.Property(x => x.InputsJson).HasColumnType("jsonb");
+        builder.Property(x => x.AlgorithmVersion).HasMaxLength(80).IsRequired();
+        builder.Property(x => x.QuartileMethod).HasMaxLength(80).IsRequired();
         builder.Property(x => x.Notes).HasMaxLength(2000);
 
         builder.HasIndex(x => new { x.ProgramId, x.BundleId, x.RunAtUtc });

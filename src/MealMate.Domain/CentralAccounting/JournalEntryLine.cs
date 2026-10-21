@@ -5,6 +5,8 @@ namespace MealMate.Domain.CentralAccounting;
 
 public sealed class JournalEntryLine : BaseEntity
 {
+    public Guid? LegalEntityId { get; set; }
+
     public Guid JournalEntryId { get; set; }
 
     public JournalEntry JournalEntry { get; set; } = default!;
@@ -16,6 +18,12 @@ public sealed class JournalEntryLine : BaseEntity
     public Money? Debit { get; set; }
 
     public Money? Credit { get; set; }
+
+    public Guid? PartyId { get; set; }
+
+    public string? PartyType { get; set; }
+
+    public Guid? AllocationId { get; set; }
 
     public string? Memo { get; set; }
 }

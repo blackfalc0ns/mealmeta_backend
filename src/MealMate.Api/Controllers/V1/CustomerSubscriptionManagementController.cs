@@ -464,6 +464,8 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
     /// <summary>Get a quote / preview of the cancellation refund and effective dates prior to confirming cancellation.</summary>
     [HttpGet("{id:guid}/cancellation-quote")]
+    [HttpGet("{id:guid}/cancellation/preview")]
+    [HttpPost("{id:guid}/cancellation/preview")]
     [ProducesResponseType(typeof(CustomerCancellationQuoteDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -475,6 +477,7 @@ public sealed class CustomerSubscriptionManagementController : ApiControllerBase
 
     /// <summary>Cancel subscription, calculate refund for remaining days after kitchen lock window, cancel remaining days, and update status.</summary>
     [HttpPost("{id:guid}/cancellation-requests")]
+    [HttpPost("{id:guid}/cancellation/confirm")]
     [ProducesResponseType(typeof(CustomerCancellationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

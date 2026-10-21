@@ -1,0 +1,5 @@
+SELECT 'athletic_offers=' || count(*) FROM "RestaurantProgramBundleOffers" WHERE "BundleId"='86903897-4676-4d73-8934-8d6d93e275a2' AND "ProgramId"='67ea99eb-79e3-489f-bfc9-3346e4c5dc5c' AND "IsActive"=true;
+SELECT 'athletic_pricings=' || count(*) FROM "RestaurantBundlePricings" WHERE "BundleId"='86903897-4676-4d73-8934-8d6d93e275a2' AND "ProgramId"='67ea99eb-79e3-489f-bfc9-3346e4c5dc5c' AND "LockStatus" IN (1,2,3) AND "ReferencePrice26_Amount" > 0;
+SELECT 'wl_offers=' || count(*) FROM "RestaurantProgramBundleOffers" WHERE "BundleId"='71d3bb5d-c4cb-41fa-b18d-9b481504b963' AND "ProgramId"='dd12dfbc-3987-4e38-83af-664b6963c04c' AND "IsActive"=true;
+SELECT 'wl_pricings=' || count(*) FROM "RestaurantBundlePricings" WHERE "BundleId"='71d3bb5d-c4cb-41fa-b18d-9b481504b963' AND "ProgramId"='dd12dfbc-3987-4e38-83af-664b6963c04c' AND "LockStatus" IN (1,2,3) AND "ReferencePrice26_Amount" > 0;
+SELECT 'wl_snack_meals=' || count(*) FROM "Meals" m JOIN "RestaurantProfiles" r ON r."Id"=m."RestaurantId" WHERE m."Slot"='snack' AND m."ApprovalStatus"=4 AND m."IsAvailableForNewOrders"=true AND r."TradeNameEn" LIKE '[TEST]%';

@@ -1369,8 +1369,105 @@
 <data name="driver_reassignment.not_found" xml:space="preserve"><value>لم يتم العثور على طلب إعادة الإسناد.</value></data>
 <data name="driver_reassignment.notification_title" xml:space="preserve"><value>تحديث طلب إعادة الإسناد</value></data>
 <data name="driver_reassignment.notification_accepted" xml:space="preserve"><value>وافق مسؤول التوصيل على طلب إعادة الإسناد. تظل العهدة لديك حتى تأكيد نقلها.</value></data>
-<data name="driver_reassignment.decision_invalid" xml:space="preserve"><value>القرار يجب أن يكون قبولاً أو رفضاً والملاحظات حتى 500 حرف؛ سبب الرفض مطلوب من 3 أحرف.</value></data>
 <data name="driver_support_handover.reassignment_rejected" xml:space="preserve"><value>تم رفض طلب إعادة الإسناد.</value></data>
+<data name="finance.rule_version_not_found" xml:space="preserve"><value>لم يتم العثور على إصدار القاعدة المالية.</value></data>
+<data name="finance.rule_legal_entity_missing" xml:space="preserve"><value>اختر كياناً قانونياً نشطاً.</value></data>
+<data name="finance.rule_legal_entity_inactive_or_missing" xml:space="preserve"><value>الكيان القانوني المحدد غير موجود أو غير نشط.</value></data>
+<data name="finance.rule_scope_invalid" xml:space="preserve"><value>اختر نطاق قاعدة وكيان نطاق صالحين.</value></data>
+<data name="finance.rule_window_invalid" xml:space="preserve"><value>أدخل فترة سريان صالحة بتوقيت UTC.</value></data>
+<data name="finance.rule_payload_invalid" xml:space="preserve"><value>محتوى القاعدة غير صالح أو غير مدعوم.</value></data>
+<data name="finance.rule_schema_unsupported" xml:space="preserve"><value>مخطط محتوى القاعدة غير مدعوم.</value></data>
+<data name="finance.rule_payload_contract_unsupported" xml:space="preserve"><value>عقد محتوى القاعدة غير مدعوم.</value></data>
+<data name="finance.rule_payload_required" xml:space="preserve"><value>أدخل محتوى قاعدة صالحاً.</value></data>
+<data name="finance.duplicate_version_code" xml:space="preserve"><value>رمز إصدار هذه القاعدة مستخدم بالفعل.</value></data>
+<data name="finance.creator_only_submit" xml:space="preserve"><value>يمكن لمنشئ المسودة وحده إرسالها للموافقة.</value></data>
+<data name="finance.self_approval" xml:space="preserve"><value>لا يمكن لمنشئ المسودة اعتماد قاعدته أو رفضها.</value></data>
+<data name="finance.rule_maker_unknown" xml:space="preserve"><value>تعذر التحقق من هوية منشئ القاعدة.</value></data>
+<data name="finance.stale_payload" xml:space="preserve"><value>تغيرت القاعدة المرسلة. أعد تحميلها قبل اتخاذ القرار.</value></data>
+<data name="finance.rule_scope_overlap" xml:space="preserve"><value>توجد قاعدة معتمدة تشغل هذا النطاق والفترة.</value></data>
+<data name="finance.state_conflict" xml:space="preserve"><value>لم تعد حالة القاعدة تسمح بهذا الإجراء.</value></data>
+<data name="finance.identity_required" xml:space="preserve"><value>تعذر التحقق من هوية المسؤول.</value></data>
+<data name="finance.reason_required" xml:space="preserve"><value>أدخل سبب رفض من 3 إلى 1000 حرف.</value></data>
+<data name="finance.profile_not_configured" xml:space="preserve"><value>ملف التقارير غير مُعد للكيان ونوع التقرير المحددين.</value></data>
+<data name="finance.unauthorized" xml:space="preserve"><value>لا تملك صلاحية تنفيذ هذا الإجراء في حوكمة الشؤون المالية.</value></data>
+<data name="finance.rule_schema_version_unsupported" xml:space="preserve"><value>مخطط محتوى القاعدة غير مدعوم.</value></data>
+<data name="finance.rule_contract_unsupported" xml:space="preserve"><value>عقد محتوى القاعدة غير مدعوم.</value></data>
+<data name="finance.invalid_payload" xml:space="preserve"><value>محتوى القاعدة غير صالح أو غير مدعوم.</value></data>
+<data name="finance.rejection_reason_required" xml:space="preserve"><value>أدخل سبب رفض من 3 إلى 1000 حرف.</value></data>
+<data name="ledger.outbox_fingerprint_mismatch" xml:space="preserve"><value>بصمة مستند الأستاذ المعتمد لا تطابق الحدث في قائمة الانتظار.</value></data>
+<data name="ledger.outbox_fingerprint_missing" xml:space="preserve"><value>حدث الأستاذ في قائمة الانتظار غير مكتمل.</value></data>
+<data name="ledger.account_code_duplicate" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.account_entity_mismatch" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.account_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.account_not_effective" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.account_not_postable" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.account_parent_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.admin_only" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.audit_append_only" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.authentication_required" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.closed_period_immutable" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.control_party_required" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.currency_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.currency_mismatch" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.currency_unsupported" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.delivery_content_conflict" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.economic_content_conflict" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.entity_access_denied" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.entity_inactive_or_currency_unsupported" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.entity_not_found" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.entity_required" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.governed_account_soft_delete_forbidden" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.governed_journal_delete_forbidden" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.journal_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.journal_line_append_only" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.journal_not_found" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.journal_unbalanced" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.line_amount_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.line_precision_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.line_sides_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.lines_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.lines_required" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.maker_checker_required" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.original_already_reversed" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.outbox_source_id_missing" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.page_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.page_size_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.parent_account_not_postable" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_delete_forbidden" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_lifecycle_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_not_found" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_not_found_for_date" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_not_open" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_overlap" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_reason_required" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_soft_delete_forbidden" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_stale" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_unbalanced" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_window_immutable" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.period_window_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.permission_required" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.posted_journal_immutable" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.posting_trace_append_only" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.rejection_reason_required" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.reversal_caller_lines_forbidden" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.reversal_content_mismatch" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.reversal_original_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.reversal_original_not_found" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.reversal_original_not_posted" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.reversal_original_required" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.source_content_changed" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.source_creator_only_submit" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.source_draft_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.source_id_required" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.source_lifecycle_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.source_not_approved" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.source_not_approved_or_changed" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.source_not_found" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.source_stale" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.submitted_source_delete_forbidden" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.submitted_source_immutable" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.total_amount_invalid" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
+<data name="ledger.trial_balance_date_outside_period" xml:space="preserve"><value>تعذر إكمال طلب دفتر الأستاذ. راجع السجل الحالي ثم أعد المحاولة.</value></data>
 <data name="driver_support_issue.forbidden" xml:space="preserve"><value>يلزم تسجيل الدخول كسائق.</value></data>
 <data name="driver_support_issue.not_found" xml:space="preserve"><value>لم يتم العثور على بلاغ الدعم.</value></data>
 <data name="driver_support_issue.query_invalid" xml:space="preserve"><value>مرشحات بلاغ الدعم غير صالحة.</value></data>

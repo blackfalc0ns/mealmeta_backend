@@ -21,7 +21,7 @@ public static class SubscriptionPackagePricingCalculator
         var variance = dailyPrices.Count < 2
             ? 0m
             : dailyPrices.Sum(value => (value - mean) * (value - mean)) / dailyPrices.Count;
-        var standardDeviation = (decimal)Math.Sqrt((double)variance);
+        var standardDeviation = DecimalPricingMath.Sqrt(variance);
 
         return prices
             .Select(price => new
@@ -34,8 +34,8 @@ public static class SubscriptionPackagePricingCalculator
             .Select(group => new SubscriptionTierPriceAverage(
                 group.Key,
                 group.Count(),
-                Math.Round(group.Average(item => item.Price26), 3),
-                Math.Round(group.Average(item => item.DailyPrice), 6)))
+                group.Average(item => item.Price26),
+                group.Average(item => item.DailyPrice)))
             .OrderBy(item => item.Tier)
             .ToList();
     }
@@ -47,11 +47,9 @@ public static class SubscriptionPackagePricingCalculator
         var averages = CalculateTierAverages(activePrices26DaysKwd);
         var requestedTierAverage = averages.FirstOrDefault(item => item.Tier == tier)?.AverageDailyPriceKwd;
         if (requestedTierAverage.HasValue) return requestedTierAverage.Value;
-
-        var restaurantCount = averages.Sum(item => item.RestaurantCount);
-        if (restaurantCount == 0)
+        if (averages.Count == 0)
             throw new InvalidOperationException("Pricing cannot be calculated without active restaurant pricing data.");
-        return averages.Sum(item => item.AverageDailyPriceKwd * item.RestaurantCount) / restaurantCount;
+        throw new InvalidOperationException($"Pricing cannot be calculated because tier '{tier}' has no active restaurants.");
     }
 
     public static RestaurantTier ResolveTier(
@@ -60,7 +58,8 @@ public static class SubscriptionPackagePricingCalculator
         decimal mean,
         decimal standardDeviation)
     {
-        if (restaurantCount == 1)
+        if (restaurantCount <= 0) throw new ArgumentOutOfRangeException(nameof(restaurantCount));
+        if (restaurantCount == 1 || standardDeviation <= 0m)
         {
             if (dailyPrice < 4.5m) return RestaurantTier.Basic;
             if (dailyPrice >= 6m) return RestaurantTier.Elite;

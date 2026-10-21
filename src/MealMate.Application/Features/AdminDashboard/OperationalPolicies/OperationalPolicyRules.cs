@@ -1,4 +1,4 @@
-﻿using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
@@ -20,6 +20,11 @@ public static class OperationalPolicyRules
         if (s.Cancellation.KitchenLockedRefundPercentage != 0) return "Committed kitchen days cannot be refunded through this policy.";
         if (!s.Cancellation.RefundToCashWallet) return "Only cash wallet refunds are supported. Bank refunds require a payment-provider refund workflow.";
         if (s.Freeze.LeadDaysNotice is < 0 or > 365 || s.Freeze.MinDays is < 1 or > 365 || s.Freeze.MaxDays < s.Freeze.MinDays || s.Freeze.MaxDays > 365 || s.Freeze.MaxOccurrences is < 0 or > 1000 || s.Freeze.MinGapDays is < 0 or > 365 || s.Freeze.MaxTotalDays is < 0 or > 3650) return "Freeze duration, notice, occurrence, gap or total allowance is invalid.";
+        if (s.Freeze.FreezeDeadlineHours.HasValue)
+        {
+            if (s.Freeze.FreezeDeadlineHours is < 12 or > 168) return "Freeze deadline hours must be between 12 and 168.";
+            if (s.Freeze.FreezeDeadlineHours.Value < s.Cutoff.CutoffLeadHours) return "Freeze deadline notice must not be less than the selection lock cutoff.";
+        }
         if (s.AutoSelection?.MinutesBeforeCutoff is < 0 or > 10080) return "Automatic selection lead must be between 0 minutes and 7 days.";
         if (s.Renewal?.AvailableDaysBeforeEnd is < 0 or > 365) return "Renewal availability must be between 0 and 365 days.";
         if (s.DeliveryDelay?.SevereDelayThresholdMinutes is < 1 or > 240) return "Severe delivery delay threshold must be between 1 and 240 minutes.";

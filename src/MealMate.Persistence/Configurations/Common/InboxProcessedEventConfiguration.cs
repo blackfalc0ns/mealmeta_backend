@@ -14,7 +14,13 @@ public sealed class InboxProcessedEventConfiguration : IEntityTypeConfiguration<
         builder.Property(x => x.ConsumerName).HasMaxLength(256).IsRequired();
         builder.Property(x => x.EventId).IsRequired();
         builder.Property(x => x.ProcessedAtUtc).IsRequired();
+        builder.Property(x => x.FinancePayloadHash).HasMaxLength(64);
 
         builder.HasIndex(x => new { x.ConsumerName, x.EventId }).IsUnique();
+
+        builder.HasOne<MealMate.Domain.CentralAccounting.JournalEntry>()
+            .WithMany()
+            .HasForeignKey(x => x.ResultJournalEntryId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

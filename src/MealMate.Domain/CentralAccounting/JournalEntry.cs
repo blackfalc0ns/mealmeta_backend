@@ -5,6 +5,21 @@ namespace MealMate.Domain.CentralAccounting;
 
 public sealed class JournalEntry : BaseEntity
 {
+    /// <summary>Null for legacy journals that have not been classified to an entity.</summary>
+    public Guid? LegalEntityId { get; set; }
+
+    public Guid? AccountingPeriodId { get; set; }
+
+    public AccountingPeriod? AccountingPeriod { get; set; }
+
+    public DateOnly? BusinessDate { get; set; }
+
+    public string? CurrencyCode { get; set; }
+
+    public string? PayloadHash { get; set; }
+
+    public DateTime? SourceOccurredAtUtc { get; set; }
+
     public string EntryNumber { get; set; } = default!;
 
     public JournalEntryStatus Status { get; set; } = JournalEntryStatus.Draft;

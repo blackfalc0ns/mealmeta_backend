@@ -720,11 +720,26 @@ public sealed class SubscriptionCatalogAvailabilityTests
                 ReferencePrice26 = new Money(104m, "KWD"), ContractedSupplyPrice26 = new Money(80m, "KWD"),
                 LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = Now.AddDays(-1),
             });
+            // Keep the intended Basic test restaurant in a real cohort: a 4 KWD/day
+            // candidate is below mean - 0.5 SD when two non-offered peers are at 10.
+            db.AddRange(
+                new RestaurantBundlePricing
+                {
+                    ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = Guid.NewGuid(),
+                    ReferencePrice26 = new Money(260m, "KWD"), ContractedSupplyPrice26 = new Money(200m, "KWD"),
+                    LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = Now.AddDays(-1),
+                },
+                new RestaurantBundlePricing
+                {
+                    ProgramId = program.Id, BundleId = bundle.Id, RestaurantId = Guid.NewGuid(),
+                    ReferencePrice26 = new Money(260m, "KWD"), ContractedSupplyPrice26 = new Money(200m, "KWD"),
+                    LockStatus = PriceLockStatus.Locked, EffectiveFromUtc = Now.AddDays(-1),
+                });
         }
 
         if (classifyRestaurant)
         {
-            var run = new ClassificationRun { ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle, RestaurantCount = 1, ConfidenceLevel = "95", RunAtUtc = Now };
+            var run = new ClassificationRun { ProgramId = program.Id, Program = program, BundleId = bundle.Id, Bundle = bundle, RestaurantCount = 3, ConfidenceLevel = "95", RunAtUtc = Now };
             db.Add(run);
             db.RestaurantClassifications.Add(new RestaurantClassification
             {
