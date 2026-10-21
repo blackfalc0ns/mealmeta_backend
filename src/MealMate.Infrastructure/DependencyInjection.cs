@@ -137,6 +137,7 @@ public static class DependencyInjection
             });
 
         services.AddSingleton<IFcmMessagingClient, FirebaseFcmMessagingClient>();
+        services.AddScoped<MediatR.INotificationHandler<MealMate.Application.Common.Outbox.OutboxLifecycleNotification>, DeliveryManagerSupportPushHandler>();
         services.AddScoped<ICustomerPushNotifier, FirebaseCustomerPushNotifier>();
         services.AddScoped<IDriverPushNotifier, FirebaseDriverPushNotifier>();
         services.AddScoped<ICustomerPushTestService, CustomerPushTestService>();

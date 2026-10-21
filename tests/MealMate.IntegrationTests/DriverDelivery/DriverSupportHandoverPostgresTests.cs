@@ -3,6 +3,7 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.DriverDelivery.DriverApp;
+using MealMate.Application.Features.DriverDelivery.SupervisorNotifications;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
@@ -205,6 +206,41 @@ public sealed class DriverSupportHandoverPostgresTests : IAsyncLifetime
         resolvedHold.ResolvedAtUtc.Should().NotBeNull();
         (await afterFollowUp.AuditLogs.CountAsync(x => x.Action == "SupportHandoverFollowUpReturnedToKitchen" && x.EntityId == resolvedHold.Id)).Should().Be(1);
         (await afterFollowUp.DriverSupportHandoverBoxes.SingleAsync(x => x.TripStopId == missingStop.Id)).Status.Should().Be("Missing", "returning the physical box does not rewrite the driver's original receipt evidence");
+    }
+
+    [Fact]
+    public async Task SupportPushAndInboxCommitOrRollbackTogether()
+    {
+        var notification = new DeliveryManagerNotification
+        {
+            UserId = Guid.NewGuid(), RestaurantId = Guid.NewGuid(), Type = "driver-support-issue",
+            TitleAr = "بلاغ", TitleEn = "Issue", BodyAr = "مشكلة الطريق", BodyEn = "Road issue",
+            Section = "support", SentAtUtc = DateTime.UtcNow
+        };
+        var transaction = new PostgresApplicationTransactionExecutor(_db);
+        Func<Task> failAfterSave = async () => await transaction.ExecuteResultAsync<bool>(async ct =>
+        {
+            DeliveryManagerSupportPushOutbox.Add(_db, notification);
+            await _db.SaveChangesAsync(ct);
+            throw new InvalidOperationException("Injected failure after saving inbox and push.");
+        }, default);
+        await failAfterSave.Should().ThrowAsync<InvalidOperationException>();
+        await using var fresh = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseNpgsql(_database.GetConnectionString()).Options, Substitute.For<IDomainEventDispatcher>());
+        (await fresh.DeliveryManagerNotifications.CountAsync()).Should().Be(0);
+        (await fresh.OutboxMessages.CountAsync(x => x.EventType == DeliveryManagerSupportPushOutbox.EventType)).Should().Be(0);
+
+        var successful = await new PostgresApplicationTransactionExecutor(fresh).ExecuteResultAsync<bool>(async ct =>
+        {
+            DeliveryManagerSupportPushOutbox.Add(fresh, notification);
+            await fresh.SaveChangesAsync(ct);
+            return Result.Success(true);
+        }, default);
+        successful.IsSuccess.Should().BeTrue();
+        (await fresh.DeliveryManagerNotifications.CountAsync()).Should().Be(1);
+        var push = await fresh.OutboxMessages.SingleAsync(x => x.EventType == DeliveryManagerSupportPushOutbox.EventType);
+        push.AggregateId.Should().Be(notification.Id.ToString("D"));
+        push.ProcessedAtUtc.Should().BeNull();
     }
 
     private sealed class ThrowOnceOnSaveInterceptor : SaveChangesInterceptor

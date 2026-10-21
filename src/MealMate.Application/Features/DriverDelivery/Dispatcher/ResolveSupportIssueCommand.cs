@@ -1,3 +1,4 @@
+using MealMate.Application.Features.DriverDelivery.SupervisorNotifications;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
@@ -172,7 +173,7 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
                 .Where(x => x.RestaurantId == restaurantId.Value && x.Status == VerificationStatus.Approved && x.ResultingUserId.HasValue)
                 .Select(x => x.ResultingUserId!.Value).Distinct().ToArray();
             foreach (var managerUserId in managerUserIds)
-                _db.DeliveryManagerNotifications.Add(new MealMate.Domain.IdentityAccess.DeliveryManagerNotification
+                DeliveryManagerSupportPushOutbox.Add(_db, new MealMate.Domain.IdentityAccess.DeliveryManagerNotification
                 {
                     UserId = managerUserId, RestaurantId = restaurantId, Type = "driver-support-issue-resolved",
                     TitleAr = _messages.GetArabicMessage("driver_support_issue.notification_title", "تحديث بلاغ دعم السائق"),

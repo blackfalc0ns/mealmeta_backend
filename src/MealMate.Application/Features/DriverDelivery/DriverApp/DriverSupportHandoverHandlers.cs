@@ -1,3 +1,4 @@
+using MealMate.Application.Features.DriverDelivery.SupervisorNotifications;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
@@ -564,6 +565,6 @@ public sealed class DriverSupportHandoverHandlers :
         var managers = _db.DeliveryManagerRegistrations.Where(x => x.RestaurantId == handover.RestaurantId && x.Status == VerificationStatus.Approved && x.ResultingUserId.HasValue)
             .Select(x => x.ResultingUserId!.Value).Distinct().ToArray();
         foreach (var userId in managers)
-            _db.DeliveryManagerNotifications.Add(new DeliveryManagerNotification { UserId = userId, RestaurantId = handover.RestaurantId, Type = "driver-support-handover", TitleAr = _messages.GetArabicMessage("driver_support_handover.notification_title", "نقل عهدة السائق"), TitleEn = _messages.GetEnglishMessage("driver_support_handover.notification_title_en", "Driver support handover"), BodyAr = _messages.GetArabicMessage("driver_support_handover.notification_dispatch_followup", "نقل العهدة يحتاج متابعة من فريق التوزيع."), BodyEn = _messages.GetEnglishMessage("driver_support_handover.notification_dispatch_followup_en", "The handover needs dispatch follow-up."), Section = "support", SubjectId = handover.Id, DeepLink = $"/dispatcher/support-handovers/{handover.Id:D}", SentAtUtc = _clock.UtcNow });
+            DeliveryManagerSupportPushOutbox.Add(_db, new DeliveryManagerNotification { UserId = userId, RestaurantId = handover.RestaurantId, Type = "driver-support-handover", TitleAr = _messages.GetArabicMessage("driver_support_handover.notification_title", "نقل عهدة السائق"), TitleEn = _messages.GetEnglishMessage("driver_support_handover.notification_title_en", "Driver support handover"), BodyAr = _messages.GetArabicMessage("driver_support_handover.notification_dispatch_followup", "نقل العهدة يحتاج متابعة من فريق التوزيع."), BodyEn = _messages.GetEnglishMessage("driver_support_handover.notification_dispatch_followup_en", "The handover needs dispatch follow-up."), Section = "support", SubjectId = handover.Id, DeepLink = $"/dispatcher/support-handovers/{handover.Id:D}", SentAtUtc = _clock.UtcNow });
     }
 }

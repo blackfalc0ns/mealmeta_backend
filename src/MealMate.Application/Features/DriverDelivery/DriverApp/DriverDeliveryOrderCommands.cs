@@ -1,3 +1,4 @@
+using MealMate.Application.Features.DriverDelivery.SupervisorNotifications;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
@@ -1579,7 +1580,7 @@ public sealed class DriverDeliveryOrderCommandHandlers
             .Select(x => x.ResultingUserId!.Value).Distinct().ToArray();
         foreach (var userId in managerIds)
         {
-            _db.DeliveryManagerNotifications.Add(new DeliveryManagerNotification
+            DeliveryManagerSupportPushOutbox.Add(_db, new DeliveryManagerNotification
             {
                 UserId = userId, RestaurantId = restaurantId, Type = "driver-support-issue",
                 TitleAr = titleAr, TitleEn = titleEn, BodyAr = bodyAr, BodyEn = bodyEn,
