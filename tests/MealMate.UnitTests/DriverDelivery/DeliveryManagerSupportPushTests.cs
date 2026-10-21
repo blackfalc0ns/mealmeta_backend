@@ -7,6 +7,7 @@ using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Infrastructure.Push;
 using MealMate.Persistence;
+using MealMate.Persistence.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -25,6 +26,8 @@ public sealed class DeliveryManagerSupportPushTests : IDisposable
             Type = "driver-support-issue", Section = "support", SubjectId = Guid.NewGuid(),
             TitleAr = "بلاغ السائق", TitleEn = "Driver issue", BodyAr = "مشكلة الطريق", BodyEn = "Road issue",
             DeepLink = "/dispatcher/support/issues/issue", SentAtUtc = DateTime.UtcNow };
+        db.Users.Add(new ApplicationUser { Id = notification.UserId, UserType = UserType.DeliveryManager,
+            AccountStatus = AccountStatus.Active });
         db.DeliveryManagerRegistrations.Add(new DeliveryManagerRegistration { ResultingUserId = notification.UserId,
             RestaurantId = notification.RestaurantId.Value, Status = VerificationStatus.Approved,
             FullName = "Manager", Phone = "123", Email = "manager@test.invalid", NationalId = "123" });
@@ -100,6 +103,34 @@ public sealed class DeliveryManagerSupportPushTests : IDisposable
             .Returns(FcmSendResult.Failed("temporarily unavailable"));
         await FluentActions.Awaiting(() => Handler().Handle(message, default)).Should().ThrowAsync<InvalidOperationException>();
         (await db.DeliveryManagerDeviceTokens.SingleAsync()).IsActive.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DirectRestaurantAccountReceivesPushWithoutRegistrationRequest()
+    {
+        var item = await SeedAsync();
+        db.DeliveryManagerRegistrations.RemoveRange(db.DeliveryManagerRegistrations);
+        (await db.Users.SingleAsync()).RestaurantId = item.RestaurantId;
+        db.DeliveryManagerDeviceTokens.Add(new() { UserId = item.UserId, Token = "direct-device" });
+        await db.SaveChangesAsync();
+        await Handler().Handle(await EventAsync(), default);
+        await fcm.Received(1).SendAsync("direct-device", item.TitleAr, item.BodyAr,
+            Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SuspendedOrMovedAccountCannotReceivePushEvenWithOldApproval(bool suspended)
+    {
+        var item = await SeedAsync();
+        var account = await db.Users.SingleAsync();
+        if (suspended) account.AccountStatus = AccountStatus.Suspended;
+        else account.RestaurantId = Guid.NewGuid();
+        db.DeliveryManagerDeviceTokens.Add(new() { UserId = item.UserId, Token = "old-device" });
+        await db.SaveChangesAsync();
+        await Handler().Handle(await EventAsync(), default);
+        await fcm.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default!, default);
     }
 
     [Fact]

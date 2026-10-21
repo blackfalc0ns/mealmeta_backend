@@ -24,6 +24,9 @@ public interface IAppDbContext
 {
     Task<IReadOnlySet<Guid>> GetActiveAccountUserIdsAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken);
 
+    /// <summary>Active delivery-manager accounts currently authorized for the restaurant.</summary>
+    Task<IReadOnlySet<Guid>> GetDeliveryManagerUserIdsAsync(Guid restaurantId, CancellationToken cancellationToken);
+
     /// <summary>Stored phone number for a user id, or null when absent/unconfirmed.</summary>
     Task<string?> GetUserPhoneAsync(Guid userId, CancellationToken cancellationToken);
     Task<string?> GetUserDisplayNameAsync(Guid userId, CancellationToken cancellationToken);

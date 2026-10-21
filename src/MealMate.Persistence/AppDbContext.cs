@@ -81,6 +81,18 @@ public sealed class AppDbContext
             .ToHashSetAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlySet<Guid>> GetDeliveryManagerUserIdsAsync(Guid restaurantId, CancellationToken cancellationToken)
+    {
+        return await Users.AsNoTracking()
+            .Where(user => user.UserType == MealMate.Domain.Enums.UserType.DeliveryManager
+                && user.AccountStatus == MealMate.Domain.Enums.AccountStatus.Active
+                && (user.RestaurantId == restaurantId
+                    || (user.RestaurantId == null && DeliveryManagerRegistrations.Any(registration =>
+                        registration.RestaurantId == restaurantId && registration.ResultingUserId == user.Id
+                        && registration.Status == MealMate.Domain.Enums.VerificationStatus.Approved && !registration.IsDeleted))))
+            .Select(user => user.Id).ToHashSetAsync(cancellationToken);
+    }
+
     public DbSet<Country> Countries => Set<Country>();
     public DbSet<Region> Regions => Set<Region>();
     public DbSet<RuleVersion> RuleVersions => Set<RuleVersion>();

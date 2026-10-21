@@ -279,7 +279,7 @@ public sealed class DriverSupportHandoverHandlers :
             box.Status = receipt; box.ScanMethod = request.ScanMethod; box.ScannedAtUtc = _clock.UtcNow; box.FollowUpNote = note;
             h.Status = "Receiving";
             AddHandoverOutbox(h, $"box-{receipt.ToLowerInvariant()}", $"driver-support-handover:{h.Id:N}:box:{box.Id:N}:{receipt}", new { BoxId = box.Id, ReceiptStatus = receipt });
-            if (receipt is "Missing" or "Damaged") NotifyDispatchFollowUp(h);
+            if (receipt is "Missing" or "Damaged") await NotifyDispatchFollowUpAsync(h, token);
             await _db.SaveChangesAsync(token); return Result.Success(await MapAsync(h, token));
         }, ct);
 
@@ -560,10 +560,9 @@ public sealed class DriverSupportHandoverHandlers :
         });
     }
 
-    private void NotifyDispatchFollowUp(DriverSupportHandover handover)
+    private async Task NotifyDispatchFollowUpAsync(DriverSupportHandover handover, CancellationToken cancellationToken)
     {
-        var managers = _db.DeliveryManagerRegistrations.Where(x => x.RestaurantId == handover.RestaurantId && x.Status == VerificationStatus.Approved && x.ResultingUserId.HasValue)
-            .Select(x => x.ResultingUserId!.Value).Distinct().ToArray();
+        var managers = await _db.GetDeliveryManagerUserIdsAsync(handover.RestaurantId, cancellationToken);
         foreach (var userId in managers)
             DeliveryManagerSupportPushOutbox.Add(_db, new DeliveryManagerNotification { UserId = userId, RestaurantId = handover.RestaurantId, Type = "driver-support-handover", TitleAr = _messages.GetArabicMessage("driver_support_handover.notification_title", "نقل عهدة السائق"), TitleEn = _messages.GetEnglishMessage("driver_support_handover.notification_title_en", "Driver support handover"), BodyAr = _messages.GetArabicMessage("driver_support_handover.notification_dispatch_followup", "نقل العهدة يحتاج متابعة من فريق التوزيع."), BodyEn = _messages.GetEnglishMessage("driver_support_handover.notification_dispatch_followup_en", "The handover needs dispatch follow-up."), Section = "support", SubjectId = handover.Id, DeepLink = $"/dispatcher/support-handovers/{handover.Id:D}", SentAtUtc = _clock.UtcNow });
     }

@@ -135,6 +135,11 @@ public sealed class DriverSupportHandoverPostgresTests : IAsyncLifetime
 
         await using (var before = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_database.GetConnectionString()).Options, Substitute.For<IDomainEventDispatcher>()))
         {
+            // This manager was created as a restaurant account without a registration request.
+            var notice = await before.DeliveryManagerNotifications.SingleAsync(x => x.SubjectId == handoverId);
+            notice.UserId.Should().Be(managerUserId);
+            (await before.OutboxMessages.CountAsync(x => x.EventType == DeliveryManagerSupportPushOutbox.EventType
+                && x.AggregateId == notice.Id.ToString("D"))).Should().Be(1);
             (await before.DriverAssignments.CountAsync(x => x.TripId == trip.Id && x.Status == "Active")).Should().Be(1);
             (await before.TripStops.SingleAsync(x => x.Id == receivedStop.Id)).TripId.Should().Be(trip.Id);
         }

@@ -831,7 +831,7 @@ public sealed class DriverDeliveryOrderCommandHandlers
             ActorUserId = _currentUser.UserId
         });
 
-        AddDriverSupportIssueEvent(complaint, stop, "created", now);
+        await AddDriverSupportIssueEventAsync(complaint, stop, "created", now, cancellationToken);
 
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -1305,7 +1305,7 @@ public sealed class DriverDeliveryOrderCommandHandlers
             ActorUserId = _currentUser.UserId
         });
 
-        AddDriverSupportIssueEvent(complaint, stop, "reassignment-requested", now);
+        await AddDriverSupportIssueEventAsync(complaint, stop, "reassignment-requested", now, cancellationToken);
 
         try
         {
@@ -1558,7 +1558,7 @@ public sealed class DriverDeliveryOrderCommandHandlers
         return contentType ?? "application/octet-stream";
     }
 
-    private void AddDriverSupportIssueEvent(Complaint complaint, TripStop stop, string eventName, DateTime occurredAtUtc)
+    private async Task AddDriverSupportIssueEventAsync(Complaint complaint, TripStop stop, string eventName, DateTime occurredAtUtc, CancellationToken cancellationToken)
     {
         if (complaint.RestaurantId is not Guid restaurantId) return;
         var driverId = complaint.DriverProfileId;
@@ -1575,9 +1575,7 @@ public sealed class DriverDeliveryOrderCommandHandlers
                 Section = "support", SubjectId = complaint.Id, DeepLink = $"/driver/support/issues/{complaint.Id:D}", SentAtUtc = occurredAtUtc
             });
         }
-        var managerIds = _db.DeliveryManagerRegistrations
-            .Where(x => x.RestaurantId == restaurantId && x.Status == VerificationStatus.Approved && x.ResultingUserId.HasValue)
-            .Select(x => x.ResultingUserId!.Value).Distinct().ToArray();
+        var managerIds = await _db.GetDeliveryManagerUserIdsAsync(restaurantId, cancellationToken);
         foreach (var userId in managerIds)
         {
             DeliveryManagerSupportPushOutbox.Add(_db, new DeliveryManagerNotification

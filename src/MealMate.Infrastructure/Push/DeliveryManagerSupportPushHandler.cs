@@ -2,7 +2,6 @@ using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Outbox;
 using MealMate.Application.Features.DriverDelivery.SupervisorNotifications;
-using MealMate.Domain.Enums;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -22,9 +21,8 @@ public sealed class DeliveryManagerSupportPushHandler(
         var item = await db.DeliveryManagerNotifications.AsNoTracking()
             .SingleOrDefaultAsync(x => x.Id == payload.NotificationId, cancellationToken);
         if (item?.RestaurantId is not Guid restaurantId) return;
-        if (!await db.DeliveryManagerRegistrations.AsNoTracking().AnyAsync(x =>
-                x.RestaurantId == restaurantId && x.ResultingUserId == item.UserId
-                && x.Status == VerificationStatus.Approved && !x.IsDeleted, cancellationToken)) return;
+        var recipients = await db.GetDeliveryManagerUserIdsAsync(restaurantId, cancellationToken);
+        if (!recipients.Contains(item.UserId)) return;
 
         var devices = await db.DeliveryManagerDeviceTokens.Where(x => x.UserId == item.UserId && x.IsActive
                 && !x.IsDeleted && (x.RestaurantId == null || x.RestaurantId == restaurantId))

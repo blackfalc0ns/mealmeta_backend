@@ -233,6 +233,9 @@ public class DriverSupportHandoverTests
     public async Task DispatcherFollowUpNotification_IsCreatedOnlyForMissingOrDamagedReceipt()
     {
         var s = await Seed(); var handler = Handler();
+        // Restaurant approval can create this real manager account without a registration request.
+        _db.DeliveryManagerRegistrations.RemoveRange(_db.DeliveryManagerRegistrations);
+        await _db.SaveChangesAsync();
         var created = await handler.Handle(new CreateDriverSupportHandoverCommand(s.Issue.Id, s.Replacement.Id, "attempt-notify"), default);
         _user.UserId.Returns(s.Replacement.UserId); _user.UserType.Returns(UserType.Driver);
         (await handler.Handle(new ArriveDriverSupportHandoverCommand(created.Value.HandoverId, 29.3m, 47.9m), default)).IsSuccess.Should().BeTrue();

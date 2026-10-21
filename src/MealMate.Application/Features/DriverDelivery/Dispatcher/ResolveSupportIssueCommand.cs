@@ -169,9 +169,7 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
 
         if (restaurantId.HasValue)
         {
-            var managerUserIds = _db.DeliveryManagerRegistrations
-                .Where(x => x.RestaurantId == restaurantId.Value && x.Status == VerificationStatus.Approved && x.ResultingUserId.HasValue)
-                .Select(x => x.ResultingUserId!.Value).Distinct().ToArray();
+            var managerUserIds = await _db.GetDeliveryManagerUserIdsAsync(restaurantId.Value, cancellationToken);
             foreach (var managerUserId in managerUserIds)
                 DeliveryManagerSupportPushOutbox.Add(_db, new MealMate.Domain.IdentityAccess.DeliveryManagerNotification
                 {
