@@ -1371,4 +1371,37 @@
 <data name="driver_reassignment.notification_accepted" xml:space="preserve"><value>وافق مسؤول التوصيل على طلب إعادة الإسناد. تظل العهدة لديك حتى تأكيد نقلها.</value></data>
 <data name="driver_reassignment.decision_invalid" xml:space="preserve"><value>القرار يجب أن يكون قبولاً أو رفضاً والملاحظات حتى 500 حرف؛ سبب الرفض مطلوب من 3 أحرف.</value></data>
 <data name="driver_support_handover.reassignment_rejected" xml:space="preserve"><value>تم رفض طلب إعادة الإسناد.</value></data>
+<data name="driver_support_issue.forbidden" xml:space="preserve"><value>يلزم تسجيل الدخول كسائق.</value></data>
+<data name="driver_support_issue.not_found" xml:space="preserve"><value>لم يتم العثور على بلاغ الدعم.</value></data>
+<data name="driver_support_issue.query_invalid" xml:space="preserve"><value>مرشحات بلاغ الدعم غير صالحة.</value></data>
+<data name="driver_support_issue.photos_invalid" xml:space="preserve"><value>مفاتيح تخزين الصور غير صالحة.</value></data>
+<data name="driver_support_issue.photo_upload_invalid" xml:space="preserve"><value>إحدى الصور أو أكثر ليست من ملفات السائق الصالحة.</value></data>
+<data name="driver_support_issue.photo_missing" xml:space="preserve"><value>تعذر العثور على ملف صورة.</value></data>
+<data name="driver_support_issue.photo_limit" xml:space="preserve"><value>يسمح بثلاث صور كحد أقصى للبلاغ.</value></data>
+<data name="driver_support_issue.terminal" xml:space="preserve"><value>تم حل هذا البلاغ بالفعل.</value></data>
+<data name="driver_support_issue.progress_invalid" xml:space="preserve"><value>تحديث تقدم البلاغ غير صالح.</value></data>
+<data name="driver_support_issue.progress_order_invalid" xml:space="preserve"><value>يجب أن تتبع تحديثات التقدم الترتيب المحدد.</value></data>
+<data name="driver_support_issue.incomplete" xml:space="preserve"><value>لا يمكن تحديث بلاغ الدعم هذا.</value></data>
+<data name="driver_support_issue.status.UnderReview" xml:space="preserve"><value>قيد المراجعة</value></data>
+<data name="driver_support_issue.status.AwaitingReply" xml:space="preserve"><value>بانتظار الرد</value></data>
+<data name="driver_support_issue.status.Resolved" xml:space="preserve"><value>تم الحل</value></data>
+<data name="driver_support_issue.stage.Submitted" xml:space="preserve"><value>تم الإرسال</value></data>
+<data name="driver_support_issue.stage.UnderReview" xml:space="preserve"><value>قيد المراجعة</value></data>
+<data name="driver_support_issue.stage.ContactingCustomer" xml:space="preserve"><value>جارٍ التواصل مع العميل</value></data>
+<data name="driver_support_issue.stage.Resolved" xml:space="preserve"><value>تم الحل</value></data>
+<data name="driver_support_issue.notification_title" xml:space="preserve"><value>تحديث بلاغ دعم السائق</value></data>
+<data name="driver_support_issue.notification_UnderReview" xml:space="preserve"><value>بلاغ الدعم الخاص بك قيد المراجعة.</value></data>
+<data name="driver_support_issue.notification_ContactingCustomer" xml:space="preserve"><value>يتواصل فريق التوزيع مع العميل بشأن بلاغك.</value></data>
+<data name="driver_support_issue.category.CustomerUnavailable" xml:space="preserve"><value>العميل غير متاح</value></data>
+<data name="driver_support_issue.category.AddressIssue" xml:space="preserve"><value>مشكلة في العنوان</value></data>
+<data name="driver_support_issue.category.DamagedBox" xml:space="preserve"><value>بوكس تالف</value></data>
+<data name="driver_support_issue.category.SevereDelay" xml:space="preserve"><value>تأخير شديد</value></data>
+<data name="driver_support_issue.category.CustomerRefusal" xml:space="preserve"><value>رفض العميل الاستلام</value></data>
+<data name="driver_support_issue.category.VehicleBreakdown" xml:space="preserve"><value>عطل بالمركبة</value></data>
+<data name="driver_support_issue.category.TrafficAccident" xml:space="preserve"><value>حادث سير</value></data>
+<data name="driver_support_issue.category.RoadIssue" xml:space="preserve"><value>مشكلة في الطريق</value></data>
+<data name="driver_support_issue.category.SevereWeather" xml:space="preserve"><value>سوء الأحوال الجوية</value></data>
+<data name="driver_support_issue.category.Other" xml:space="preserve"><value>مشكلة أخرى</value></data>
+<data name="driver_support_issue.category.DriverReassignmentRequested" xml:space="preserve"><value>طلب إعادة إسناد</value></data>
+<data name="driver_support_issue.category.DeliveryIssue" xml:space="preserve"><value>مشكلة في التوصيل</value></data>
 </root>

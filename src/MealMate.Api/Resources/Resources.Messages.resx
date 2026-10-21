@@ -1429,4 +1429,37 @@
 <data name="driver_reassignment.notification_accepted" xml:space="preserve"><value>Dispatch accepted your reassignment request. Custody remains with you until handover completion.</value></data>
 <data name="driver_reassignment.decision_invalid" xml:space="preserve"><value>Provide Accepted or Rejected and notes up to 500 characters; rejection requires at least 3 characters.</value></data>
 <data name="driver_support_handover.reassignment_rejected" xml:space="preserve"><value>The reassignment request was rejected.</value></data>
+<data name="driver_support_issue.forbidden" xml:space="preserve"><value>Driver access is required.</value></data>
+<data name="driver_support_issue.not_found" xml:space="preserve"><value>Support issue was not found.</value></data>
+<data name="driver_support_issue.query_invalid" xml:space="preserve"><value>The support issue filters are invalid.</value></data>
+<data name="driver_support_issue.photos_invalid" xml:space="preserve"><value>Photo storage keys are invalid.</value></data>
+<data name="driver_support_issue.photo_upload_invalid" xml:space="preserve"><value>One or more photos are not valid driver uploads.</value></data>
+<data name="driver_support_issue.photo_missing" xml:space="preserve"><value>A photo file could not be found.</value></data>
+<data name="driver_support_issue.photo_limit" xml:space="preserve"><value>An issue can have at most three photos.</value></data>
+<data name="driver_support_issue.terminal" xml:space="preserve"><value>This issue is already resolved.</value></data>
+<data name="driver_support_issue.progress_invalid" xml:space="preserve"><value>The support progress update is invalid.</value></data>
+<data name="driver_support_issue.progress_order_invalid" xml:space="preserve"><value>Progress updates must follow the required order.</value></data>
+<data name="driver_support_issue.incomplete" xml:space="preserve"><value>This support issue cannot accept updates.</value></data>
+<data name="driver_support_issue.status.UnderReview" xml:space="preserve"><value>Under review</value></data>
+<data name="driver_support_issue.status.AwaitingReply" xml:space="preserve"><value>Awaiting reply</value></data>
+<data name="driver_support_issue.status.Resolved" xml:space="preserve"><value>Resolved</value></data>
+<data name="driver_support_issue.stage.Submitted" xml:space="preserve"><value>Submitted</value></data>
+<data name="driver_support_issue.stage.UnderReview" xml:space="preserve"><value>Under review</value></data>
+<data name="driver_support_issue.stage.ContactingCustomer" xml:space="preserve"><value>Contacting customer</value></data>
+<data name="driver_support_issue.stage.Resolved" xml:space="preserve"><value>Resolved</value></data>
+<data name="driver_support_issue.notification_title" xml:space="preserve"><value>Driver support issue update</value></data>
+<data name="driver_support_issue.notification_UnderReview" xml:space="preserve"><value>Your support issue is under review.</value></data>
+<data name="driver_support_issue.notification_ContactingCustomer" xml:space="preserve"><value>Dispatch is contacting the customer about your issue.</value></data>
+<data name="driver_support_issue.category.CustomerUnavailable" xml:space="preserve"><value>Customer unavailable</value></data>
+<data name="driver_support_issue.category.AddressIssue" xml:space="preserve"><value>Address issue</value></data>
+<data name="driver_support_issue.category.DamagedBox" xml:space="preserve"><value>Damaged box</value></data>
+<data name="driver_support_issue.category.SevereDelay" xml:space="preserve"><value>Severe delay</value></data>
+<data name="driver_support_issue.category.CustomerRefusal" xml:space="preserve"><value>Customer refusal</value></data>
+<data name="driver_support_issue.category.VehicleBreakdown" xml:space="preserve"><value>Vehicle breakdown</value></data>
+<data name="driver_support_issue.category.TrafficAccident" xml:space="preserve"><value>Traffic accident</value></data>
+<data name="driver_support_issue.category.RoadIssue" xml:space="preserve"><value>Road issue</value></data>
+<data name="driver_support_issue.category.SevereWeather" xml:space="preserve"><value>Severe weather</value></data>
+<data name="driver_support_issue.category.Other" xml:space="preserve"><value>Other issue</value></data>
+<data name="driver_support_issue.category.DriverReassignmentRequested" xml:space="preserve"><value>Driver reassignment request</value></data>
+<data name="driver_support_issue.category.DeliveryIssue" xml:space="preserve"><value>Delivery issue</value></data>
 </root>
