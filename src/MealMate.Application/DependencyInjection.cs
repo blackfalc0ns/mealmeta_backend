@@ -90,6 +90,7 @@ public static class DependencyInjection
         services.AddScoped<Features.MealLabels.IMealLabelService, Features.MealLabels.MealLabelService>();
         services.AddScoped<Features.AdminOrders.AdminOrderDocumentsQueryService>();
         services.AddScoped<Features.CustomerCalendar.ISubscriptionDayDispatchService, Features.CustomerCalendar.SubscriptionDayDispatchService>();
+        services.AddScoped<Features.CustomerCompensations.ICustomerCompensationService, Features.CustomerCompensations.CustomerCompensationService>();
         services.AddScoped<Features.IdentityAccess.Customers.ICustomerDeliveryAddressService, Features.IdentityAccess.Customers.CustomerDeliveryAddressService>();
         services.AddScoped<Features.IdentityAccess.Customers.ICustomerAddressBook, Features.IdentityAccess.Customers.CustomerAddressHandlers>();
         services.AddScoped<Features.FamilyManager.IFamilyCalendarAccessGate, Features.FamilyManager.FamilyCalendarAccessGate>();

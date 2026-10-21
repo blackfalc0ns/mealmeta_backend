@@ -212,6 +212,7 @@ public sealed class AppDbContext
     public DbSet<PlatformCapacityPolicy> PlatformCapacityPolicies => Set<PlatformCapacityPolicy>();
     public DbSet<ServiceCapacityCommitment> ServiceCapacityCommitments => Set<ServiceCapacityCommitment>();
     public DbSet<CapacityReductionRequest> CapacityReductionRequests => Set<CapacityReductionRequest>();
+    public DbSet<CustomerServiceCompensation> CustomerServiceCompensations => Set<CustomerServiceCompensation>();
     public DbSet<RestaurantServiceRegion> RestaurantServiceRegions => Set<RestaurantServiceRegion>();
     public DbSet<DailyCapacity> DailyCapacities => Set<DailyCapacity>();
     public DbSet<BusyStatus> BusyStatuses => Set<BusyStatus>();

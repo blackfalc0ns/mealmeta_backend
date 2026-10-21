@@ -159,6 +159,7 @@ public interface IAppDbContext
     DbSet<PlatformCapacityPolicy> PlatformCapacityPolicies { get; }
     DbSet<ServiceCapacityCommitment> ServiceCapacityCommitments { get; }
     DbSet<CapacityReductionRequest> CapacityReductionRequests { get; }
+    DbSet<CustomerServiceCompensation> CustomerServiceCompensations { get; }
     DbSet<BusyStatus> BusyStatuses { get; }
     DbSet<RestaurantOperatingSchedule> RestaurantOperatingSchedules { get; }
     DbSet<RestaurantOperatingDayException> RestaurantOperatingDayExceptions { get; }
