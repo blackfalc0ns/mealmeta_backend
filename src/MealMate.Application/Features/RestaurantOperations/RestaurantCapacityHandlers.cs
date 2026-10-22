@@ -686,13 +686,15 @@ public sealed class RestaurantCapacityService
 
     private async Task<int> CountConfirmedMealsForDateAsync(Guid restaurantId, DateOnly date, CancellationToken cancellationToken)
     {
-        var countFromSubDays = await _db.SubscriptionDays
-            .CountAsync(x => x.RestaurantId == restaurantId && x.ServiceDate == date && x.Status != SubscriptionDayStatus.Cancelled, cancellationToken);
-
-        var countFromSelections = await _db.DailyRestaurantSelections
-            .CountAsync(x => x.RestaurantId == restaurantId && x.SubscriptionDay != null && x.SubscriptionDay.ServiceDate == date, cancellationToken);
-
-        return Math.Max(countFromSubDays, countFromSelections);
+        return await _db.SubscriptionDays
+            .CountAsync(x => x.RestaurantId == restaurantId &&
+                             x.ServiceDate == date &&
+                             x.Status != SubscriptionDayStatus.Cancelled &&
+                             x.Status != SubscriptionDayStatus.Failed &&
+                             x.Status != SubscriptionDayStatus.Frozen &&
+                             x.Status != SubscriptionDayStatus.ReplacementRequired &&
+                             x.Status != SubscriptionDayStatus.ReplacementWindowOpen,
+                        cancellationToken);
     }
 
     private async Task<Dictionary<DateOnly, int>> GetConfirmedMealsByDateAsync(
@@ -701,33 +703,19 @@ public sealed class RestaurantCapacityService
         DateOnly toDate,
         CancellationToken cancellationToken)
     {
-        var subscriptionDayCounts = await _db.SubscriptionDays
+        return await _db.SubscriptionDays
             .AsNoTracking()
             .Where(x => x.RestaurantId == restaurantId &&
                         x.ServiceDate >= fromDate &&
                         x.ServiceDate <= toDate &&
-                        x.Status != SubscriptionDayStatus.Cancelled)
+                        x.Status != SubscriptionDayStatus.Cancelled &&
+                        x.Status != SubscriptionDayStatus.Failed &&
+                        x.Status != SubscriptionDayStatus.Frozen &&
+                        x.Status != SubscriptionDayStatus.ReplacementRequired &&
+                        x.Status != SubscriptionDayStatus.ReplacementWindowOpen)
             .GroupBy(x => x.ServiceDate)
             .Select(group => new { Date = group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.Date, x => x.Count, cancellationToken);
-
-        var selectionCounts = await _db.DailyRestaurantSelections
-            .AsNoTracking()
-            .Where(x => x.RestaurantId == restaurantId &&
-                        x.SubscriptionDay.ServiceDate >= fromDate &&
-                        x.SubscriptionDay.ServiceDate <= toDate)
-            .GroupBy(x => x.SubscriptionDay.ServiceDate)
-            .Select(group => new { Date = group.Key, Count = group.Count() })
-            .ToDictionaryAsync(x => x.Date, x => x.Count, cancellationToken);
-
-        foreach (var (date, count) in selectionCounts)
-        {
-            subscriptionDayCounts[date] = Math.Max(
-                subscriptionDayCounts.GetValueOrDefault(date),
-                count);
-        }
-
-        return subscriptionDayCounts;
     }
 
     private async Task<WorkingDaysScheduleDto> GetWorkingDaysScheduleDtoAsync(Guid restaurantId, CancellationToken cancellationToken)
