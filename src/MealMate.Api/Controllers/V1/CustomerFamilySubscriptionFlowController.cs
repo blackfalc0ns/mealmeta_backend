@@ -410,6 +410,20 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     public Task<IActionResult> Summary(Guid? memberId, CancellationToken cancellationToken)
         => Summary(memberId, null, cancellationToken);
 
+    /// <summary>Returns the verified family invoice and each purchased member subscription.</summary>
+    /// <param name="batchId">Optional checkout batch; omitted selects the latest initial family purchase.</param>
+    /// <param name="cancellationToken">Request cancellation.</param>
+    [HttpGet("confirmation")]
+    [ProducesResponseType(typeof(FamilySubscriptionConfirmationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Confirmation([FromQuery] Guid? batchId, CancellationToken cancellationToken)
+    {
+        if (!IsCustomer()) return Forbid();
+        return HandleResult(await Sender.Send(
+            new GetFamilySubscriptionConfirmationQuery(_currentUser.UserId!.Value, batchId), cancellationToken));
+    }
+
     [HttpGet("payment-status")]
     [ProducesResponseType(typeof(FamilyPaymentStatusDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> PaymentStatus(CancellationToken cancellationToken)

@@ -1501,4 +1501,6 @@
 <data name="driver_support_issue.category.Other" xml:space="preserve"><value>مشكلة أخرى</value></data>
 <data name="driver_support_issue.category.DriverReassignmentRequested" xml:space="preserve"><value>طلب إعادة إسناد</value></data>
 <data name="driver_support_issue.category.DeliveryIssue" xml:space="preserve"><value>مشكلة في التوصيل</value></data>
+  <data name="family.confirmation_not_found" xml:space="preserve"><value>لم يتم العثور على تأكيد عملية الاشتراك العائلي.</value></data>
+  <data name="family.confirmation_not_ready" xml:space="preserve"><value>لم يتم التحقق من دفع الاشتراك العائلي بعد.</value></data>
 </root>

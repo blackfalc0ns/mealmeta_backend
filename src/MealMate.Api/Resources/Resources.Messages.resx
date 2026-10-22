@@ -1561,4 +1561,6 @@
 <data name="driver_support_issue.category.Other" xml:space="preserve"><value>Other issue</value></data>
 <data name="driver_support_issue.category.DriverReassignmentRequested" xml:space="preserve"><value>Driver reassignment request</value></data>
 <data name="driver_support_issue.category.DeliveryIssue" xml:space="preserve"><value>Delivery issue</value></data>
+  <data name="family.confirmation_not_found" xml:space="preserve"><value>Family checkout confirmation was not found.</value></data>
+  <data name="family.confirmation_not_ready" xml:space="preserve"><value>The family payment has not been verified yet.</value></data>
 </root>
