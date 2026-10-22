@@ -19,6 +19,8 @@ using System.Text;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MealMate.Application.Features.FamilyCheckout;
 
@@ -78,6 +80,7 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
     private readonly IFamilyPricingSettingsReader _familyPricing;
     private readonly ISubscriptionFlowCouponService _coupons;
     private readonly FamilyInvoiceOptions _invoiceOptions;
+    private readonly ILogger<FamilyCheckoutService> _logger;
 
     public FamilyCheckoutService(
         IAppDbContext db,
@@ -97,9 +100,11 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
         IFamilySubscriptionAccess? familyAccess = null,
         IFamilyPricingSettingsReader? familyPricing = null,
         IOptions<FamilyInvoiceOptions>? invoiceOptions = null,
-        ISubscriptionFlowCouponService? coupons = null)
+        ISubscriptionFlowCouponService? coupons = null,
+        ILogger<FamilyCheckoutService>? logger = null)
     {
         _db = db;
+        _logger = logger ?? NullLogger<FamilyCheckoutService>.Instance;
         _currentUser = currentUser;
         _users = users;
         _quote = quote;
@@ -612,8 +617,11 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 return Started(reservation, attempt.GatewayPaymentUrl);
             }, cancellationToken);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            // Do not attach exceptions: their messages can include customer or provider data.
+            _logger.LogError("Family checkout initialization failed. BatchId {BatchId} AttemptId {AttemptId} ExceptionType {ExceptionType} StackTrace {StackTrace}",
+                reservation.BatchId, reservation.AttemptId, ex.GetType().FullName, ex.StackTrace);
             // Product decision: an initialization failure (including a timeout)
             // never forces a review stop. The batch is marked Failed and the
             // group returns to Draft so the customer can retry the payment

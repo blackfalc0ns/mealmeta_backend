@@ -29,38 +29,62 @@ public sealed class PayzahPaymentService(HttpClient httpClient, ILogger<PayzahPa
         string customerEmail, string customerMobile, string callbackUrl, string errorUrl,
         string? customerReference = null, int paymentMethodId = 3, CancellationToken cancellationToken = default)
     {
-        if (invoiceValue <= 0 || decimal.Round(invoiceValue, 3) != invoiceValue || string.IsNullOrWhiteSpace(customerReference))
-            throw new ArgumentException("A positive KWD amount with at most three decimals and an application reference are required.");
-        if (paymentMethodId != 3) throw new ArgumentException("Payzah supports hosted checkout method 3; refresh the available payment methods.");
-        if (customerReference.Length > 255 || customerName.Length > 255 || customerEmail.Length > 255 || customerMobile.Length > 255)
-            throw new ArgumentException("Payzah customer fields and reference must be at most 255 characters.");
-        var settings = await SettingsAsync(cancellationToken);
-        if (settings.Config.DefaultCurrency != "KWD") throw new InvalidOperationException("Payzah checkout currently supports the documented KWD currency contract only.");
-        var attempt = new PaymentGatewayAttempt { TrackId = Guid.NewGuid().ToString("N"), CustomerReference = customerReference,
-            ExpectedAmount = invoiceValue, ExpectedCurrency = settings.Config.DefaultCurrency, IsSandbox = settings.Config.IsSandbox };
-        db.PaymentGatewayAttempts.Add(attempt);
-        await db.SaveChangesAsync(cancellationToken);
-        using var request = Request(settings.BaseUrl + "/index", settings.Key);
-        request.Content = JsonContent.Create(new { trackid = attempt.TrackId, amount = invoiceValue.ToString("F3", CultureInfo.InvariantCulture),
-            currency = "414", success_url = BrowserUrl(callbackUrl, attempt.TrackId), error_url = BrowserUrl(errorUrl, attempt.TrackId),
-            language = "ARA", udf1 = customerReference, payment_type = "3", customer_name = customerName,
-            customer_email = customerEmail, customer_phone = ToPayzahPhone(customerMobile) });
-        using var response = await httpClient.SendAsync(request, cancellationToken);
-        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-        var data = RequireData(response, json.RootElement);
-        var paymentId = Text(data, "PaymentID");
-        var paymentUrl = Text(data, "transit_url");
-        if (string.IsNullOrWhiteSpace(paymentUrl))
+        string? diagnosticTrackId = null;
+        int? httpStatus = null;
+        var failureStage = "InputValidation";
+        try
         {
-            paymentUrl = Text(data, "PaymentUrl");
-            if (!string.IsNullOrWhiteSpace(paymentUrl)) paymentUrl += (paymentUrl.Contains('?') ? "&" : "?") + "PaymentID=" + Uri.EscapeDataString(paymentId);
+            if (invoiceValue <= 0 || decimal.Round(invoiceValue, 3) != invoiceValue || string.IsNullOrWhiteSpace(customerReference))
+                throw new ArgumentException("A positive KWD amount with at most three decimals and an application reference are required.");
+            if (paymentMethodId != 3) throw new ArgumentException("Payzah supports hosted checkout method 3; refresh the available payment methods.");
+            if (customerReference.Length > 255 || customerName.Length > 255 || customerEmail.Length > 255 || customerMobile.Length > 255)
+                throw new ArgumentException("Payzah customer fields and reference must be at most 255 characters.");
+            failureStage = "Configuration";
+            var settings = await SettingsAsync(cancellationToken);
+            if (settings.Config.DefaultCurrency != "KWD") throw new InvalidOperationException("Payzah checkout currently supports the documented KWD currency contract only.");
+            var attempt = new PaymentGatewayAttempt { TrackId = Guid.NewGuid().ToString("N"), CustomerReference = customerReference,
+                ExpectedAmount = invoiceValue, ExpectedCurrency = settings.Config.DefaultCurrency, IsSandbox = settings.Config.IsSandbox };
+            diagnosticTrackId = attempt.TrackId;
+            failureStage = "AttemptPersistence";
+            db.PaymentGatewayAttempts.Add(attempt);
+            await db.SaveChangesAsync(cancellationToken);
+            failureStage = "RequestConstruction";
+            using var request = Request(settings.BaseUrl + "/index", settings.Key);
+            request.Content = JsonContent.Create(new { trackid = attempt.TrackId, amount = invoiceValue.ToString("F3", CultureInfo.InvariantCulture),
+                currency = "414", success_url = BrowserUrl(callbackUrl, attempt.TrackId), error_url = BrowserUrl(errorUrl, attempt.TrackId),
+                language = "ARA", udf1 = customerReference, payment_type = "3", customer_name = customerName,
+                customer_email = customerEmail, customer_phone = ToPayzahPhone(customerMobile) });
+            failureStage = "Transport";
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            httpStatus = (int)response.StatusCode;
+            failureStage = "InvalidJson";
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            failureStage = "ProviderRejected";
+            var data = RequireData(response, json.RootElement);
+            failureStage = "InvalidReceipt";
+            var paymentId = Text(data, "PaymentID");
+            var paymentUrl = Text(data, "transit_url");
+            if (string.IsNullOrWhiteSpace(paymentUrl))
+            {
+                paymentUrl = Text(data, "PaymentUrl");
+                if (!string.IsNullOrWhiteSpace(paymentUrl)) paymentUrl += (paymentUrl.Contains('?') ? "&" : "?") + "PaymentID=" + Uri.EscapeDataString(paymentId);
+            }
+            if (string.IsNullOrWhiteSpace(paymentId) || !Uri.TryCreate(paymentUrl, UriKind.Absolute, out var redirect)
+                || redirect.Scheme != "https" || !string.IsNullOrEmpty(redirect.UserInfo) || !string.IsNullOrEmpty(redirect.Fragment) || !(redirect.Host == "devgateway.trytajer.app" || redirect.Host == "payzah.net" || redirect.Host.EndsWith(".payzah.net", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("Payzah returned no valid payment ID and secure hosted redirect.");
+            attempt.PaymentId = paymentId;
+            failureStage = "ReceiptPersistence";
+            await db.SaveChangesAsync(cancellationToken);
+            return new(paymentId, paymentUrl, attempt.TrackId);
         }
-        if (string.IsNullOrWhiteSpace(paymentId) || !Uri.TryCreate(paymentUrl, UriKind.Absolute, out var redirect)
-            || redirect.Scheme != "https" || !string.IsNullOrEmpty(redirect.UserInfo) || !string.IsNullOrEmpty(redirect.Fragment) || !(redirect.Host == "devgateway.trytajer.app" || redirect.Host == "payzah.net" || redirect.Host.EndsWith(".payzah.net", StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException("Payzah returned no valid payment ID and secure hosted redirect.");
-        attempt.PaymentId = paymentId;
-        await db.SaveChangesAsync(cancellationToken);
-        return new(paymentId, paymentUrl, attempt.TrackId);
+        catch (Exception ex)
+        {
+            // Provider payloads and exception messages may contain personal data,
+            // credentials, or hosted checkout URLs. Log only safe classifications.
+            logger.LogError("Payzah initialization failed. TrackId {TrackId} HttpStatus {HttpStatus} FailureStage {FailureStage} ExceptionType {ExceptionType}",
+                diagnosticTrackId, httpStatus, failureStage, ex.GetType().FullName);
+            throw;
+        }
     }
 
     public async Task<PaymentGatewayStatusResponse?> GetPaymentStatusAsync(string key, string keyType = "PaymentId", CancellationToken cancellationToken = default)

@@ -8,11 +8,34 @@ using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Xunit;
 namespace MealMate.UnitTests.Settings;
 public sealed class PayzahReceiptTests
 {
+    [Theory]
+    [InlineData("{\"status\":false,\"message\":\"private-customer-email\"}", "ProviderRejected")]
+    [InlineData("private-customer-email", "InvalidJson")]
+    [InlineData("{\"status\":true,\"data\":{\"PaymentID\":\"id\",\"transit_url\":\"https://untrusted.invalid/private-customer-email\"}}", "InvalidReceipt")]
+    public async Task InitializationFailureLogsSafeReasonAndTrackWithoutCustomerData(string response, string reason)
+    {
+        await using var fixture = new Fixture();
+        fixture.Handler.Response = response;
+        await Assert.ThrowsAnyAsync<Exception>(() => fixture.Service.ExecutePaymentAsync(
+            12m, "private-customer-name", "private-customer-email", "private-customer-phone",
+            "mealmate://checkout/success", "mealmate://checkout/error", "reference"));
+        var attempt = await fixture.Db.PaymentGatewayAttempts.SingleAsync();
+        var logs = string.Join("\n", fixture.Logger.Messages);
+        Assert.Contains(reason, logs);
+        Assert.Contains(attempt.TrackId, logs);
+        Assert.Contains("200", logs);
+        Assert.DoesNotContain("private-customer", logs);
+        Assert.DoesNotContain("private-key", logs);
+        Assert.DoesNotContain("untrusted.invalid", logs);
+        Assert.All(fixture.Logger.Exceptions, exception => Assert.Null(exception));
+    }
+
     [Fact]
     public async Task InitializationPersistsExplicitPaymentIdAndUsesBase64PrivateKey()
     {
@@ -156,16 +179,30 @@ public sealed class PayzahReceiptTests
     {
         public AppDbContext Db { get; } = new(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options, Substitute.For<IDomainEventDispatcher>());
         public ResponseHandler Handler { get; } = new();
+        public RecordingLogger Logger { get; } = new();
         public PayzahPaymentService Service { get; }
         public Fixture()
         {
             var protector = Substitute.For<IEmailSecretProtector>();
             protector.Decrypt("encrypted-key").Returns("private-key");
             Db.PayzahGatewayConfigs.Add(new(true, "https://development.payzah.net/ws/paymentgateway", "encrypted-key", "****")); Db.SaveChanges();
-            Service = new(new HttpClient(Handler), NullLogger<PayzahPaymentService>.Instance, Db, protector,
+            Service = new(new HttpClient(Handler), Logger, Db, protector,
                 new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string,string?> { ["Payments:PublicBaseUrl"] = "https://merchant.mealmate.app" }).Build());
         }
         public ValueTask DisposeAsync() => Db.DisposeAsync();
+    }
+    private sealed class RecordingLogger : ILogger<PayzahPaymentService>
+    {
+        public List<string> Messages { get; } = [];
+        public List<Exception?> Exceptions { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
+            Exceptions.Add(exception);
+        }
     }
     private sealed class ResponseHandler : HttpMessageHandler
     {
