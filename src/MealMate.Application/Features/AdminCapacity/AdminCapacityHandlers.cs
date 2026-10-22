@@ -64,17 +64,27 @@ public sealed class GetAdminCapacityOverviewQueryHandler
             .AsNoTracking()
             .ToDictionaryAsync(r => r.Id, r => r.NameAr, cancellationToken);
 
-        // Fetch capacity policies
+        // Fetch active restaurant capacity policies
         var capacityPolicies = await _db.RestaurantCapacityPolicies
             .AsNoTracking()
-            .Where(p => p.IsActive)
-            .ToDictionaryAsync(p => p.RestaurantId, cancellationToken);
+            .Where(p => p.IsActive && p.EffectiveFromDate <= targetDate)
+            .OrderByDescending(p => p.Version)
+            .ToListAsync(cancellationToken);
 
-        // Fetch daily capacities for target date
-        var dailyCaps = await _db.DailyCapacities
+        var latestCapacityPolicies = capacityPolicies
+            .GroupBy(p => p.RestaurantId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // Fetch latest base daily capacities (ServiceDate <= targetDate)
+        var baseDailyCaps = await _db.DailyCapacities
             .AsNoTracking()
-            .Where(c => c.ServiceDate == targetDate)
-            .ToDictionaryAsync(c => c.RestaurantId, cancellationToken);
+            .Where(c => c.CapacityType == CapacityType.Base && c.ServiceDate <= targetDate)
+            .OrderByDescending(c => c.ServiceDate)
+            .ToListAsync(cancellationToken);
+
+        var latestBaseDailyCaps = baseDailyCaps
+            .GroupBy(c => c.RestaurantId)
+            .ToDictionary(g => g.Key, g => g.First());
 
         // Fetch commitments for target date
         var commitments = await _db.ServiceCapacityCommitments
@@ -169,8 +179,8 @@ public sealed class GetAdminCapacityOverviewQueryHandler
                 ? areaName
                 : "العاصمة";
 
-            var policyRow = capacityPolicies.TryGetValue(r.Id, out var pol) ? pol : null;
-            var dailyCap = dailyCaps.TryGetValue(r.Id, out var dc) ? dc : null;
+            var policyRow = latestCapacityPolicies.TryGetValue(r.Id, out var pol) ? pol : null;
+            var dailyCap = latestBaseDailyCaps.TryGetValue(r.Id, out var dc) ? dc : null;
             var restCommitments = commitmentsByRestaurant.TryGetValue(r.Id, out var comms) ? comms : new List<ServiceCapacityCommitment>();
             var subDaysCount = subscriptionDaysCounts.TryGetValue(r.Id, out var sdc) ? sdc : 0;
 
