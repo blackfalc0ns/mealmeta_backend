@@ -40,7 +40,7 @@ public sealed class RestaurantDeliveryWindowTests
         user.IsAuthenticated.Returns(true); user.UserId.Returns(profile.UserId); user.UserType.Returns(UserType.Restaurant); user.RestaurantId.Returns(profile.Id); user.TenantIds.Returns(new[] { tenant.Id }); user.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(true);
         resolver = new(db, user);
         review = new(db, user, Substitute.For<IAuditLogger>(), clock);
-        service = new(db, user, clock, resolver, review);
+        service = new(db, user, clock, resolver);
     }
     private RestaurantServiceRegion AddRegion(bool active, int start = 9, int end = 17)
     {
@@ -85,17 +85,16 @@ public sealed class RestaurantDeliveryWindowTests
         Assert.Equal(45, active.PreparationLeadTimeMinutes);
     }
     [Fact]
-    public async Task PreparationProposal_OnlyAppliesOnApproval()
+    public async Task OwnerPreparationSave_AppliesImmediatelyWithoutReview()
     {
         var a = AddRegion(true); var b = AddRegion(false);
         user.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
-        Assert.True((await service.SaveAsync(new(new(10, 0), new(18, 0), PreparationLeadTimeMinutes: 60), default)).IsSuccess);
-        Assert.Null(profile.PreparationLeadTimeMinutes); Assert.Null(a.PreparationLeadTimeMinutes);
-        var request = await db.RestaurantSettingsChangeRequests.SingleAsync();
-        user.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(true);
-        Assert.True((await review.DecideChangeAsync(new(request.Id, "Approved", null, request.BaseVersion), default)).IsSuccess);
+        var saved = await service.SaveAsync(new(new(10, 0), new(18, 0), PreparationLeadTimeMinutes: 60), default);
+        Assert.True(saved.IsSuccess); Assert.False(saved.Value.RequiresReview);
         Assert.Equal(60, profile.PreparationLeadTimeMinutes); Assert.Equal(60, a.PreparationLeadTimeMinutes); Assert.Equal(60, b.PreparationLeadTimeMinutes);
+        Assert.Empty(db.RestaurantSettingsChangeRequests);
     }
+
     [Fact]
     public async Task ConflictingPreparation_IsNotArbitrarilySelected_AndNegativeIsRejected()
     {
@@ -148,17 +147,17 @@ public sealed class RestaurantDeliveryWindowTests
         Assert.True(result.IsFailure); Assert.Null(profile.DeliveryWindowStart);
     }
     [Fact]
-    public async Task OwnerSave_QueuesReviewWithoutChangingCoverageOrLocation_ApprovalAppliesGlobally()
+    public async Task OwnerSave_AppliesImmediatelyWithoutChangingCoverageOrLocation()
     {
         var a = AddRegion(true); var b = AddRegion(false);
         user.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
         var result = await service.SaveAsync(new(new(10, 0), new(18, 0)), default);
-        Assert.True(result.IsSuccess); Assert.True(result.Value.RequiresReview); Assert.Null(profile.DeliveryWindowStart); Assert.Equal(new TimeOnly(9, 0), a.DeliveryWindowStart);
-        var request = await db.RestaurantSettingsChangeRequests.SingleAsync();
-        user.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(true);
-        var decision = await review.DecideChangeAsync(new(request.Id, "Approved", null, request.BaseVersion), default);
-        Assert.True(decision.IsSuccess); Assert.Equal(new TimeOnly(10, 0), profile.DeliveryWindowStart); Assert.Equal(new TimeOnly(18, 0), b.DeliveryWindowEnd); Assert.True(a.IsActive); Assert.False(b.IsActive); Assert.Null(profile.Latitude);
+        Assert.True(result.IsSuccess); Assert.False(result.Value.RequiresReview);
+        Assert.Equal(new TimeOnly(10, 0), profile.DeliveryWindowStart); Assert.Equal(new TimeOnly(18, 0), b.DeliveryWindowEnd);
+        Assert.True(a.IsActive); Assert.False(b.IsActive); Assert.Null(profile.Latitude);
+        Assert.Empty(db.RestaurantSettingsChangeRequests);
     }
+
     [Fact]
     public async Task NewSelectedRegion_InheritsGlobalWindow_AndLegacyOverrideIsRejected()
     {
@@ -181,7 +180,7 @@ public sealed class RestaurantDeliveryWindowTests
         var request = new RestaurantSettingsChangeRequest { RestaurantId = profile.Id, RegistrationId = db.RestaurantRegistrations.Single().Id, Category = RestaurantChangeCategory.Coverage, Status = VerificationStatus.NeedsChanges, PayloadJson = original, BaseVersion = 1 };
         db.RestaurantSettingsChangeRequests.Add(request); await db.SaveChangesAsync();
         var saved = await service.SaveAsync(new(new(10, 0), new(18, 0)), default);
-        Assert.True(saved.IsFailure); Assert.Equal(original, request.PayloadJson); Assert.Equal(VerificationStatus.NeedsChanges, request.Status);
+        Assert.True(saved.IsSuccess); Assert.False(saved.Value.RequiresReview); Assert.Equal(new TimeOnly(10, 0), profile.DeliveryWindowStart); Assert.Equal(original, request.PayloadJson); Assert.Equal(VerificationStatus.NeedsChanges, request.Status);
     }
     [Fact]
     public async Task StartupBackfill_NewCoverageInheritsCanonicalWindow()
@@ -222,13 +221,22 @@ public sealed class RestaurantDeliveryWindowTests
     }
 
     [Fact]
-    public async Task DirectSave_CannotSupersedeOverlappingPendingWindowReview()
+    public async Task DirectSave_SupersedesOnlyOldTimingRequest_AndOldApprovalCannotRevertIt()
     {
+        var region = AddRegion(true);
+        var oldPayload = JsonSerializer.Serialize(new { DeliveryWindowOnly = true, DeliveryWindow = new RestaurantDeliveryWindowPayload(new(9, 0), new(17, 0), 90) });
+        var pending = new RestaurantSettingsChangeRequest { RestaurantId = profile.Id, RegistrationId = db.RestaurantRegistrations.Single().Id, Category = RestaurantChangeCategory.Coverage, Status = VerificationStatus.Submitted, PayloadJson = oldPayload, BaseVersion = 1 };
+        db.RestaurantSettingsChangeRequests.Add(pending); await db.SaveChangesAsync();
         user.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(false);
-        Assert.True((await service.SaveAsync(new(new(9, 0), new(17, 0)), default)).IsSuccess);
+        var direct = await service.SaveAsync(new(new(10, 0), new(18, 0), PreparationLeadTimeMinutes: 60), default);
+        Assert.True(direct.IsSuccess); Assert.False(direct.Value.RequiresReview);
+        Assert.Equal(VerificationStatus.Rejected, pending.Status); Assert.Equal(oldPayload, pending.PayloadJson);
+        var events = JsonSerializer.Deserialize<RestaurantChangeDecisionEvent[]>(pending.DecisionEventsJson!)!;
+        Assert.Equal("SupersededByDirectTimingSave", events.Single().Decision); Assert.Null(events.Single().ReviewedByUserId);
         user.HasPermission(PermissionCodes.RestaurantRegApprove).Returns(true);
-        var direct = await service.SaveAsync(new(new(10, 0), new(18, 0)), default);
-        Assert.True(direct.IsFailure); Assert.Null(profile.DeliveryWindowStart);
+        Assert.True((await review.DecideChangeAsync(new(pending.Id, "Approved", null, pending.BaseVersion), default)).IsFailure);
+        Assert.Equal(new TimeOnly(10, 0), profile.DeliveryWindowStart); Assert.Equal(60, region.PreparationLeadTimeMinutes);
     }
+
 
 }

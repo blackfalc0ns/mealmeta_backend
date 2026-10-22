@@ -614,12 +614,10 @@ public sealed class RestaurantChangeReviewService
                     var payload = JsonSerializer.Deserialize<RestaurantCoverageProposalPayload>(change.PayloadJson);
                     if (payload is null) return Error.Validation("payload.invalid", "Invalid coverage payload.");
 
-                    if (payload.DeliveryWindowOnly && payload.DeliveryWindow is null)
-                        return Error.Validation("service_region.invalid_delivery_window");
-                    if (payload.DeliveryWindow is { } window && window.DeliveryWindowStart >= window.DeliveryWindowEnd)
-                        return Error.Validation("service_region.invalid_delivery_window");
-                    if (payload.DeliveryWindow?.PreparationLeadTimeMinutes < 0)
-                        return Error.Validation("service_region.invalid_preparation_time");
+                    // Timing is saved directly by the restaurant; obsolete reviews must not overwrite it.
+                    if (payload.DeliveryWindowOnly || payload.DeliveryWindow is not null)
+                        return Error.Validation("delivery_window.direct_save_required");
+
                     if (payload.DeliveryWindow is null && profile.DeliveryWindowStart.HasValue && profile.DeliveryWindowEnd.HasValue &&
                         payload.Windows?.Any(w => w.DeliveryWindowStart != profile.DeliveryWindowStart || w.DeliveryWindowEnd != profile.DeliveryWindowEnd) == true)
                         return Error.Validation("service_region.restaurant_window_required");
@@ -906,13 +904,6 @@ public sealed class RestaurantChangeReviewService
         RestaurantCoverageProposalPayload payload,
         CancellationToken cancellationToken)
     {
-        if (payload.DeliveryWindow is { } window)
-        {
-            await MealMate.Application.Features.RestaurantOperations.RestaurantDeliveryWindowService.ApplyAsync(
-                _db, profile, window.DeliveryWindowStart, window.DeliveryWindowEnd, _clock.UtcNow, cancellationToken, window.PreparationLeadTimeMinutes);
-        }
-        if (payload.DeliveryWindowOnly) return;
-
         if (!string.IsNullOrWhiteSpace(payload.Address))
         {
             registration.Address = RestaurantRegistrationRules.NormalizeOptional(payload.Address);

@@ -2,7 +2,6 @@ using System.Text.Json;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
-using MealMate.Application.Common.Security;
 using MealMate.Application.Features.Catalog;
 using MealMate.Application.Features.IdentityAccess.RestaurantRegistration;
 using MealMate.Domain.Enums;
@@ -24,7 +23,7 @@ public sealed class UpdateRestaurantDeliveryWindowHandler(RestaurantDeliveryWind
     public Task<Result<RestaurantDeliveryWindowSaveResult>> Handle(UpdateRestaurantDeliveryWindowCommand request, CancellationToken cancellationToken) => service.SaveAsync(request, cancellationToken);
 }
 
-public sealed class RestaurantDeliveryWindowService(IAppDbContext db, ICurrentUser user, IDateTimeProvider clock, KuwaitTenantResolver tenantResolver, RestaurantChangeReviewService review)
+public sealed class RestaurantDeliveryWindowService(IAppDbContext db, ICurrentUser user, IDateTimeProvider clock, KuwaitTenantResolver tenantResolver)
 {
     private async Task<Result<RestaurantProfile>> ResolveAsync(Guid? restaurantId, CancellationToken ct)
     {
@@ -66,25 +65,38 @@ public sealed class RestaurantDeliveryWindowService(IAppDbContext db, ICurrentUs
         if (request.PreparationLeadTimeMinutes < 0)
             return Error.Validation("service_region.invalid_preparation_time");
         var profile = scope.Value;
-        var hasOpenCoverage = await db.RestaurantSettingsChangeRequests.AnyAsync(x =>
+        var openCoverage = await db.RestaurantSettingsChangeRequests.Where(x =>
             x.RestaurantId == profile.Id && x.Category == RestaurantChangeCategory.Coverage &&
             (x.Status == VerificationStatus.Draft || x.Status == VerificationStatus.Submitted ||
-             x.Status == VerificationStatus.UnderReview || x.Status == VerificationStatus.NeedsChanges), ct);
-        if (hasOpenCoverage) return Error.Conflict("delivery_window.coverage_review_pending");
-        if (!user.HasPermission(PermissionCodes.RestaurantRegApprove))
+             x.Status == VerificationStatus.UnderReview || x.Status == VerificationStatus.NeedsChanges)).ToListAsync(ct);
+        foreach (var pending in openCoverage)
         {
-            // Time-only proposals never carry location or coverage snapshots that could overwrite newer data.
-            var payload = JsonSerializer.Serialize(new {
-                DeliveryWindowOnly = true,
-                DeliveryWindow = new RestaurantDeliveryWindowPayload(request.DeliveryWindowStart, request.DeliveryWindowEnd, request.PreparationLeadTimeMinutes)
-            });
-            var submitted = await review.SubmitChangeAsync(new(profile.Id, RestaurantChangeCategory.Coverage, payload, JsonSerializer.Serialize(new[] { "DeliveryWindow", "PreparationLeadTimeMinutes" })), ct);
-            if (submitted.IsFailure) return Result.Failure<RestaurantDeliveryWindowSaveResult>(submitted.Error);
-            return new RestaurantDeliveryWindowSaveResult(true);
+            if (!IsTimingOnly(pending.PayloadJson)) continue;
+            // Close obsolete timing proposals without representing a human approval or touching coverage proposals.
+            var events = string.IsNullOrWhiteSpace(pending.DecisionEventsJson)
+                ? new List<RestaurantChangeDecisionEvent>()
+                : JsonSerializer.Deserialize<List<RestaurantChangeDecisionEvent>>(pending.DecisionEventsJson) ?? [];
+            events.Add(new("SupersededByDirectTimingSave", null, null, clock.UtcNow, pending.BaseVersion, pending.PayloadVersion));
+            pending.DecisionEventsJson = JsonSerializer.Serialize(events);
+            pending.Status = VerificationStatus.Rejected;
+            pending.ReviewedAtUtc = clock.UtcNow;
+            pending.ReviewedByUserId = null;
+            pending.ModifiedAtUtc = clock.UtcNow;
         }
         await ApplyAsync(db, profile, request.DeliveryWindowStart, request.DeliveryWindowEnd, clock.UtcNow, ct, request.PreparationLeadTimeMinutes);
         await db.SaveChangesAsync(ct);
         return new RestaurantDeliveryWindowSaveResult(false);
+    }
+
+    private static bool IsTimingOnly(string payload)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                document.RootElement.TryGetProperty("DeliveryWindowOnly", out var flag) && flag.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException) { return false; }
     }
 
     public static async Task ApplyAsync(IAppDbContext db, RestaurantProfile profile, TimeOnly start, TimeOnly end, DateTime now, CancellationToken ct, int? preparationLeadTimeMinutes = null)
