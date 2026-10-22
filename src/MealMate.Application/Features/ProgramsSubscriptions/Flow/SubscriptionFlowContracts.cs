@@ -513,7 +513,10 @@ public sealed record SubscriptionOrderSummaryDto(
     MobileEligibilityDto? Eligibility = null,
     DateTime? SummaryExpiresAtUtc = null,
     DateTime? ServerNowUtc = null,
-    Guid? QuoteId = null);
+    Guid? QuoteId = null,
+    DateOnly? EarliestStartDate = null,
+    DateOnly? RequestedStartDate = null,
+    bool StartDateAdjusted = false);
 
 /// <summary>Contextual availability for the individual flow: one verdict for the whole period plus
 /// the eligible browse cards. TotalCount is the eligible list size before pagination.</summary>

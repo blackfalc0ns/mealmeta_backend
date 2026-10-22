@@ -1042,6 +1042,15 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
         var validation = await ValidateSummaryRequestAsync(request, ct);
         if (validation is not null) return Error.Validation(validation);
 
+        // This is a pre-payment preview: a Friday toggle can leave the picker on the
+        // old minimum. Recalculate the whole preview using the corrected date, while
+        // keeping past/missing dates invalid and leaving checkout validation strict.
+        var requestedStartDate = request.StartDate!.Value;
+        var today = _schedule.GetKuwaitToday();
+        var earliestStartDate = _schedule.ResolveFirstDeliveryDate(today, request.IncludeFriday);
+        if (requestedStartDate >= today && requestedStartDate < earliestStartDate)
+            request = request with { StartDate = earliestStartDate };
+
         if (!_schedule.TryResolveCheckoutStart(request.StartDate, request.IncludeFriday, out var startDate, out var startError))
             return Error.Validation(startError ?? "checkout.start_date_invalid");
 
@@ -1346,7 +1355,10 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             Eligibility: new MobileEligibilityDto(effectiveCanCheckout, summaryBlockingReasons),
             SummaryExpiresAtUtc: summaryExpiresAt,
             ServerNowUtc: _clock.UtcNow,
-            QuoteId: quoteId);
+            QuoteId: quoteId,
+            EarliestStartDate: earliestStartDate,
+            RequestedStartDate: requestedStartDate,
+            StartDateAdjusted: requestedStartDate != startDate);
     }
 
     public async Task<Result<IReadOnlyList<CustomerPaymentMethodDto>>> GetPaymentMethodsAsync(decimal amount, CancellationToken ct = default, bool allowSandboxCompletion = true)

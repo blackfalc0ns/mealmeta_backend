@@ -1123,9 +1123,15 @@ public sealed class CustomerSubscriptionFlowControllerTests
     }
 
     [Theory]
-    [InlineData(26)]
-    [InlineData(28)]
-    public async Task Summary_WithoutRestaurantId_ReturnsPackageSummaryForSelectedTier(int firstDeliveryDay)
+    [InlineData(26, false, 26)]
+    [InlineData(28, false, 28)]
+    [InlineData(25, false, 25)]
+    [InlineData(25, true, 26)]
+    [InlineData(28, true, 28)]
+    [InlineData(21, true, 0)]
+    [InlineData(0, false, 0)]
+    public async Task Summary_WithoutRestaurantId_ReturnsPackageSummaryForSelectedTier(
+        int firstDeliveryDay, bool includeFriday, int expectedDeliveryDay)
     {
         await using var db = CreateDb();
         var program = new MealMate.Domain.ProgramsSubscriptions.Program
@@ -1194,9 +1200,14 @@ public sealed class CustomerSubscriptionFlowControllerTests
         await db.SaveChangesAsync();
         // Summary validates StartDate against Kuwait calendar day, not UTC date.
         var request = new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, schedule.GetKuwaitToday());
-        var chosenStart = new DateOnly(2026, 10, firstDeliveryDay);
-        request = request with { StartDate = chosenStart };
-        var expectedFirstDelivery = chosenStart;
+        DateOnly? chosenStart = firstDeliveryDay == 0 ? null : new DateOnly(2026, 10, firstDeliveryDay);
+        request = request with { StartDate = chosenStart, IncludeFriday = includeFriday };
+        if (expectedDeliveryDay == 0)
+        {
+            Assert.IsType<BadRequestObjectResult>(await controller.Summary(request, CancellationToken.None));
+            return;
+        }
+        var expectedFirstDelivery = new DateOnly(2026, 10, expectedDeliveryDay);
 
         var result = Assert.IsType<OkObjectResult>(await controller.Summary(request, CancellationToken.None));
         var summary = Assert.IsType<SubscriptionOrderSummaryDto>(result.Value);
@@ -1215,10 +1226,17 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Contains("keto.webp", summary.ProgramImageUrl);
         Assert.Equal(new DateOnly(2026, 10, 22), summary.PaymentDate);
         Assert.Equal(expectedFirstDelivery, summary.StartDate);
+        Assert.Equal(chosenStart, summary.RequestedStartDate);
+        Assert.Equal(schedule.ResolveFirstDeliveryDate(schedule.GetKuwaitToday(), includeFriday), summary.EarliestStartDate);
+        Assert.Equal(chosenStart != expectedFirstDelivery, summary.StartDateAdjusted);
+        Assert.Equal(expectedFirstDelivery, summary.ServiceDates[0]);
+        Assert.Equal(schedule.GetServiceDates(expectedFirstDelivery, 26, includeFriday), summary.ServiceDates);
+        if (summary.StartDateAdjusted)
+            Assert.False(schedule.TryResolveCheckoutStart(chosenStart, includeFriday, out _, out _));
         Assert.NotNull(summary.RestaurantRepetition);
         Assert.Equal(1, summary.RestaurantRepetition!.RestaurantCount);
         Assert.Equal(26, summary.RestaurantRepetition.DurationDays);
-        Assert.Equal(26, summary.RestaurantRepetition.Limit); // single restaurant → full duration
+        Assert.Equal(summary.TotalServiceDays, summary.RestaurantRepetition.Limit); // single restaurant → all service days
         Assert.True(summary.FinalPrice > 0m);
         var lunch = Assert.Single(summary.SlotRequirements);
         Assert.Equal("lunch", lunch.Slot);
