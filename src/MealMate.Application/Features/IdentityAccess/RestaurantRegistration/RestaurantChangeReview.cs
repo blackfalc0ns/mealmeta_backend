@@ -30,7 +30,11 @@ public sealed record RestaurantCoverageProposalPayload(
     decimal Longitude,
     Guid? PrimaryRegionId,
     List<Guid> ServiceRegionIds,
-    List<RestaurantServiceRegionWindowPayload>? Windows = null);
+    List<RestaurantServiceRegionWindowPayload>? Windows = null,
+    RestaurantDeliveryWindowPayload? DeliveryWindow = null,
+    bool DeliveryWindowOnly = false);
+
+public sealed record RestaurantDeliveryWindowPayload(TimeOnly DeliveryWindowStart, TimeOnly DeliveryWindowEnd, int? PreparationLeadTimeMinutes = null);
 
 public sealed record RestaurantServiceRegionWindowPayload(
     Guid RegionId,
@@ -374,7 +378,7 @@ public sealed class RestaurantChangeReviewService
                 try
                 {
                     var covPayload = JsonSerializer.Deserialize<RestaurantCoverageProposalPayload>(change.PayloadJson);
-                    if (covPayload is not null)
+                    if (covPayload is not null && !covPayload.DeliveryWindowOnly)
                     {
                         var existingActiveRegionIds = await _db.RestaurantServiceRegions
                             .Where(x => x.RestaurantId == profile.Id && x.IsActive)
@@ -609,6 +613,19 @@ public sealed class RestaurantChangeReviewService
                 {
                     var payload = JsonSerializer.Deserialize<RestaurantCoverageProposalPayload>(change.PayloadJson);
                     if (payload is null) return Error.Validation("payload.invalid", "Invalid coverage payload.");
+
+                    if (payload.DeliveryWindowOnly && payload.DeliveryWindow is null)
+                        return Error.Validation("service_region.invalid_delivery_window");
+                    if (payload.DeliveryWindow is { } window && window.DeliveryWindowStart >= window.DeliveryWindowEnd)
+                        return Error.Validation("service_region.invalid_delivery_window");
+                    if (payload.DeliveryWindow?.PreparationLeadTimeMinutes < 0)
+                        return Error.Validation("service_region.invalid_preparation_time");
+                    if (payload.DeliveryWindow is null && profile.DeliveryWindowStart.HasValue && profile.DeliveryWindowEnd.HasValue &&
+                        payload.Windows?.Any(w => w.DeliveryWindowStart != profile.DeliveryWindowStart || w.DeliveryWindowEnd != profile.DeliveryWindowEnd) == true)
+                        return Error.Validation("service_region.restaurant_window_required");
+                    if (payload.DeliveryWindow is null && (profile.PreparationLeadTimeMinutes.HasValue || profile.DeliveryWindowStart.HasValue) &&
+                        payload.Windows?.Any(w => w.PreparationLeadTimeMinutes != profile.PreparationLeadTimeMinutes) == true)
+                        return Error.Validation("service_region.restaurant_preparation_required");
 
                     await ApplyCoveragePayloadAsync(registration, profile, payload, cancellationToken);
                     return Result.Success();
@@ -889,6 +906,13 @@ public sealed class RestaurantChangeReviewService
         RestaurantCoverageProposalPayload payload,
         CancellationToken cancellationToken)
     {
+        if (payload.DeliveryWindow is { } window)
+        {
+            await MealMate.Application.Features.RestaurantOperations.RestaurantDeliveryWindowService.ApplyAsync(
+                _db, profile, window.DeliveryWindowStart, window.DeliveryWindowEnd, _clock.UtcNow, cancellationToken, window.PreparationLeadTimeMinutes);
+        }
+        if (payload.DeliveryWindowOnly) return;
+
         if (!string.IsNullOrWhiteSpace(payload.Address))
         {
             registration.Address = RestaurantRegistrationRules.NormalizeOptional(payload.Address);
@@ -924,9 +948,9 @@ public sealed class RestaurantChangeReviewService
                 existing.IsActive = targetIds.Contains(existing.RegionId);
                 if (windowDict.TryGetValue(existing.RegionId, out var win))
                 {
-                    existing.DeliveryWindowStart = win.DeliveryWindowStart;
-                    existing.DeliveryWindowEnd = win.DeliveryWindowEnd;
-                    existing.PreparationLeadTimeMinutes = win.PreparationLeadTimeMinutes;
+                    existing.DeliveryWindowStart = profile.DeliveryWindowStart ?? win.DeliveryWindowStart;
+                    existing.DeliveryWindowEnd = profile.DeliveryWindowEnd ?? win.DeliveryWindowEnd;
+                    existing.PreparationLeadTimeMinutes = profile.DeliveryWindowStart.HasValue || profile.PreparationLeadTimeMinutes.HasValue ? profile.PreparationLeadTimeMinutes : win.PreparationLeadTimeMinutes;
                 }
                 existing.ModifiedAtUtc = _clock.UtcNow;
             }
@@ -940,9 +964,9 @@ public sealed class RestaurantChangeReviewService
                     RestaurantId = profile.Id,
                     RegionId = newId,
                     IsActive = true,
-                    DeliveryWindowStart = win?.DeliveryWindowStart ?? new TimeOnly(8, 0),
-                    DeliveryWindowEnd = win?.DeliveryWindowEnd ?? new TimeOnly(14, 0),
-                    PreparationLeadTimeMinutes = win?.PreparationLeadTimeMinutes,
+                    DeliveryWindowStart = profile.DeliveryWindowStart ?? win?.DeliveryWindowStart ?? new TimeOnly(8, 0),
+                    DeliveryWindowEnd = profile.DeliveryWindowEnd ?? win?.DeliveryWindowEnd ?? new TimeOnly(14, 0),
+                    PreparationLeadTimeMinutes = profile.DeliveryWindowStart.HasValue || profile.PreparationLeadTimeMinutes.HasValue ? profile.PreparationLeadTimeMinutes : win?.PreparationLeadTimeMinutes,
                     CreatedAtUtc = _clock.UtcNow,
                 });
             }
@@ -1227,7 +1251,8 @@ public sealed class RestaurantChangeReviewService
                     registration?.Latitude,
                     registration?.Longitude,
                     PrimaryRegionId = registration?.RegionId,
-                    ServiceRegionIds = regions
+                    ServiceRegionIds = regions,
+                    DeliveryWindow = new { DeliveryWindowStart = profile?.DeliveryWindowStart, DeliveryWindowEnd = profile?.DeliveryWindowEnd, PreparationLeadTimeMinutes = profile?.PreparationLeadTimeMinutes }
                 });
                 break;
 

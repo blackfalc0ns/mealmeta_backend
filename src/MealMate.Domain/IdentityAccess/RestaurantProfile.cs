@@ -42,6 +42,13 @@ public sealed class RestaurantProfile : AuditableEntity
     /// <summary>Settlement commission percent deducted from restaurant box price.</summary>
     public decimal? CommissionPercent { get; set; }
 
+    /// <summary>Approved restaurant-wide delivery window, shared by every service region.</summary>
+    public TimeOnly? DeliveryWindowStart { get; set; }
+
+    public TimeOnly? DeliveryWindowEnd { get; set; }
+
+    public int? PreparationLeadTimeMinutes { get; set; }
+
     public bool AutoConfirmOrders { get; set; }
 
     /// <summary>Restaurant-wide busy preference; date-level busy remains on operations APIs.</summary>

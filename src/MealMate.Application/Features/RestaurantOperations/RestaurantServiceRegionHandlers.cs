@@ -215,9 +215,9 @@ public sealed class RestaurantServiceRegionService
         {
             var config = configuredRegions.FirstOrDefault(x => x.RegionId == sysRegion.Id);
             var isActive = config?.IsActive ?? false;
-            var start = config?.DeliveryWindowStart ?? new TimeOnly(8, 0);
-            var end = config?.DeliveryWindowEnd ?? new TimeOnly(14, 0);
-            var leadTime = config?.PreparationLeadTimeMinutes;
+            var start = restaurant.DeliveryWindowStart ?? config?.DeliveryWindowStart ?? new TimeOnly(8, 0);
+            var end = restaurant.DeliveryWindowEnd ?? config?.DeliveryWindowEnd ?? new TimeOnly(14, 0);
+            var leadTime = restaurant.DeliveryWindowStart.HasValue || restaurant.PreparationLeadTimeMinutes.HasValue ? restaurant.PreparationLeadTimeMinutes : config?.PreparationLeadTimeMinutes;
             var updatedAt = config?.ModifiedAtUtc?.ToString("O") ?? config?.CreatedAtUtc.ToString("O");
 
             var confirmedCount = confirmedCountsByRegion.GetValueOrDefault(sysRegion.Id);
@@ -290,6 +290,15 @@ public sealed class RestaurantServiceRegionService
         if (sysRegion == null)
             return Result.Failure<RestaurantServiceRegionItemDto>(Error.NotFound(MessageCodes.RestaurantOperations.RegionNotFound));
 
+        if (restaurant.DeliveryWindowStart.HasValue && restaurant.DeliveryWindowEnd.HasValue &&
+            (request.DeliveryWindowStart != restaurant.DeliveryWindowStart || request.DeliveryWindowEnd != restaurant.DeliveryWindowEnd))
+            return Result.Failure<RestaurantServiceRegionItemDto>(Error.Validation("service_region.restaurant_window_required"));
+
+        if (request.PreparationLeadTimeMinutes < 0)
+            return Result.Failure<RestaurantServiceRegionItemDto>(Error.Validation("service_region.invalid_preparation_time"));
+        if ((restaurant.DeliveryWindowStart.HasValue || restaurant.PreparationLeadTimeMinutes.HasValue) && request.PreparationLeadTimeMinutes != restaurant.PreparationLeadTimeMinutes)
+            return Result.Failure<RestaurantServiceRegionItemDto>(Error.Validation("service_region.restaurant_preparation_required"));
+
         if (request.DeliveryWindowStart >= request.DeliveryWindowEnd)
         {
             return Result.Failure<RestaurantServiceRegionItemDto>(Error.Validation(MessageCodes.RestaurantOperations.InvalidDeliveryWindow));
@@ -341,15 +350,15 @@ public sealed class RestaurantServiceRegionService
         if (tenantResult.IsFailure)
             return Result.Failure<List<RestaurantServiceRegionItemDto>>(tenantResult.Error);
 
-        var restaurantCountryId = await _db.RestaurantProfiles
+        var restaurantSettings = await _db.RestaurantProfiles
             .AsNoTracking()
             .Where(x => x.Id == restaurantId)
-            .Select(x => (Guid?)x.CountryId)
+            .Select(x => new { x.CountryId, x.DeliveryWindowStart, x.DeliveryWindowEnd, x.PreparationLeadTimeMinutes })
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (!restaurantCountryId.HasValue)
+        if (restaurantSettings is null)
             return Result.Failure<List<RestaurantServiceRegionItemDto>>(Error.NotFound("restaurant.not_found"));
-        if (restaurantCountryId.Value != tenantResult.Value.CountryId)
+        if (restaurantSettings.CountryId != tenantResult.Value.CountryId)
             return Result.Failure<List<RestaurantServiceRegionItemDto>>(Error.Forbidden("catalog.restaurant_tenant_mismatch"));
 
         if (!_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
@@ -391,8 +400,9 @@ public sealed class RestaurantServiceRegionService
                 RestaurantId = restaurantId,
                 RegionId = regionId,
                 IsActive = true,
-                DeliveryWindowStart = new TimeOnly(8, 0),
-                DeliveryWindowEnd = new TimeOnly(14, 0),
+                DeliveryWindowStart = restaurantSettings.DeliveryWindowStart ?? new TimeOnly(8, 0),
+                DeliveryWindowEnd = restaurantSettings.DeliveryWindowEnd ?? new TimeOnly(14, 0),
+                PreparationLeadTimeMinutes = restaurantSettings.PreparationLeadTimeMinutes,
                 CreatedAtUtc = _clock.UtcNow
             });
         }

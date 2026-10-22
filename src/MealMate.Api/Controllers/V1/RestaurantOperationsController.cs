@@ -130,6 +130,14 @@ public sealed class RestaurantOperationsController : ApiControllerBase
         => HandleResult(await Sender.Send(new ResolveRestaurantEmergencyOverrideCommand(overrideId, request.Reason), cancellationToken));
 
 
+    [HttpGet("delivery-window")]
+    public async Task<IActionResult> GetDeliveryWindow(CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetRestaurantDeliveryWindowQuery(), cancellationToken));
+
+    [HttpPut("delivery-window")]
+    public async Task<IActionResult> UpdateDeliveryWindow([FromBody] UpdateRestaurantDeliveryWindowRequest request, CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new UpdateRestaurantDeliveryWindowCommand(request.DeliveryWindowStart, request.DeliveryWindowEnd, PreparationLeadTimeMinutes: request.PreparationLeadTimeMinutes), cancellationToken));
+
     [HttpGet("service-regions")]
     [AllowAnonymous]
     public async Task<IActionResult> GetServiceRegions(CancellationToken cancellationToken = default)
@@ -182,3 +190,5 @@ public sealed record ActivateEmergencyOverrideRequest(
 public sealed record ResolveEmergencyOverrideRequest(string Reason);
 public sealed record SubmitCapacityReductionRequest(int RequestedLimit, DateOnly RequestedEffectiveDate, string Reason);
 
+
+public sealed record UpdateRestaurantDeliveryWindowRequest(TimeOnly DeliveryWindowStart, TimeOnly DeliveryWindowEnd, int? PreparationLeadTimeMinutes = null);

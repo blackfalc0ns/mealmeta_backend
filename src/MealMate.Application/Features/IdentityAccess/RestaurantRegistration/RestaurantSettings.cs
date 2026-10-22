@@ -864,6 +864,7 @@ public sealed class RestaurantSettingsHandlers :
         IReadOnlyList<Guid> regionIds,
         CancellationToken cancellationToken)
     {
+        var deliverySettings = await _db.RestaurantProfiles.AsNoTracking().FirstAsync(x => x.Id == restaurantId, cancellationToken);
         var existing = await _db.RestaurantServiceRegions
             .Where(x => x.RestaurantId == restaurantId)
             .ToListAsync(cancellationToken);
@@ -883,8 +884,9 @@ public sealed class RestaurantSettingsHandlers :
                 RestaurantId = restaurantId,
                 RegionId = regionId,
                 IsActive = true,
-                DeliveryWindowStart = new TimeOnly(8, 0),
-                DeliveryWindowEnd = new TimeOnly(14, 0),
+                DeliveryWindowStart = deliverySettings.DeliveryWindowStart ?? new TimeOnly(8, 0),
+                DeliveryWindowEnd = deliverySettings.DeliveryWindowEnd ?? new TimeOnly(14, 0),
+                PreparationLeadTimeMinutes = deliverySettings.PreparationLeadTimeMinutes,
                 CreatedAtUtc = _clock.UtcNow,
             });
         }

@@ -9583,6 +9583,15 @@ namespace MealMate.Persistence.Migrations
                     b.Property<Guid?>("CountryId")
                         .HasColumnType("uuid");
 
+                    b.Property<TimeOnly?>("DeliveryWindowStart")
+                        .HasColumnType("time without time zone");
+
+                    b.Property<int?>("PreparationLeadTimeMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<TimeOnly?>("DeliveryWindowEnd")
+                        .HasColumnType("time without time zone");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 

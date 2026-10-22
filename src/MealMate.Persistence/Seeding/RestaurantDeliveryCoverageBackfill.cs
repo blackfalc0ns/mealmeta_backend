@@ -108,9 +108,9 @@ public static class RestaurantDeliveryCoverageBackfill
                         RestaurantId = restaurant.Id,
                         RegionId = areaId,
                         IsActive = true,
-                        DeliveryWindowStart = new TimeOnly(8, 0),
-                        DeliveryWindowEnd = new TimeOnly(16, 0),
-                        PreparationLeadTimeMinutes = 90,
+                        DeliveryWindowStart = restaurant.DeliveryWindowStart ?? new TimeOnly(8, 0),
+                        DeliveryWindowEnd = restaurant.DeliveryWindowEnd ?? new TimeOnly(16, 0),
+                        PreparationLeadTimeMinutes = restaurant.DeliveryWindowStart.HasValue || restaurant.PreparationLeadTimeMinutes.HasValue ? restaurant.PreparationLeadTimeMinutes : 90,
                     });
                     added++;
                     continue;
@@ -144,6 +144,7 @@ public static class RestaurantDeliveryCoverageBackfill
 
         foreach (var restaurantId in checkoutReadyIds)
         {
+            var deliverySettings = await db.RestaurantProfiles.AsNoTracking().FirstOrDefaultAsync(x => x.Id == restaurantId, cancellationToken);
             coverageByRestaurant.TryGetValue(restaurantId, out var rows);
             rows ??= [];
             var coveredIds = rows.Select(x => x.RegionId).ToHashSet();
@@ -169,9 +170,9 @@ public static class RestaurantDeliveryCoverageBackfill
                     RestaurantId = restaurantId,
                     RegionId = areaId,
                     IsActive = true,
-                    DeliveryWindowStart = new TimeOnly(8, 0),
-                    DeliveryWindowEnd = new TimeOnly(16, 0),
-                    PreparationLeadTimeMinutes = 90,
+                    DeliveryWindowStart = deliverySettings?.DeliveryWindowStart ?? new TimeOnly(8, 0),
+                    DeliveryWindowEnd = deliverySettings?.DeliveryWindowEnd ?? new TimeOnly(16, 0),
+                    PreparationLeadTimeMinutes = deliverySettings?.DeliveryWindowStart.HasValue == true || deliverySettings?.PreparationLeadTimeMinutes.HasValue == true ? deliverySettings.PreparationLeadTimeMinutes : 90,
                 });
                 coveredIds.Add(areaId);
                 added++;
