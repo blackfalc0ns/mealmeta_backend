@@ -31,6 +31,7 @@ public sealed class PayzahPaymentService(HttpClient httpClient, ILogger<PayzahPa
     {
         string? diagnosticTrackId = null;
         int? httpStatus = null;
+        var providerCode = "Unknown";
         var failureStage = "InputValidation";
         try
         {
@@ -52,13 +53,16 @@ public sealed class PayzahPaymentService(HttpClient httpClient, ILogger<PayzahPa
             using var request = Request(settings.BaseUrl + "/index", settings.Key);
             request.Content = JsonContent.Create(new { trackid = attempt.TrackId, amount = invoiceValue.ToString("F3", CultureInfo.InvariantCulture),
                 currency = "414", success_url = BrowserUrl(callbackUrl, attempt.TrackId), error_url = BrowserUrl(errorUrl, attempt.TrackId),
-                language = "ARA", udf1 = customerReference, payment_type = "3", customer_name = customerName,
+                // UDF fields must be alphanumeric. Keep the application reference
+                // (including GUID separators or campaign prefixes) in our ledger.
+                language = "ARA", udf1 = attempt.TrackId, payment_type = "3", customer_name = customerName,
                 customer_email = customerEmail, customer_phone = ToPayzahPhone(customerMobile) });
             failureStage = "Transport";
             using var response = await httpClient.SendAsync(request, cancellationToken);
             httpStatus = (int)response.StatusCode;
             failureStage = "InvalidJson";
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            providerCode = SafeInitializationCode(json.RootElement);
             failureStage = "ProviderRejected";
             var data = RequireData(response, json.RootElement);
             failureStage = "InvalidReceipt";
@@ -81,8 +85,8 @@ public sealed class PayzahPaymentService(HttpClient httpClient, ILogger<PayzahPa
         {
             // Provider payloads and exception messages may contain personal data,
             // credentials, or hosted checkout URLs. Log only safe classifications.
-            logger.LogError("Payzah initialization failed. TrackId {TrackId} HttpStatus {HttpStatus} FailureStage {FailureStage} ExceptionType {ExceptionType}",
-                diagnosticTrackId, httpStatus, failureStage, ex.GetType().FullName);
+            logger.LogError("Payzah initialization failed. TrackId {TrackId} HttpStatus {HttpStatus} FailureStage {FailureStage} ProviderCode {ProviderCode} ExceptionType {ExceptionType}",
+                diagnosticTrackId, httpStatus, failureStage, providerCode, ex.GetType().FullName);
             throw;
         }
     }
@@ -102,7 +106,11 @@ public sealed class PayzahPaymentService(HttpClient httpClient, ILogger<PayzahPa
         using var response = await httpClient.SendAsync(request, cancellationToken);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         var data = RequireData(response, json.RootElement);
-        if (Text(data, "trackId") != attempt.TrackId || Text(data, "UDF1") != attempt.CustomerReference) return null;
+        // New attempts bind UDF1 to their unique track; legacy attempts sent the
+        // original application reference. Both still require exact track binding.
+        var udf = Text(data, "UDF1");
+        if (Text(data, "trackId") != attempt.TrackId
+            || (udf != attempt.TrackId && udf != attempt.CustomerReference)) return null;
         if (data.TryGetProperty("amount", out var amount) && (!decimal.TryParse(amount.ToString(), CultureInfo.InvariantCulture, out var value) || value != attempt.ExpectedAmount)) return null;
         if (data.TryGetProperty("currency", out var currency) && currency.ToString() is not ("414" or "KWD")) return null;
         var reference = Text(data, "payzahRefrenceCode");
@@ -178,4 +186,16 @@ public sealed class PayzahPaymentService(HttpClient httpClient, ILogger<PayzahPa
         return data;
     }
     private static string Text(JsonElement data, string name) => data.TryGetProperty(name, out var value) ? value.ToString() : "";
+
+    private static string SafeInitializationCode(JsonElement root)
+    {
+        // Only documented numeric codes are safe to log. Never echo arbitrary
+        // provider messages or values: they can contain credentials or PII.
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("code", out var code)
+            && code.ValueKind is JsonValueKind.String or JsonValueKind.Number
+            && int.TryParse(code.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var numeric)
+            && numeric is >= 10000 and <= 10015)
+            return numeric.ToString(CultureInfo.InvariantCulture);
+        return "Unknown";
+    }
 }

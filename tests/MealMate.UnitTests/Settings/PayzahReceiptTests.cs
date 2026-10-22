@@ -14,6 +14,50 @@ using Xunit;
 namespace MealMate.UnitTests.Settings;
 public sealed class PayzahReceiptTests
 {
+    [Fact]
+    public async Task InitializationUsesAlphanumericProviderReferenceAndKeepsOriginalApplicationReference()
+    {
+        await using var fixture = new Fixture();
+        fixture.Handler.Response = """{"status":true,"data":{"PaymentID":"creation-id","transit_url":"https://devgateway.trytajer.app?id=hosted"}}""";
+        const string reference = "campaign-checkout:7757f01d8fa645ab9eb7281cdae1e217";
+        var receipt = await fixture.Service.ExecutePaymentAsync(12m, "", "", "", "", "", reference);
+        using var body = JsonDocument.Parse(fixture.Handler.Body!);
+        Assert.Equal(receipt.TrackId, body.RootElement.GetProperty("udf1").GetString());
+        Assert.All(body.RootElement.GetProperty("udf1").GetString()!, c => Assert.True(char.IsAsciiLetterOrDigit(c)));
+        Assert.Equal(reference, (await fixture.Db.PaymentGatewayAttempts.SingleAsync()).CustomerReference);
+    }
+
+    [Theory]
+    [InlineData("boundtrack", true)]
+    [InlineData("original-reference", true)]
+    [InlineData("unrelated-reference", false)]
+    public async Task StatusBindsProviderReferenceAndReturnsOriginalApplicationReference(string udf, bool accepted)
+    {
+        await using var fixture = new Fixture();
+        fixture.Db.PaymentGatewayAttempts.Add(new() { TrackId = "boundtrack", PaymentId = "creation-id",
+            CustomerReference = "original-reference", ExpectedAmount = 12m, IsSandbox = true });
+        await fixture.Db.SaveChangesAsync();
+        fixture.Handler.Response = JsonSerializer.Serialize(new { status = true, data = new { trackId = "boundtrack",
+            UDF1 = udf, paymentStatus = "CAPTURED", payzahRefrenceCode = "reference", transactionNumber = "transaction" } });
+        var result = await fixture.Service.GetPaymentStatusAsync("pz-boundtrack");
+        if (accepted) Assert.Equal("original-reference", result?.CustomerReference);
+        else Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData("10007", "10007")]
+    [InlineData("10014", "10014")]
+    [InlineData("private-customer-email", "Unknown")]
+    public async Task ProviderRejectionLogsOnlyDocumentedSafeCode(string code, string loggedCode)
+    {
+        await using var fixture = new Fixture();
+        fixture.Handler.Response = JsonSerializer.Serialize(new { status = false, code, message = "private-customer-email" });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ExecutePaymentAsync(12m, "", "", "", "", "", "reference"));
+        var logs = string.Join("\n", fixture.Logger.Messages);
+        Assert.Contains("ProviderCode " + loggedCode, logs);
+        Assert.DoesNotContain("private-customer", logs);
+    }
+
     [Theory]
     [InlineData("{\"status\":false,\"message\":\"private-customer-email\"}", "ProviderRejected")]
     [InlineData("private-customer-email", "InvalidJson")]

@@ -687,13 +687,16 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
                 await _db.SaveChangesAsync(ct);
                 return true;
             }, CancellationToken.None);
-            return Error.Conflict("payment.initialization_failed", "payment.initialization_failed");
+            return InitializationFailed();
         }
     }
 
     private static FamilyCheckoutStartedDto Started(FamilyReservationOutcome reservation, string url)
         => new(reservation.FamilyGroupId, reservation.PaymentAnchorSubscriptionId, url, reservation.ExpiresAtUtc,
             reservation.FinalPrice, reservation.BatchId, reservation.BatchVersion);
+
+    private static Error InitializationFailed() => Error.ConflictWithMetadata("payment.initialization_failed",
+        new Dictionary<string, object?> { ["retryEndpoint"] = FamilyCheckoutResumeReader.RetryEndpoint });
 
     private async Task<Result<FamilyReservationOutcome>> PrepareAsync(
         FamilyStartCheckoutRequest request,
@@ -740,6 +743,14 @@ public sealed class FamilyCheckoutService : IFamilyCheckoutService
             if (historical is not null && historical.Status is not (FamilyCheckoutBatchStatus.Draft or FamilyCheckoutBatchStatus.PaymentPending))
             {
                 var recorded = historical.PaymentAttempts.SingleOrDefault();
+                // A replay reports the saved failure; it must never create another
+                // invoice. A user-initiated retry goes through the dedicated endpoint.
+                if (historical.Status == FamilyCheckoutBatchStatus.Failed && historical.PaidAtUtc is null
+                    && recorded?.ResultCode == "Failed"
+                    && string.IsNullOrWhiteSpace(recorded.GatewayPaymentId)
+                    && string.IsNullOrWhiteSpace(recorded.GatewayPaymentUrl)
+                    && string.IsNullOrWhiteSpace(historical.GatewayPaymentId))
+                    return InitializationFailed();
                 if (historical.Status == FamilyCheckoutBatchStatus.Paid && historical.PaymentAnchorSubscriptionId is Guid anchor
                     && recorded?.GatewayPaymentUrl is not null)
                     return new FamilyReservationOutcome(group.Id, anchor,

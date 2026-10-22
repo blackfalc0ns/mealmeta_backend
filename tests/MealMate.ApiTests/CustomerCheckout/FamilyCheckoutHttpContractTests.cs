@@ -37,6 +37,46 @@ namespace MealMate.ApiTests.CustomerCheckout;
 
 public sealed class FamilyCheckoutHttpContractTests
 {
+    [Theory]
+    [InlineData("ar")]
+    [InlineData("en")]
+    public async Task Retry_initialization_failure_uses_the_same_gateway_error_contract(string language)
+    {
+        await using var fx = await Fixture.Create();
+        using var response = await fx.PostCheckout(language, "null", 1, "retry-payment");
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("payment.initialization_failed", body.GetProperty("code").GetString());
+        Assert.Equal(FamilyCheckoutResumeReader.RetryEndpoint, body.GetProperty("retryEndpoint").GetString());
+        Assert.NotEqual("payment.initialization_failed", body.GetProperty("detail").GetString());
+    }
+
+    [Theory]
+    [InlineData("ar")]
+    [InlineData("en")]
+    public async Task Failed_checkout_replay_exposes_explicit_retry_without_initializing_payment(string language)
+    {
+        await using var fx = await Fixture.Create();
+        var batch = await fx.Db.FamilyCheckoutBatches.SingleAsync();
+        batch.IdempotencyKey = "failed-http-key";
+        batch.Status = FamilyCheckoutBatchStatus.Failed;
+        fx.Db.FamilyCheckoutPaymentAttempts.Add(new FamilyCheckoutPaymentAttempt
+        {
+            BatchId = batch.Id, AttemptKey = batch.IdempotencyKey, ResultCode = "Failed",
+            RequestedAtUtc = DateTime.UtcNow,
+        });
+        await fx.Db.SaveChangesAsync();
+        using var response = await fx.PostCheckout(language, "\"failed-http-key\"", 1);
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("payment.initialization_failed", body.GetProperty("code").GetString());
+        Assert.Equal(FamilyCheckoutResumeReader.RetryEndpoint, body.GetProperty("retryEndpoint").GetString());
+        Assert.NotEqual("payment.initialization_failed", body.GetProperty("detail").GetString());
+        Assert.Equal(0, fx.PaymentMethodsReceived);
+        Assert.Empty(await fx.Db.Subscriptions.ToListAsync());
+        Assert.Single(await fx.Db.FamilyCheckoutPaymentAttempts.ToListAsync());
+    }
+
     [Fact]
     public async Task Checkout_contract_gate_is_bound_localized_and_metadata_is_serialized_over_http()
     {
@@ -155,6 +195,10 @@ public sealed class FamilyCheckoutHttpContractTests
             builder.Services.AddControllers().AddApplicationPart(typeof(CustomerFamilySubscriptionFlowController).Assembly);
             builder.Services.AddMealMateLocalization();
             builder.Services.AddSingleton<IAppDbContext>(db);
+            var retry = Substitute.For<IFamilyPaymentRetryService>();
+            retry.RetryAsync(Arg.Any<FamilyStartCheckoutRequest>(), Arg.Any<CancellationToken>())
+                .Returns(Result<FamilyCheckoutStartedDto>.Failure(Error.Conflict("payment.initialization_failed")));
+            builder.Services.AddSingleton(retry);
             builder.Services.AddSingleton(db);
             builder.Services.AddSingleton<IDomainEventDispatcher>(Substitute.For<IDomainEventDispatcher>());
             builder.Services.AddSingleton<IUserAccountService>(Substitute.For<IUserAccountService>());
@@ -235,10 +279,11 @@ public sealed class FamilyCheckoutHttpContractTests
             return _client.SendAsync(request);
         }
 
-        public Task<HttpResponseMessage> PostCheckout(string language, string idempotencyKeyJson, int? clientContractVersion = null)
+        public Task<HttpResponseMessage> PostCheckout(string language, string idempotencyKeyJson, int? clientContractVersion = null,
+            string endpoint = "checkout")
         {
             var version = clientContractVersion.HasValue ? $",\"clientContractVersion\":{clientContractVersion.Value}" : string.Empty;
-            var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/customer/family-subscription-flow/checkout")
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/customer/family-subscription-flow/" + endpoint)
             {
                 Content = new StringContent($"{{\"callbackUrl\":\"https://callback.test\",\"errorUrl\":\"https://error.test\",\"idempotencyKey\":{idempotencyKeyJson}{version}}}",
                     System.Text.Encoding.UTF8, "application/json"),

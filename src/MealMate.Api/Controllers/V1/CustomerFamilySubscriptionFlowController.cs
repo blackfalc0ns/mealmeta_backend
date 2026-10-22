@@ -70,7 +70,8 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
         [FromServices] IFamilyPaymentRetryService retry, CancellationToken ct)
     {
         if (!IsCustomer()) return Forbid();
-        return HandleResult(await retry.RetryAsync(request, ct));
+        var result = await retry.RetryAsync(request, ct);
+        return HandleInitialCheckoutResult(result);
     }
 
     [HttpGet("relationships")]
@@ -445,9 +446,20 @@ public sealed class CustomerFamilySubscriptionFlowController : ApiControllerBase
     {
         if (!IsCustomer()) return Forbid();
         var result = await _familyFlow.StartCheckoutAsync(request, cancellationToken);
+        return HandleInitialCheckoutResult(result);
+    }
+
+    private IActionResult HandleInitialCheckoutResult(Result<FamilyCheckoutStartedDto> result)
+    {
         if (result.IsFailure && result.Error.Code == "payment.initialization_failed")
             return Problem(statusCode: StatusCodes.Status502BadGateway,
-                title: Messages.GetMessage("payment.initialization_failed", "Payment initialization failed."), detail: result.Error.Description);
+                title: Messages.GetMessage("payment.initialization_failed", "Payment initialization failed."),
+                detail: Messages.GetMessage("payment.initialization_failed", "Payment initialization failed."),
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = "payment.initialization_failed",
+                    ["retryEndpoint"] = FamilyCheckoutResumeReader.RetryEndpoint,
+                });
         return HandleResult(result);
     }
 
