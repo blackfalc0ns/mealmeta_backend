@@ -12,7 +12,7 @@ namespace MealMate.UnitTests.RestaurantOperations;
 
 public sealed class RestaurantWorkingDaysPersistenceTests
 {
-    private readonly DbContextOptions<Persistence.AppDbContext> options = new DbContextOptionsBuilder<Persistence.AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+    private readonly DbContextOptions<Persistence.AppDbContext> options;
     private readonly ICurrentUser owner = Substitute.For<ICurrentUser>();
     private readonly IDateTimeProvider clock = Substitute.For<IDateTimeProvider>();
     private readonly Guid restaurantId = Guid.NewGuid();
@@ -22,6 +22,9 @@ public sealed class RestaurantWorkingDaysPersistenceTests
     {
         owner.IsAuthenticated.Returns(true); owner.RestaurantId.Returns(restaurantId); owner.UserType.Returns(UserType.Restaurant);
         clock.UtcNow.Returns(new DateTime(2026, 10, 22, 9, 0, 0, DateTimeKind.Utc));
+        options = new DbContextOptionsBuilder<Persistence.AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(new Persistence.Interceptors.AuditableEntityInterceptor(owner, clock)).Options;
         using var db = OpenDb();
         db.RestaurantProfiles.Add(new RestaurantProfile { Id = restaurantId, UserId = Guid.NewGuid(), LegalNameAr = "مطعم", LegalNameEn = "Restaurant", TradeNameAr = "مطعم", TradeNameEn = "Restaurant", VerificationStatus = VerificationStatus.Approved });
         db.SaveChanges();
@@ -76,6 +79,45 @@ public sealed class RestaurantWorkingDaysPersistenceTests
         Assert.True((await service.UpdateWorkingDaysScheduleAsync(new(new() { new(0, false) }, other), default)).IsFailure);
         Assert.True((await service.AddWorkingDayExceptionAsync(new(new(2026, 10, 23), false, null, other), default)).IsFailure);
         Assert.Empty(db.RestaurantOperatingSchedules); Assert.Empty(db.RestaurantOperatingDayExceptions);
+    }
+
+    [Fact]
+    public async Task DeletedException_CanBeAddedAgainWithoutDuplicateDate()
+    {
+        var date = new DateOnly(2026, 10, 23);
+        Guid originalId;
+        using (var db = OpenDb())
+        {
+            var service = new RestaurantCapacityService(db, owner, clock);
+            originalId = (await service.AddWorkingDayExceptionAsync(new(date, true), default)).Value.Id;
+            await service.DeleteWorkingDayExceptionAsync(new(date), default);
+        }
+        using (var db = OpenDb())
+        {
+            var saved = await new RestaurantCapacityService(db, owner, clock).AddWorkingDayExceptionAsync(new(date, false), default);
+            Assert.True(saved.IsSuccess); Assert.Equal(originalId, saved.Value.Id);
+        }
+        using var read = OpenDb();
+        var row = Assert.Single(await read.RestaurantOperatingDayExceptions.IgnoreQueryFilters().ToListAsync());
+        Assert.False(row.IsDeleted); Assert.Null(row.DeletedAtUtc); Assert.Null(row.DeletedByUserId); Assert.False(row.IsWorkingDay);
+    }
+
+    [Fact]
+    public async Task DeletedWeeklyDay_IsRestoredInsteadOfInsertedAgain()
+    {
+        Guid id;
+        using (var db = OpenDb())
+        {
+            var deleted = new RestaurantOperatingSchedule { RestaurantId = restaurantId, DayOfWeek = DayOfWeek.Friday, IsWorkingDay = true, IsDeleted = true, DeletedAtUtc = clock.UtcNow, DeletedByUserId = Guid.NewGuid() };
+            id = deleted.Id; db.RestaurantOperatingSchedules.Add(deleted); await db.SaveChangesAsync();
+        }
+        using (var db = OpenDb())
+        {
+            Assert.True((await new RestaurantCapacityService(db, owner, clock).UpdateWorkingDaysScheduleAsync(new(new() { new(5, false) }), default)).IsSuccess);
+        }
+        using var read = OpenDb();
+        var row = Assert.Single(await read.RestaurantOperatingSchedules.IgnoreQueryFilters().ToListAsync());
+        Assert.Equal(id, row.Id); Assert.False(row.IsDeleted); Assert.Null(row.DeletedAtUtc); Assert.Null(row.DeletedByUserId); Assert.False(row.IsWorkingDay);
     }
 
     [Fact]

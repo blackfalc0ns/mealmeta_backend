@@ -379,6 +379,7 @@ public sealed class RestaurantCapacityService
         var restaurantId = restaurantIdResult.Value;
 
         var existingSchedules = await _db.RestaurantOperatingSchedules
+            .IgnoreQueryFilters()
             .Where(x => x.RestaurantId == restaurantId)
             .ToListAsync(cancellationToken);
 
@@ -388,6 +389,9 @@ public sealed class RestaurantCapacityService
             var existing = existingSchedules.FirstOrDefault(x => x.DayOfWeek == dayOfWeek);
             if (existing != null)
             {
+                existing.IsDeleted = false;
+                existing.DeletedAtUtc = null;
+                existing.DeletedByUserId = null;
                 existing.IsWorkingDay = item.IsWorkingDay;
             }
             else
@@ -430,10 +434,14 @@ public sealed class RestaurantCapacityService
         }
 
         var existingException = await _db.RestaurantOperatingDayExceptions
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(x => x.RestaurantId == restaurantId && x.Date == request.Date, cancellationToken);
 
         if (existingException != null)
         {
+            existingException.IsDeleted = false;
+            existingException.DeletedAtUtc = null;
+            existingException.DeletedByUserId = null;
             existingException.IsWorkingDay = request.IsWorkingDay;
             existingException.Reason = request.Reason;
         }
