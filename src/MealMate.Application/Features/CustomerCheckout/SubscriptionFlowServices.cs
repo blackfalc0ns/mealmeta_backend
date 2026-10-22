@@ -170,22 +170,14 @@ public sealed class SubscriptionScheduleService : ISubscriptionScheduleService
 
     public DateOnly ResolveFirstDeliveryDate(DateOnly chosenStartDate, bool includeFriday)
     {
-        var hasFridayInWindow = false;
-        for (var offset = 1; offset <= 3; offset++)
-        {
-            if (chosenStartDate.AddDays(offset).DayOfWeek == DayOfWeek.Friday)
-            {
-                hasFridayInWindow = true;
-                break;
-            }
-        }
+        var baselineDelivery = chosenStartDate.AddDays(4);
+        // Passing a Friday during preparation must not remove the choice day.
+        // Only an excluded Friday at the baseline delivery itself triggers the
+        // exception; the previous day still preserves the three-day preparation.
+        if (!includeFriday && baselineDelivery.DayOfWeek == DayOfWeek.Friday)
+            return baselineDelivery.AddDays(-1);
 
-        var daysToAdd = (!includeFriday && hasFridayInWindow) ? 3 : 4;
-        var firstDelivery = chosenStartDate.AddDays(daysToAdd);
-        if (includeFriday) return firstDelivery;
-        while (firstDelivery.DayOfWeek == DayOfWeek.Friday)
-            firstDelivery = firstDelivery.AddDays(1);
-        return firstDelivery;
+        return baselineDelivery;
     }
 
     public bool TryResolveCheckoutStart(

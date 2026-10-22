@@ -33,9 +33,9 @@ public sealed class CustomerSubscriptionFlowControllerTests
 {
     [Theory]
     [InlineData(true, 26, false)]
-    [InlineData(false, 25, false)]
+    [InlineData(false, 26, false)]
     [InlineData(true, 26, true)]
-    [InlineData(false, 25, true)]
+    [InlineData(false, 26, true)]
     public async Task EligibleStartDates_OnlyListsDatesAcceptedByCheckout(
         bool includeFriday, int expectedEarliestDay, bool useInjectedConstructor)
     {
@@ -1173,7 +1173,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
     [Theory]
     [InlineData(26, false, 26)]
     [InlineData(28, false, 28)]
-    [InlineData(25, false, 25)]
+    [InlineData(25, false, 26)]
     [InlineData(25, true, 26)]
     [InlineData(28, true, 28)]
     [InlineData(21, true, 0)]
