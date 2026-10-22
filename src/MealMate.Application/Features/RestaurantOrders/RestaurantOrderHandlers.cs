@@ -143,6 +143,7 @@ public sealed class RestaurantOrderService
 
             var lockTime = receivedOrders.Where(x => x.SubscriptionDayId == day.Id).Select(x => (DateTime?)x.CreatedAtUtc).Max() ?? day.LockAtUtc ?? day.CreatedAtUtc;
             var deadlineTime = lockTime.AddMinutes(confirmationMinutes);
+            var minutesLeft = (int)Math.Ceiling((deadlineTime - now).TotalMinutes);
             var hoursLeft = (int)Math.Floor((deadlineTime - now).TotalHours);
 
             var isConfirmed = day.Status == SubscriptionDayStatus.ConfirmedByRestaurant ||
@@ -159,11 +160,11 @@ public sealed class RestaurantOrderService
             {
                 urgency = "overdue";
             }
-            else if (hoursLeft <= 4)
+            else if (minutesLeft <= 30)
             {
                 urgency = "critical";
             }
-            else if (hoursLeft <= 8)
+            else if (minutesLeft <= 120)
             {
                 urgency = "warning";
             }
@@ -197,16 +198,20 @@ public sealed class RestaurantOrderService
             }
             else if (deadlineTime <= now)
             {
-                var overdueHours = Math.Abs(hoursLeft);
-                deadlineLabel = new LocalizedTextDto(
-                    overdueHours == 0 ? "انتهى الموعد" : $"متأخر {overdueHours} ساعات",
-                    overdueHours == 0 ? "Deadline passed" : $"{overdueHours}h overdue");
+                var overdueMinutes = Math.Abs(minutesLeft);
+                var overdueHours = overdueMinutes / 60;
+                deadlineLabel = overdueHours == 0
+                    ? new LocalizedTextDto("انتهى الموعد (جاري النقل أو المتابعة)", "Overdue (Reassigning/Escalated)")
+                    : new LocalizedTextDto($"متأخر {overdueHours} ساعة", $"{overdueHours}h overdue");
+            }
+            else if (minutesLeft < 60)
+            {
+                deadlineLabel = new LocalizedTextDto($"متبقي {minutesLeft} دقيقة", $"{minutesLeft} min left");
             }
             else
             {
-                var minutesLeft = (int)Math.Ceiling((deadlineTime - now).TotalMinutes);
-                deadlineLabel = hoursLeft < 1 ? new LocalizedTextDto($"متبقي {minutesLeft} دقيقة", $"{minutesLeft} min left")
-                    : new LocalizedTextDto($"متبقي {hoursLeft} ساعات", $"{hoursLeft}h left");
+                var h = Math.Round((double)minutesLeft / 60.0, 1);
+                deadlineLabel = new LocalizedTextDto($"متبقي {h} ساعة", $"{h}h left");
             }
 
             var orderCode = $"ORD-{day.ServiceDate:MMdd}-{day.Id.ToString()[..4].ToUpperInvariant()}";
@@ -243,21 +248,30 @@ public sealed class RestaurantOrderService
         var summaries = new List<PendingConfirmationSummaryDto>
         {
             new("pending", new LocalizedTextDto("بانتظار التأكيد", "Awaiting confirm"), pendingCount, new LocalizedTextDto("بانتظار إجراء المطعم", "Awaiting restaurant action"), "primary", "lucideClock"),
-            new("critical", new LocalizedTextDto("حرج (< 4س)", "Critical (< 4h)"), criticalCount, new LocalizedTextDto("يحتاج تأكيد فوري", "Needs immediate confirm"), "danger", "lucideTriangleAlert"),
-            new("warning", new LocalizedTextDto("تنبيه (< 8س)", "Warning (< 8h)"), warningCount, new LocalizedTextDto("اقترب الموعد النهائي", "Deadline approaching"), "warning", "lucideTimer"),
+            new("critical", new LocalizedTextDto("حرج (< 30د)", "Critical (< 30m)"), criticalCount, new LocalizedTextDto("يحتاج تأكيد فوري", "Needs immediate confirm"), "danger", "lucideTriangleAlert"),
+            new("warning", new LocalizedTextDto("تنبيه (< 2س)", "Warning (< 2h)"), warningCount, new LocalizedTextDto("اقترب الموعد النهائي", "Deadline approaching"), "warning", "lucideTimer"),
             new("overdue", new LocalizedTextDto("متأخر", "Overdue"), overdueCount, new LocalizedTextDto("قد يُعاد تعيينه", "May be reassigned"), "accent", "lucideCircleAlert")
         };
 
         var dateLabel = FormatDateLabel(DateOnly.FromDateTime(now));
 
+        var isAutoConfirm = await _db.RestaurantProfiles
+            .AsNoTracking()
+            .Where(r => r.Id == restaurantId)
+            .Select(r => r.AutoConfirmOrders)
+            .FirstOrDefaultAsync(cancellationToken);
+
         var data = new PendingConfirmationDataDto(
             Title: new LocalizedTextDto("بانتظار التأكيد", "Pending confirmation"),
-            Subtitle: new LocalizedTextDto("أكّد الطلبات قبل انتهاء مهلة التأكيد المحددة في سياسة التشغيل", "Confirm orders before the operational policy confirmation deadline"),
+            Subtitle: new LocalizedTextDto("أكّد الطلبات قبل انتهاء مهلة التأكيد المحددة في سياسة التشغيل (4 ساعات)", "Confirm orders before the unified operational policy deadline (4 hours)"),
             DateLabel: dateLabel,
-            WindowHint: new LocalizedTextDto($"مهلة التأكيد {confirmationMinutes} دقيقة", $"Confirmation window: {confirmationMinutes} minutes"),
+            WindowHint: new LocalizedTextDto("مهلة التأكيد 4 ساعات بموجب السياسة الموحدة (قبل 72 ساعة من موعد الخدمة)", "4-Hour Confirmation Window under Unified Operational Policy (72h prior)"),
             Summaries: summaries,
             Orders: items
-        );
+        )
+        {
+            ConfirmationMode = isAutoConfirm ? "auto" : "manual"
+        };
 
         return Result.Success(data);
     }

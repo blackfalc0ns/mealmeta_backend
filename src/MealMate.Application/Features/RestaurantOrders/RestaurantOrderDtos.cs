@@ -41,7 +41,10 @@ public sealed record PendingConfirmationDataDto(
     LocalizedTextDto DateLabel,
     LocalizedTextDto WindowHint,
     IReadOnlyList<PendingConfirmationSummaryDto> Summaries,
-    IReadOnlyList<PendingConfirmationItemDto> Orders);
+    IReadOnlyList<PendingConfirmationItemDto> Orders)
+{
+    public string ConfirmationMode { get; init; } = "manual";
+}
 
 public sealed record BoxMealNutritionDto(
     decimal Calories,

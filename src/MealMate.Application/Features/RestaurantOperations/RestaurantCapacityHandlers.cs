@@ -3,6 +3,7 @@ using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Features.RestaurantOperations.Availability;
 using MealMate.Domain.Enums;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
@@ -97,6 +98,39 @@ public sealed class DeleteWorkingDayExceptionCommandHandler : ICommandHandler<De
         => _service.DeleteWorkingDayExceptionAsync(request, cancellationToken);
 }
 
+public sealed class GetRestaurantCapacityReductionsQueryHandler : IQueryHandler<GetRestaurantCapacityReductionsQuery, List<CapacityReductionRequestDto>>
+{
+    private readonly RestaurantCapacityService _service;
+
+    public GetRestaurantCapacityReductionsQueryHandler(RestaurantCapacityService service)
+        => _service = service;
+
+    public Task<Result<List<CapacityReductionRequestDto>>> Handle(GetRestaurantCapacityReductionsQuery request, CancellationToken cancellationToken)
+        => _service.GetCapacityReductionsAsync(request, cancellationToken);
+}
+
+public sealed class SubmitCapacityReductionRequestCommandHandler : ICommandHandler<SubmitCapacityReductionRequestCommand, CapacityReductionRequestDto>
+{
+    private readonly RestaurantCapacityService _service;
+
+    public SubmitCapacityReductionRequestCommandHandler(RestaurantCapacityService service)
+        => _service = service;
+
+    public Task<Result<CapacityReductionRequestDto>> Handle(SubmitCapacityReductionRequestCommand request, CancellationToken cancellationToken)
+        => _service.SubmitCapacityReductionRequestAsync(request, cancellationToken);
+}
+
+public sealed class WithdrawCapacityReductionRequestCommandHandler : ICommandHandler<WithdrawCapacityReductionRequestCommand, bool>
+{
+    private readonly RestaurantCapacityService _service;
+
+    public WithdrawCapacityReductionRequestCommandHandler(RestaurantCapacityService service)
+        => _service = service;
+
+    public Task<Result<bool>> Handle(WithdrawCapacityReductionRequestCommand request, CancellationToken cancellationToken)
+        => _service.WithdrawCapacityReductionRequestAsync(request, cancellationToken);
+}
+
 public sealed class RestaurantCapacityService
 {
     private readonly IAppDbContext _db;
@@ -136,20 +170,6 @@ public sealed class RestaurantCapacityService
             return Result.Failure<RestaurantCapacityOverviewDto>(restaurantIdResult.Error);
 
         var restaurantId = restaurantIdResult.Value;
-
-        if (!_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
-        {
-            var isApproved = await _db.RestaurantProfiles.AnyAsync(p => p.Id == restaurantId, cancellationToken)
-                || await _db.RestaurantRegistrations.AnyAsync(r => (r.Id == restaurantId || r.ResultingRestaurantId == restaurantId) && r.Status == VerificationStatus.Approved, cancellationToken);
-
-            if (isApproved)
-            {
-                return Result.Failure<RestaurantCapacityOverviewDto>(Error.Conflict(
-                    "capacity.review_required",
-                    "Permanent capacity changes for an approved restaurant require admin review. Please submit a capacity review proposal."));
-            }
-        }
-
         var today = DateOnly.FromDateTime(_clock.UtcNow);
         var currentBaseCapacity = await GetCurrentBaseCapacityAsync(restaurantId, today, cancellationToken);
 
@@ -157,9 +177,47 @@ public sealed class RestaurantCapacityService
         {
             return Result.Failure<RestaurantCapacityOverviewDto>(Error.ValidationWithArguments(
                 MessageCodes.RestaurantOperations.CapacityCannotReduce,
-                "Capacity cannot be reduced below the current limit.",
+                "Capacity cannot be reduced directly. Please submit a formal capacity reduction request.",
                 currentBaseCapacity));
         }
+
+        // Direct capacity increase is allowed immediately per unified capacity rules (Spec 3.1 & 3.3).
+        // Any pending reduction request is superseded and closed by the direct increase.
+        var pendingReductions = await _db.CapacityReductionRequests
+            .Where(r => r.RestaurantId == restaurantId && r.Status == CapacityReductionStatus.Pending)
+            .ToListAsync(cancellationToken);
+
+        foreach (var pending in pendingReductions)
+        {
+            pending.Status = CapacityReductionStatus.Superseded;
+            pending.ReviewNotes = $"Closed automatically because restaurant directly increased capacity to {request.NewCapacity}.";
+            pending.ModifiedAtUtc = _clock.UtcNow;
+            pending.ModifiedByUserId = _currentUser.UserId;
+        }
+
+        // Update or insert RestaurantCapacityPolicy
+        var latestPolicy = await _db.RestaurantCapacityPolicies
+            .Where(p => p.RestaurantId == restaurantId && p.IsActive)
+            .OrderByDescending(p => p.Version)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var nextVersion = (latestPolicy?.Version ?? 0) + 1;
+        if (latestPolicy != null)
+        {
+            latestPolicy.IsActive = false;
+        }
+
+        _db.RestaurantCapacityPolicies.Add(new RestaurantCapacityPolicy
+        {
+            RestaurantId = restaurantId,
+            DailyBoxLimit = request.NewCapacity,
+            Version = nextVersion,
+            EffectiveFromDate = today,
+            IsActive = true,
+            Reason = "Direct restaurant capacity increase",
+            CreatedAtUtc = _clock.UtcNow,
+            CreatedByUserId = _currentUser.UserId
+        });
 
         var existingCaps = await _db.DailyCapacities
             .Where(x => x.RestaurantId == restaurantId && x.CapacityType == CapacityType.Base && x.ServiceDate >= today)
@@ -437,11 +495,187 @@ public sealed class RestaurantCapacityService
         return Result.Success(true);
     }
 
+    public async Task<Result<List<CapacityReductionRequestDto>>> GetCapacityReductionsAsync(
+        GetRestaurantCapacityReductionsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var restaurantIdResult = ResolveRestaurantId(request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<List<CapacityReductionRequestDto>>(restaurantIdResult.Error);
+
+        var restaurantId = restaurantIdResult.Value;
+
+        var requests = await _db.CapacityReductionRequests
+            .AsNoTracking()
+            .Where(r => r.RestaurantId == restaurantId)
+            .OrderByDescending(r => r.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var dtos = requests.Select(r => new CapacityReductionRequestDto(
+            r.Id,
+            r.RestaurantId,
+            r.CurrentCapacity,
+            r.RequestedCapacity,
+            r.RequestedEffectiveDate.ToString("yyyy-MM-dd"),
+            (r.ApprovedEffectiveDate ?? r.RequestedEffectiveDate).ToString("yyyy-MM-dd"),
+            r.Reason,
+            r.Status.ToString(),
+            r.CreatedAtUtc.ToString("o"),
+            r.ReviewedAtUtc.HasValue ? r.ReviewedAtUtc.Value.ToString("o") : null,
+            r.ReviewNotes
+        )).ToList();
+
+        return Result.Success(dtos);
+    }
+
+    public async Task<Result<CapacityReductionRequestDto>> SubmitCapacityReductionRequestAsync(
+        SubmitCapacityReductionRequestCommand request,
+        CancellationToken cancellationToken)
+    {
+        var restaurantIdResult = ResolveRestaurantId(request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<CapacityReductionRequestDto>(restaurantIdResult.Error);
+
+        var restaurantId = restaurantIdResult.Value;
+        var today = DateOnly.FromDateTime(_clock.UtcNow);
+
+        if (request.RequestedEffectiveDate < today)
+        {
+            return Result.Failure<CapacityReductionRequestDto>(Error.Validation(
+                "capacity.effective_date_past",
+                "Requested effective date cannot be in the past."));
+        }
+
+        var currentCapacity = await GetCurrentBaseCapacityAsync(restaurantId, today, cancellationToken);
+        if (request.RequestedLimit >= currentCapacity)
+        {
+            return Result.Failure<CapacityReductionRequestDto>(Error.Validation(
+                "capacity.limit_must_be_lower",
+                $"Requested capacity limit ({request.RequestedLimit}) must be lower than current capacity limit ({currentCapacity})."));
+        }
+
+        if (request.RequestedLimit <= 0)
+        {
+            return Result.Failure<CapacityReductionRequestDto>(Error.Validation(
+                "capacity.limit_must_be_positive",
+                "Requested capacity limit must be greater than zero."));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length < 5)
+        {
+            return Result.Failure<CapacityReductionRequestDto>(Error.Validation(
+                "capacity.reason_required",
+                "A detailed operational reason of at least 5 characters is required."));
+        }
+
+        var hasActivePending = await _db.CapacityReductionRequests
+            .AnyAsync(r => r.RestaurantId == restaurantId && r.Status == CapacityReductionStatus.Pending, cancellationToken);
+
+        if (hasActivePending)
+        {
+            return Result.Failure<CapacityReductionRequestDto>(Error.Conflict(
+                "capacity.pending_request_exists",
+                "An active capacity reduction request is already pending review for this restaurant."));
+        }
+
+        var forwardDays = await _db.SubscriptionDays
+            .AsNoTracking()
+            .Where(x => x.RestaurantId == restaurantId && x.ServiceDate >= request.RequestedEffectiveDate &&
+                        x.Status != SubscriptionDayStatus.Cancelled)
+            .GroupBy(x => x.ServiceDate)
+            .Select(g => new DateOccupancy(g.Key, g.Count()))
+            .ToListAsync(cancellationToken);
+
+        var safetyPlan = CapacityReductionPlanner.EvaluateReduction(
+            request.RequestedLimit,
+            request.RequestedEffectiveDate,
+            forwardDays);
+
+        var reductionReq = new CapacityReductionRequest
+        {
+            Id = Guid.NewGuid(),
+            RestaurantId = restaurantId,
+            CurrentCapacity = currentCapacity,
+            RequestedCapacity = request.RequestedLimit,
+            Reason = request.Reason.Trim(),
+            RequestedEffectiveDate = request.RequestedEffectiveDate,
+            Status = CapacityReductionStatus.Pending,
+            ApprovedEffectiveDate = safetyPlan.FirstSafeDate,
+            CreatedAtUtc = _clock.UtcNow,
+            CreatedByUserId = _currentUser.UserId
+        };
+
+        _db.CapacityReductionRequests.Add(reductionReq);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var dto = new CapacityReductionRequestDto(
+            reductionReq.Id,
+            reductionReq.RestaurantId,
+            reductionReq.CurrentCapacity,
+            reductionReq.RequestedCapacity,
+            reductionReq.RequestedEffectiveDate.ToString("yyyy-MM-dd"),
+            safetyPlan.FirstSafeDate.ToString("yyyy-MM-dd"),
+            reductionReq.Reason,
+            reductionReq.Status.ToString(),
+            reductionReq.CreatedAtUtc.ToString("o"),
+            null,
+            safetyPlan.Message
+        );
+
+        return Result.Success(dto);
+    }
+
+    public async Task<Result<bool>> WithdrawCapacityReductionRequestAsync(
+        WithdrawCapacityReductionRequestCommand request,
+        CancellationToken cancellationToken)
+    {
+        var restaurantIdResult = ResolveRestaurantId(request.RestaurantId);
+        if (restaurantIdResult.IsFailure)
+            return Result.Failure<bool>(restaurantIdResult.Error);
+
+        var restaurantId = restaurantIdResult.Value;
+
+        var reductionReq = await _db.CapacityReductionRequests
+            .FirstOrDefaultAsync(r => r.Id == request.RequestId && r.RestaurantId == restaurantId, cancellationToken);
+
+        if (reductionReq == null)
+        {
+            return Result.Failure<bool>(Error.NotFound(
+                "capacity.reduction_request_not_found",
+                "Capacity reduction request not found."));
+        }
+
+        var withdrawResult = reductionReq.Withdraw();
+        if (withdrawResult.IsFailure)
+        {
+            return Result.Failure<bool>(Error.Conflict(
+                "capacity.cannot_withdraw",
+                withdrawResult.Error));
+        }
+
+        reductionReq.ModifiedAtUtc = _clock.UtcNow;
+        reductionReq.ModifiedByUserId = _currentUser.UserId;
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return Result.Success(true);
+    }
+
     private Result<Guid> ResolveRestaurantId(Guid? overrideRestaurantId = null)
         => RestaurantOperationsScope.ResolveRestaurantId(_currentUser, overrideRestaurantId);
 
     private async Task<int> GetCurrentBaseCapacityAsync(Guid restaurantId, DateOnly date, CancellationToken cancellationToken)
     {
+        var policy = await _db.RestaurantCapacityPolicies
+            .AsNoTracking()
+            .Where(p => p.RestaurantId == restaurantId && p.IsActive && p.EffectiveFromDate <= date)
+            .OrderByDescending(p => p.Version)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (policy != null)
+        {
+            return policy.DailyBoxLimit;
+        }
+
         var cap = await _db.DailyCapacities
             .Where(x => x.RestaurantId == restaurantId && x.CapacityType == CapacityType.Base && x.ServiceDate <= date)
             .OrderByDescending(x => x.ServiceDate)
@@ -649,6 +883,31 @@ public sealed class RestaurantCapacityService
             WorkingDaysSummaryAr: $"أيام العمل القادمة: {upcomingWorkingCount} يومًا من الـ {daysList.Count} القادمة",
             WorkingDaysSummaryEn: $"Upcoming working days: {upcomingWorkingCount} of next {daysList.Count} days");
 
+        var scheduledApprovedReduction = await _db.CapacityReductionRequests
+            .AsNoTracking()
+            .Where(r => r.RestaurantId == restaurantId &&
+                        r.Status == CapacityReductionStatus.Approved &&
+                        (r.ApprovedEffectiveDate ?? r.RequestedEffectiveDate) >= today)
+            .OrderBy(r => r.ApprovedEffectiveDate ?? r.RequestedEffectiveDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        ScheduledReductionDto? scheduledReductionDto = null;
+        if (scheduledApprovedReduction != null)
+        {
+            var effDate = (scheduledApprovedReduction.ApprovedEffectiveDate ?? scheduledApprovedReduction.RequestedEffectiveDate).ToString("yyyy-MM-dd");
+            scheduledReductionDto = new ScheduledReductionDto(
+                TargetLimit: scheduledApprovedReduction.RequestedCapacity,
+                EffectiveDate: effDate,
+                FirstSafeDate: effDate,
+                Reason: scheduledApprovedReduction.Reason);
+        }
+
+        var isAutoConfirm = await _db.RestaurantProfiles
+            .AsNoTracking()
+            .Where(r => r.Id == restaurantId)
+            .Select(r => r.AutoConfirmOrders)
+            .FirstOrDefaultAsync(cancellationToken);
+
         return new RestaurantCapacityOverviewDto(
             Status: status,
             DailyLimit: baseCapacity,
@@ -657,6 +916,10 @@ public sealed class RestaurantCapacityService
             UpdatedAtIso: DateTime.UtcNow.ToString("O"),
             Days: daysList,
             WeeklyDays: schedule.WeeklyDays,
-            Exceptions: schedule.Exceptions);
+            Exceptions: schedule.Exceptions)
+        {
+            ScheduledReduction = scheduledReductionDto,
+            ConfirmationMode = isAutoConfirm ? "auto" : "manual"
+        };
     }
 }

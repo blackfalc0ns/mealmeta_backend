@@ -2,6 +2,12 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Messaging;
 namespace MealMate.Application.Features.RestaurantOperations;
 
+public sealed record ScheduledReductionDto(
+    int TargetLimit,
+    string EffectiveDate,
+    string FirstSafeDate,
+    string Reason);
+
 public sealed record RestaurantCapacityOverviewDto(
     OperationalStatusDto Status,
     int DailyLimit,
@@ -10,7 +16,11 @@ public sealed record RestaurantCapacityOverviewDto(
     string UpdatedAtIso,
     List<CapacityDayDto> Days,
     List<WeeklyDayScheduleDto> WeeklyDays,
-    List<WorkingDayExceptionDto> Exceptions);
+    List<WorkingDayExceptionDto> Exceptions)
+{
+    public ScheduledReductionDto? ScheduledReduction { get; init; }
+    public string ConfirmationMode { get; init; } = "manual";
+}
 
 public sealed record OperationalStatusDto(
     bool IsActive,
@@ -93,4 +103,30 @@ public sealed record AddWorkingDayExceptionCommand(
 
 public sealed record DeleteWorkingDayExceptionCommand(
     DateOnly Date,
+    Guid? RestaurantId = null) : ICommand<bool>;
+
+public sealed record CapacityReductionRequestDto(
+    Guid Id,
+    Guid RestaurantId,
+    int CurrentLimit,
+    int RequestedLimit,
+    string RequestedEffectiveDate,
+    string FirstSafeDate,
+    string Reason,
+    string Status,
+    string SubmittedAtUtc,
+    string? ReviewedAtUtc,
+    string? AdminNotes);
+
+public sealed record GetRestaurantCapacityReductionsQuery(
+    Guid? RestaurantId = null) : IQuery<List<CapacityReductionRequestDto>>;
+
+public sealed record SubmitCapacityReductionRequestCommand(
+    int RequestedLimit,
+    DateOnly RequestedEffectiveDate,
+    string Reason,
+    Guid? RestaurantId = null) : ICommand<CapacityReductionRequestDto>;
+
+public sealed record WithdrawCapacityReductionRequestCommand(
+    Guid RequestId,
     Guid? RestaurantId = null) : ICommand<bool>;

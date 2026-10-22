@@ -11,7 +11,7 @@ public sealed record CutoffPolicySettings(
     int CutoffLeadHours = 72,
     bool EnableFixedDailyHour = false,
     int FixedDailyHourKuwait = 14,
-    int KitchenConfirmSlaHours = 24,
+    int KitchenConfirmSlaHours = 4,
     int? CutoffLeadMinutes = null,
     int? KitchenConfirmSlaMinutes = null,
     int FirstDaySelectionWindowHours = 24

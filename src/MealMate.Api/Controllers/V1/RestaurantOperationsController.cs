@@ -54,6 +54,30 @@ public sealed class RestaurantOperationsController : ApiControllerBase
         CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new SetDateManualBusyCommand(date, request.IsManualBusy, request.Reason), cancellationToken));
 
+    [HttpGet("capacity/reductions")]
+    public async Task<IActionResult> GetCapacityReductions(
+        [FromQuery] Guid? restaurantId = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new GetRestaurantCapacityReductionsQuery(restaurantId), cancellationToken));
+
+    [HttpPost("capacity/reductions")]
+    public async Task<IActionResult> SubmitCapacityReduction(
+        [FromBody] SubmitCapacityReductionRequest request,
+        [FromQuery] Guid? restaurantId = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new SubmitCapacityReductionRequestCommand(
+            request.RequestedLimit,
+            request.RequestedEffectiveDate,
+            request.Reason,
+            restaurantId), cancellationToken));
+
+    [HttpPost("capacity/reductions/{id:guid}/withdraw")]
+    public async Task<IActionResult> WithdrawCapacityReduction(
+        Guid id,
+        [FromQuery] Guid? restaurantId = null,
+        CancellationToken cancellationToken = default)
+        => HandleResult(await Sender.Send(new WithdrawCapacityReductionRequestCommand(id, restaurantId), cancellationToken));
+
     [HttpGet("working-days")]
     public async Task<IActionResult> GetWorkingDaysSchedule(CancellationToken cancellationToken = default)
         => HandleResult(await Sender.Send(new GetWorkingDaysScheduleQuery(), cancellationToken));
@@ -156,4 +180,5 @@ public sealed record ActivateEmergencyOverrideRequest(
     bool Closed,
     string Reason);
 public sealed record ResolveEmergencyOverrideRequest(string Reason);
+public sealed record SubmitCapacityReductionRequest(int RequestedLimit, DateOnly RequestedEffectiveDate, string Reason);
 
