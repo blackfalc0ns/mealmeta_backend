@@ -27,18 +27,21 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     private readonly ISubscriptionFlowQueryService _queryService;
     private readonly ISubscriptionCatalogAvailabilityService? _catalogAvailability;
     private readonly IOperationalPolicyService? _policyService;
+    private readonly ISubscriptionScheduleService _schedule;
 
     [ActivatorUtilitiesConstructor]
     public CustomerSubscriptionFlowController(
         ICurrentUser currentUser,
         ISubscriptionFlowQueryService queryService,
         ISubscriptionCatalogAvailabilityService catalogAvailability,
+        ISubscriptionScheduleService schedule,
         IOperationalPolicyService? policyService = null)
     {
         _currentUser = currentUser;
         _queryService = queryService;
         _catalogAvailability = catalogAvailability;
         _policyService = policyService;
+        _schedule = schedule;
     }
 
     /// <summary>Backward-compatible constructor for existing tests and call sites.</summary>
@@ -63,6 +66,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
         ISubscriptionCatalogPreparationService? preparation = null)
     {
         _currentUser = currentUser;
+        _schedule = schedule;
         _queryService = queryService ?? new SubscriptionFlowQueryService(
             db, eligibility, menus, schedule, slots, payments,
             allowedDurations, tiers, readiness, individualGate, diversification,
@@ -317,10 +321,8 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
     }
 
     /// <summary>
-    /// <summary>
-    /// Returns earliest eligible delivery date and calendar dates matching the operational lead time
-    /// configured dynamically by the platform administrator.
-    /// Consumed by the mobile DatePicker before checkout to select StartDate.
+    /// Returns date-picker candidates accepted by the same start-date validation as checkout.
+    /// This context-free list does not promise restaurant availability or a delivery time slot.
     /// </summary>
     [HttpGet("eligible-start-dates")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -341,13 +343,18 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             policyVersion = settings.Version;
         }
 
-        var snapshot = new TimingSnapshot(policyVersion, leadTimeHours);
+        var nowUtc = DateTime.UtcNow;
+        var today = _schedule.GetKuwaitToday();
+        var eligibleDates = new List<DateOnly>();
+        for (var offset = 0; offset <= lookaheadDays; offset++)
+        {
+            var candidate = today.AddDays(offset);
+            if (!includeFriday && candidate.DayOfWeek == DayOfWeek.Friday) continue;
+            if (_schedule.TryResolveCheckoutStart(candidate, includeFriday, out var acceptedDate, out _))
+                eligibleDates.Add(acceptedDate);
+        }
 
-        var nowUtc = DateTimeOffset.UtcNow;
-        var eligibleDates = ServiceTimingPolicy.GetEligibleFirstDeliveryDates(
-            nowUtc, snapshot, includeFriday, new TimeOnly(12, 0), TimeSpan.FromHours(3), lookaheadDays).ToList();
-
-        var earliest = eligibleDates.FirstOrDefault();
+        DateOnly? earliest = eligibleDates.Count > 0 ? eligibleDates[0] : null;
 
         return Ok(new
         {
@@ -356,7 +363,7 @@ public sealed class CustomerSubscriptionFlowController : ApiControllerBase
             EarliestEligibleDeliveryDate = earliest,
             EligibleFirstDeliveryDates = eligibleDates,
             IncludeFriday = includeFriday,
-            ServerTimeUtc = DateTime.UtcNow
+            ServerTimeUtc = nowUtc
         });
     }
 

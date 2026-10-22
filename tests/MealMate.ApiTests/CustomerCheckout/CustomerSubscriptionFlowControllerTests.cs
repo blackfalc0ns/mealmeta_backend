@@ -31,6 +31,54 @@ namespace MealMate.ApiTests.CustomerCheckout;
 
 public sealed class CustomerSubscriptionFlowControllerTests
 {
+    [Theory]
+    [InlineData(true, 26, false)]
+    [InlineData(false, 25, false)]
+    [InlineData(true, 26, true)]
+    [InlineData(false, 25, true)]
+    public async Task EligibleStartDates_OnlyListsDatesAcceptedByCheckout(
+        bool includeFriday, int expectedEarliestDay, bool useInjectedConstructor)
+    {
+        await using var db = CreateDb();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(new DateTime(2026, 10, 22, 2, 1, 23, DateTimeKind.Utc));
+        var schedule = new SubscriptionScheduleService(clock);
+        var controller = CreateController(db, out _, out var user, schedule: schedule);
+        if (useInjectedConstructor)
+            controller = new CustomerSubscriptionFlowController(user,
+                Substitute.For<ISubscriptionFlowQueryService>(),
+                Substitute.For<ISubscriptionCatalogAvailabilityService>(), schedule);
+
+        var result = Assert.IsType<OkObjectResult>(await controller.EligibleStartDates(includeFriday, 14));
+        var json = JsonSerializer.SerializeToElement(result.Value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var earliest = DateOnly.Parse(json.GetProperty("earliestEligibleDeliveryDate").GetString()!);
+        var dates = json.GetProperty("eligibleFirstDeliveryDates").EnumerateArray()
+            .Select(x => DateOnly.Parse(x.GetString()!)).ToList();
+
+        Assert.Equal(new DateOnly(2026, 10, expectedEarliestDay), earliest);
+        Assert.Equal(earliest, dates[0]);
+        Assert.All(dates, date =>
+        {
+            Assert.True(schedule.TryResolveCheckoutStart(date, includeFriday, out var accepted, out _));
+            Assert.Equal(date, accepted);
+            Assert.InRange(date, schedule.GetKuwaitToday(), schedule.GetKuwaitToday().AddDays(14));
+            if (!includeFriday) Assert.NotEqual(DayOfWeek.Friday, date.DayOfWeek);
+        });
+    }
+
+    [Fact]
+    public async Task EligibleStartDates_EmptyHorizonHasNoInventedEarliestDate()
+    {
+        await using var db = CreateDb();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(new DateTime(2026, 10, 22, 2, 1, 23, DateTimeKind.Utc));
+        var controller = CreateController(db, out _, out _, schedule: new SubscriptionScheduleService(clock));
+        var result = Assert.IsType<OkObjectResult>(await controller.EligibleStartDates(true, 1));
+        var json = JsonSerializer.SerializeToElement(result.Value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("earliestEligibleDeliveryDate").ValueKind);
+        Assert.Empty(json.GetProperty("eligibleFirstDeliveryDates").EnumerateArray());
+    }
+
     [Fact]
     public async Task Types_ReturnsAvailableTypes_WhenCustomerHasNoSubscriptions()
     {
