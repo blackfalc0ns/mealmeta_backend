@@ -33,6 +33,62 @@ namespace MealMate.ApiTests.CustomerCheckout;
 
 public sealed class CustomerSubscriptionManagementControllerTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Scheduled_paid_subscription_is_active_on_customer_screens_without_starting_service(bool isFamily)
+    {
+        await using var db = CreateDb();
+        var customerId = Guid.NewGuid();
+        var program = NewProgram();
+        var bundle = NewBundle(program.Id);
+        var subscription = NewSubscription(customerId, program.Id, bundle.Id, SubscriptionStatus.Scheduled);
+        subscription.StartDate = new DateOnly(2026, 10, 26);
+        subscription.EndDate = new DateOnly(2026, 11, 8);
+        if (isFamily)
+        {
+            var group = new FamilyGroup { ManagerCustomerUserId = customerId, Name = "Family", Status = FamilyGroupStatus.Active };
+            var member = new FamilyMember { FamilyGroupId = group.Id, FamilyGroup = group,
+                DisplayName = "Manager", Role = FamilyMemberRole.Manager,
+                RelationshipCode = "self", NutritionalGoalCode = "maintain", MemberSubscriptionId = subscription.Id };
+            subscription.FamilyGroupId = group.Id;
+            subscription.FamilyMemberId = member.Id;
+            db.AddRange(group, member);
+        }
+        db.AddRange(program, bundle, subscription);
+        await db.SaveChangesAsync();
+        var clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(new DateTime(2026, 10, 22, 12, 0, 0, DateTimeKind.Utc));
+        var service = new CustomerSubscriptionQueryService(db, clock);
+
+        var current = (await service.GetCurrentSubscriptionAsync(customerId)).Value.Subscription!;
+        var listed = Assert.Single((await service.ListSubscriptionsAsync(customerId, false)).Value);
+        var management = (await service.GetManagementScreenAsync(customerId, false)).Value;
+        var details = (await service.GetManagementDetailsAsync(subscription.Id, customerId)).Value;
+        var expectedAr = isFamily ? "اشتراك عائلي" : "نشط";
+        var expectedEn = isFamily ? "Family Subscription" : "Active";
+        foreach (var card in new[] { current, listed })
+        {
+            Assert.Equal("Active", card.Status);
+            Assert.Equal(expectedAr, card.StatusNameAr);
+            Assert.Equal(expectedEn, card.StatusNameEn);
+            Assert.Equal(subscription.StartDate, card.StartDate);
+            Assert.Equal(subscription.EndDate, card.EndDate);
+            Assert.Equal(0, card.CompletedServiceDays);
+            Assert.True(card.Actions.CanFreeze);
+        }
+        foreach (var card in new[] { management.CurrentSubscription!, Assert.Single(management.Subscriptions), details })
+        {
+            Assert.Equal("Active", card.Status);
+            Assert.Equal(expectedAr, card.StatusNameAr);
+            Assert.Equal(expectedEn, card.StatusNameEn);
+            Assert.Equal(subscription.StartDate, card.StartDate);
+            Assert.Equal(subscription.EndDate, card.EndDate);
+        }
+        Assert.Equal(SubscriptionStatus.Scheduled,
+            (await db.Subscriptions.AsNoTracking().SingleAsync(x => x.Id == subscription.Id)).Status);
+    }
+
     [Fact]
     public async Task Current_subscription_prefers_actor_member_and_exposes_member_identity_for_sibling_cards()
     {

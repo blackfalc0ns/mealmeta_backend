@@ -529,9 +529,9 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
 
             displays[subscription.Id] = new FamilySubscriptionDisplay(
                 "FAMILY", familyId, Math.Max(memberCount, 1), group?.Name, Math.Max(amount.Value, 0m),
-                SubscriptionLocalization.FamilyStatusNameAr(subscription.Status), subscription.FamilyMemberId,
+                SubscriptionLocalization.FamilyStatusNameAr(CustomerDisplayStatus(subscription.Status)), subscription.FamilyMemberId,
                 subscription.FamilyMemberId is Guid memberId && memberNames.TryGetValue(memberId, out var name) ? name : null,
-                SubscriptionLocalization.FamilyStatusNameEn(subscription.Status));
+                SubscriptionLocalization.FamilyStatusNameEn(CustomerDisplayStatus(subscription.Status)));
         }
 
         return displays;
@@ -541,7 +541,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
     {
         if (subscription.FamilyGroupId is not Guid familyId)
             return new("INDIVIDUAL", null, 1, null, subscription.PaidAmount.Amount,
-                SubscriptionLocalization.StatusNameAr(subscription.Status), StatusNameEn: SubscriptionLocalization.StatusNameEn(subscription.Status));
+                SubscriptionLocalization.StatusNameAr(CustomerDisplayStatus(subscription.Status)), StatusNameEn: SubscriptionLocalization.StatusNameEn(CustomerDisplayStatus(subscription.Status)));
         var group = await _db.FamilyGroups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == familyId, ct);
         var member = await _db.FamilyMembers.AsNoTracking().FirstOrDefaultAsync(x =>
             x.FamilyGroupId == familyId && (subscription.FamilyMemberId.HasValue
@@ -567,8 +567,8 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
             memberCount = legacy?.MemberCount ?? 1;
         }
         return new("FAMILY", familyId, memberCount, group?.Name, amount,
-            SubscriptionLocalization.FamilyStatusNameAr(subscription.Status), member?.Id, member?.DisplayName,
-            SubscriptionLocalization.FamilyStatusNameEn(subscription.Status));
+            SubscriptionLocalization.FamilyStatusNameAr(CustomerDisplayStatus(subscription.Status)), member?.Id, member?.DisplayName,
+            SubscriptionLocalization.FamilyStatusNameEn(CustomerDisplayStatus(subscription.Status)));
     }
 
     private IQueryable<InvoiceReceiptRow> InvoiceReceiptQuery(Guid customerUserId)
@@ -604,7 +604,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var family = await FamilyDisplayAsync(subscription, ct, actorUserId);
         var canViewInvoices = (await _familyAccess.AuthorizeAsync(subscription, actorUserId, FamilyAction.ViewInvoices, ct)).IsSuccess;
         var invoices = includeInvoices && canViewInvoices ? await GetInvoices(subscription, ct, actorUserId) : Array.Empty<CustomerSubscriptionInvoiceDto>();
-        return new CustomerManagedSubscriptionDto(subscription.Id, CustomerFacingStatus(subscription.Status), family.StatusNameAr, subscription.ProgramId,
+        return new CustomerManagedSubscriptionDto(subscription.Id, CustomerFacingStatus(CustomerDisplayStatus(subscription.Status)), family.StatusNameAr, subscription.ProgramId,
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
@@ -619,7 +619,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var common = await BuildSubscriptionCommon(subscription, ct);
         var family = preloadedFamily ?? await FamilyDisplayAsync(subscription, ct, actorUserId);
         var canViewInvoices = actorUserId.HasValue && (await _familyAccess.AuthorizeAsync(subscription, actorUserId.Value, FamilyAction.ViewInvoices, ct)).IsSuccess;
-        return new CustomerSubscriptionSlimDto(subscription.Id, CustomerFacingStatus(subscription.Status), family.StatusNameAr, subscription.ProgramId,
+        return new CustomerSubscriptionSlimDto(subscription.Id, CustomerFacingStatus(CustomerDisplayStatus(subscription.Status)), family.StatusNameAr, subscription.ProgramId,
             subscription.Program.NameAr, subscription.Program.NameEn, subscription.BundleId, subscription.Bundle.NameAr, subscription.Bundle.NameEn,
             subscription.SelectedTier, common.TierNameAr, common.TierNameEn, common.TierLogoUrl, subscription.Bundle.MealsPerDay, common.ImageUrl, subscription.StartDate, subscription.EndDate, subscription.EndDate.AddDays(1),
             common.TotalDays, common.CompletedDays, common.RemainingDays, common.Progress, canViewInvoices ? family.PaidAmount : null, subscription.PaidAmount.CurrencyCode,
@@ -711,7 +711,7 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         var pricing = SubscriptionPricingSettingsReader.Deserialize(pricingRow?.ValueJson);
         var (tierNameAr, tierNameEn, tierLogoUrl) = ResolveTierInfo(subscription.SelectedTier, pricing.TierLabels);
 
-        var statusNameAr = SubscriptionLocalization.StatusNameAr(subscription.Status);
+        var statusNameAr = SubscriptionLocalization.StatusNameAr(CustomerDisplayStatus(subscription.Status));
 
         var earliestFreezeStartDate = businessToday.AddDays(policy.StartDelayDays);
         var latestLockedServiceDate = await _db.SubscriptionDays.AsNoTracking()
@@ -1045,6 +1045,11 @@ public sealed class CustomerSubscriptionQueryService : ICustomerSubscriptionQuer
         RestaurantTier.Elite => (labels.EliteAr, labels.EliteEn, CatalogImageStorage.ToContentUrl(labels.EliteLogoStorageKey)),
         _ => (tier.ToString(), tier.ToString(), null),
     };
+
+    // A funded subscription is active for the customer before its first service day.
+    // Keep the persisted lifecycle status for scheduling and current-plan selection.
+    private static SubscriptionStatus CustomerDisplayStatus(SubscriptionStatus status) =>
+        status == SubscriptionStatus.Scheduled ? SubscriptionStatus.Active : status;
 
     private static string CustomerFacingStatus(SubscriptionStatus status) =>
         status == SubscriptionStatus.SuspendedForReview ? nameof(SubscriptionStatus.Paid) : status.ToString();
