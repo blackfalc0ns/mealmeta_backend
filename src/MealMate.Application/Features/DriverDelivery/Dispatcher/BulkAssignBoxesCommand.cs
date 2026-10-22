@@ -82,6 +82,9 @@ public sealed class BulkAssignBoxesCommandHandler : ICommandHandler<BulkAssignBo
                 .Select(s => s.TripId).Distinct().OrderBy(id => id).ToListAsync(ct);
             var targetTripIds = await _db.DriverAssignments.AsNoTracking()
                 .Where(x => x.DriverProfileId == request.DriverId && (x.Status == "Active" || x.Status == "Assigned"))
+                // Historical assignments can remain active after their trip ends.
+                // Source trips above still undergo terminal-state validation.
+                .Where(x => !x.Trip.IsDeleted && x.Trip.Status != TripStatus.Completed && x.Trip.Status != TripStatus.Cancelled)
                 .Select(x => x.TripId).Distinct().ToListAsync(ct);
             tripIds = tripIds.Concat(targetTripIds).Distinct().OrderBy(id => id).ToList();
             foreach (var tripId in tripIds) await _locks.LockTripAsync(tripId, ct);
