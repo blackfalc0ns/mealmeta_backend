@@ -118,7 +118,7 @@ public class RestaurantOperationsReviewTests
     }
 
     [Fact]
-    public async Task DirectScheduleUpdate_ForApprovedRestaurant_ByOwner_IsRejectedWithReviewRequired()
+    public async Task DirectScheduleUpdate_ForApprovedRestaurant_ByOwner_PersistsImmediately()
     {
         await SeedApprovedRestaurantAsync();
 
@@ -135,8 +135,9 @@ public class RestaurantOperationsReviewTests
         var cmd = new UpdateWorkingDaysScheduleCommand(scheduleList, _restaurantId);
         var result = await _capacityService.UpdateWorkingDaysScheduleAsync(cmd, CancellationToken.None);
 
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("schedule.review_required");
+        result.IsSuccess.Should().BeTrue();
+        result.Value.WeeklyDays.Should().ContainSingle(x => x.DayOfWeek == (int)DayOfWeek.Monday && !x.IsWorkingDay);
+        _db.RestaurantSettingsChangeRequests.Should().BeEmpty();
     }
 
     [Fact]

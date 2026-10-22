@@ -378,19 +378,6 @@ public sealed class RestaurantCapacityService
 
         var restaurantId = restaurantIdResult.Value;
 
-        if (!_currentUser.HasPermission(PermissionCodes.RestaurantRegApprove))
-        {
-            var isApproved = await _db.RestaurantProfiles.AnyAsync(p => p.Id == restaurantId, cancellationToken)
-                || await _db.RestaurantRegistrations.AnyAsync(r => (r.Id == restaurantId || r.ResultingRestaurantId == restaurantId) && r.Status == VerificationStatus.Approved, cancellationToken);
-
-            if (isApproved)
-            {
-                return Result.Failure<WorkingDaysScheduleDto>(Error.Conflict(
-                    "schedule.review_required",
-                    "Permanent schedule changes for an approved restaurant require admin review. Please submit a schedule review proposal."));
-            }
-        }
-
         var existingSchedules = await _db.RestaurantOperatingSchedules
             .Where(x => x.RestaurantId == restaurantId)
             .ToListAsync(cancellationToken);
