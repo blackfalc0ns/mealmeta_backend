@@ -28,7 +28,7 @@ public static class OperationalDeadlineRules
         // the subscription's true first service date over ALL of its days — never the first item
         // of the possibly partial batch received here, and never a time derived from this refresh
         // or from a fulfillment retry. Subscriptions without documented payment keep the standard
-        // cutoff; family subscriptions keep their existing behavior.
+        // cutoff, as do family subscriptions. Only the individual first day gets this exception.
         var firstDayWindows = mutableDays.Count > 0
             ? await LoadFirstDayWindowsAsync(db, mutableDays, ct)
             : new Dictionary<Guid, FirstDayWindow>();
@@ -49,13 +49,11 @@ public static class OperationalDeadlineRules
             else if (published)
             {
                 var configuredDeadline = policies.CalculateSelectionDeadlineUtc(day.ServiceDate, settings);
-                day.SelectionDeadlineUtc = firstDayWindows.ContainsKey(day.SubscriptionId)
-                    ? SubscriptionScheduleService.EnforceStandardSelectionDeadline(day.ServiceDate, configuredDeadline)
-                    : configuredDeadline;
+                day.SelectionDeadlineUtc = SubscriptionScheduleService.EnforceStandardSelectionDeadline(day.ServiceDate, configuredDeadline);
             }
-            else if (firstDayWindows.ContainsKey(day.SubscriptionId))
+            else
             {
-                // Repair legacy short deadlines even before any operational policy publication.
+                // Repair legacy short deadlines for individual and family days even before publication.
                 day.SelectionDeadlineUtc = SubscriptionScheduleService.EnforceStandardSelectionDeadline(
                     day.ServiceDate, day.SelectionDeadlineUtc ?? policies.CalculateSelectionDeadlineUtc(day.ServiceDate, settings));
             }
