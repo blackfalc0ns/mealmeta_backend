@@ -1122,8 +1122,10 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(covered && !includeFriday && priced, coverage.CanSelect);
     }
 
-    [Fact]
-    public async Task Summary_WithoutRestaurantId_ReturnsPackageSummaryForSelectedTier()
+    [Theory]
+    [InlineData(26)]
+    [InlineData(28)]
+    public async Task Summary_WithoutRestaurantId_ReturnsPackageSummaryForSelectedTier(int firstDeliveryDay)
     {
         await using var db = CreateDb();
         var program = new MealMate.Domain.ProgramsSubscriptions.Program
@@ -1162,7 +1164,8 @@ public sealed class CustomerSubscriptionFlowControllerTests
                 9m, 26, DurationRatesPct: new Dictionary<int, decimal> { [26] = 0m },
                 GatewayFeePct: 0m, GatewayFeeFixedKwd: 0m, RoundingStepKwd: 0.001m))));
         var clock = Substitute.For<IDateTimeProvider>();
-        clock.UtcNow.Returns(DateTime.UtcNow);
+        // UTC is still Oct 21, but the customer payment day in Kuwait is Oct 22.
+        clock.UtcNow.Returns(new DateTime(2026, 10, 21, 22, 0, 0, DateTimeKind.Utc));
         var schedule = new SubscriptionScheduleService(clock);
         var controller = CreateController(db, out _, out var currentUser, sender, schedule,
             new BundleSlotRequirementService(db));
@@ -1191,7 +1194,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         await db.SaveChangesAsync();
         // Summary validates StartDate against Kuwait calendar day, not UTC date.
         var request = new SubscriptionSummaryRequest(program.Id, bundle.Id, RestaurantTier.Basic, 26, schedule.GetKuwaitToday());
-        var chosenStart = schedule.ResolveFirstDeliveryDate(request.StartDate!.Value, includeFriday: false);
+        var chosenStart = new DateOnly(2026, 10, firstDeliveryDay);
         request = request with { StartDate = chosenStart };
         var expectedFirstDelivery = chosenStart;
 
@@ -1210,7 +1213,7 @@ public sealed class CustomerSubscriptionFlowControllerTests
         Assert.Equal(26, summary.DurationDays);
         Assert.Equal(bundle.Id, summary.BundleId);
         Assert.Contains("keto.webp", summary.ProgramImageUrl);
-        Assert.Equal(chosenStart, summary.PaymentDate);
+        Assert.Equal(new DateOnly(2026, 10, 22), summary.PaymentDate);
         Assert.Equal(expectedFirstDelivery, summary.StartDate);
         Assert.NotNull(summary.RestaurantRepetition);
         Assert.Equal(1, summary.RestaurantRepetition!.RestaurantCount);

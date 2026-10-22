@@ -46,6 +46,17 @@ public class OperationalPolicyServiceTests
     }
 
     [Fact]
+    public void FirstDayDeadline_Oct22PaymentForOct26Service_HasFullSelectionWindow()
+    {
+        var paidAt = new DateTime(2026, 10, 22, 9, 0, 0, DateTimeKind.Utc);
+        var deadline = CreateSut().CalculateFirstDaySelectionDeadlineUtc(
+            paidAt, new DateOnly(2026, 10, 26), new OperationalPolicySettings());
+
+        deadline.Should().Be(paidAt.AddHours(24));
+        deadline.Should().BeAfter(paidAt);
+    }
+
+    [Fact]
     public void FirstDayDeadline_LatePaymentFallsBackToStandardCutoff_WithoutInventingWindow()
     {
         var policy = new OperationalPolicySettings(

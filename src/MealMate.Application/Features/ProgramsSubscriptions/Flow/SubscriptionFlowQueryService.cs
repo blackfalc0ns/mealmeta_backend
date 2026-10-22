@@ -1111,7 +1111,6 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             }
         }
 
-        var chosenStartDate = request.StartDate!.Value;
         var classification = await _tiers.ResolveAsync(request.ProgramId, request.BundleId, eligibleOnly: true, ct);
         if (!classification.Assignments.Any(x => x.Tier == request.Tier))
             return Error.Validation("subscription_flow.tier_unavailable");
@@ -1338,7 +1337,7 @@ public sealed class SubscriptionFlowQueryService : ISubscriptionFlowQueryService
             priceValue.WalletCreditApplied, priceValue.GatewayCostRecoveryAmount, priceValue.FinalCustomerPrice, priceValue.CurrencyCode,
             true, "POST /api/v1/customer/subscriptions/checkout", request.IncludeFriday, fridayDays, dates.Count,
             BuildIncludes(summarySlots, restaurantCount, dates.Count, mealVariety),
-            readiness.Value.Address, restaurants, effectiveCanCheckout, effectiveCheckoutBlockReason, chosenStartDate,
+            readiness.Value.Address, restaurants, effectiveCanCheckout, effectiveCheckoutBlockReason, _schedule.GetKuwaitToday(),
             restaurantRepetition,
             restaurantsPagination,
             coupon,
