@@ -2,6 +2,18 @@
 
 This contract describes the implemented support API for mobile clients. All endpoints require the normal MealMate bearer session. The server derives the actor, role, restaurant, and scope from claims plus persisted account membership; clients must not send those as authorization facts. Base path: `/api/v1/support`.
 
+## Customer issue and suggestion routes
+
+Customer-specific routes use `/api/v1/customer/support` and require a customer session. `GET /options` returns the fixed catalog. The normal localized JSON response has one `label` in the request language; send `X-Bilingual: true` when both `labelAr` and `labelEn` source fields are needed. Create an issue with `POST /issues` or a suggestion with `POST /suggestions`, using `{typeCode,subject,description,idempotencyKey,relatedResourceType?,relatedResourceId?}`. Issue codes are `FoodQuality`, `MissingItems`, `WrongItems`, `DamagedPackaging`, `DeliveryDelay`, `NotDelivered`, `Payment`, `Subscription`, `Account`, and `Other`; suggestion codes are `Meals`, `Delivery`, `AppExperience`, `Service`, and `Other`. Codes are case-insensitive and trimmed. The server stores issues as `Complaint` in `customer.issue.<Code>` and suggestions as `GeneralRequest` in `customer.suggestion.<Code>`. Create returns `201` with the shared support case response and a detail Location.
+
+`GET /issues` and `/suggestions` return `{items,pageNumber,pageSize,totalCount}`. Optional query parameters are `pageNumber` (default 1), `pageSize` (default 20, maximum 100), `status` (a `SupportCaseStatus` name), and `typeCode` (from that route's catalog). Lists are restricted to the authenticated customer's own customer-channel cases of the matching kind; legacy issue categories remain visible with a null `typeCode`. `GET /{requestType}/{caseId}` retrieves one owned request; an unknown request type, wrong kind, or another customer's ID returns `404`.
+
+Each list item contains `id`, `requestType`, nullable `typeCode` (null for legacy issue categories outside the catalog), `category`, `subject`, `status`, `createdAtUtc`, nullable `modifiedAtUtc`, and `version`.
+
+Reply with `POST /{requestType}/{caseId}/messages` and `{body,expectedVersion,idempotencyKey,attachmentKeys?}`. This customer route does not accept `taskId`; task threads use the shared support route only. Shared attachment upload remains `POST /api/v1/support/attachments`, followed by the returned `storageKey` in `attachmentKeys`; the existing shared message attachment read path applies. Customer state changes are `POST /{requestType}/{caseId}/actions/close` and `/reopen` with `{expectedVersion,idempotencyKey,reason?}`. Close is valid from `Resolved`; reopen requires a nonblank reason. No other action is exposed here.
+
+Expected HTTP outcomes: valid create `201`; options/list/detail/reply/action `200`; missing or expired authentication `401`; authenticated non-customer role `403`; unknown route, request type, or inaccessible case `404`; invalid catalog code, body, status, or paging `400`; conflicting idempotency replay, stale version, or invalid lifecycle transition `409`. The common support Problem Details codes and schemas remain authoritative.
+
 ## Cases
 
 `GET /cases?pageNumber=1&pageSize=20&status=InProgress&kind=Complaint&category=delivery` returns the caller-visible page:

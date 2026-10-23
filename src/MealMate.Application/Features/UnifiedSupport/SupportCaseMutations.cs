@@ -20,6 +20,14 @@ public sealed partial class SupportCaseService
             || !Enum.IsDefined(request.Channel) || !Enum.IsDefined(request.Kind)
             || (request.RelatedResourceId.HasValue != (request.RelatedResourceType is not null)))
             return Invalid();
+        if (request.Channel == SupportCaseChannel.Customer)
+        {
+            if (!CustomerSupportCatalog.TryNormalizeReservedCategory(request.Kind, request.Category,
+                    out var isReservedCustomerCategory, out var canonicalCustomerCategory))
+                return Invalid();
+            if (isReservedCustomerCategory)
+                request = request with { Category = canonicalCustomerCategory };
+        }
         if (request.Channel == SupportCaseChannel.Restaurant && _currentUser.RestaurantId is null)
             return Forbidden();
         if (request.Channel == SupportCaseChannel.DeliveryManager)

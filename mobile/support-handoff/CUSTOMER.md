@@ -1,12 +1,19 @@
 # تنفيذ الدعم في تطبيق العميل
 
+## مسارات الشكوى والاقتراح المخصصة
+
+استخدم `/api/v1/customer/support/options` لعرض قائمتي الشكاوى والاقتراحات مع `value` و`label`. استجابة اللغة المعتادة تعيد `label` باللغة المطلوبة؛ أرسل `X-Bilingual: true` إذا احتجت حقلي المصدر `labelAr` و`labelEn`. أنشئ شكوى عبر `POST /api/v1/customer/support/issues` أو اقتراحاً عبر `POST /api/v1/customer/support/suggestions` بجسم `{typeCode,subject,description,idempotencyKey,relatedResourceType?,relatedResourceId?}`. مرر رمزاً من القائمة كما هو؛ يصنف الخادم الشكوى `Complaint` والاقتراح `GeneralRequest`. تعرض `GET /issues` و`GET /suggestions` صفحات بعناصر العميل الحالي فقط. تقبلان `pageNumber`, `pageSize` (حتى 100), `status` و`typeCode`. افتح التفاصيل عبر `GET /{requestType}/{caseId}`؛ الرد عبر `POST /{requestType}/{caseId}/messages` يستخدم `{body,expectedVersion,idempotencyKey,attachmentKeys?}`، ثم أرسل الإغلاق أو إعادة الفتح الصريحة إلى مسار `/actions/close` أو `/actions/reopen` مع الإصدار الحالي ومفتاح العملية.
+
+ارفع المرفقات عبر المسار المشترك `POST /api/v1/support/attachments`، ثم أرسل `storageKey` ضمن `attachmentKeys` للرسالة؛ لا ترسل `taskId` في مسار العميل المخصص. الاستجابات المتوقعة: إنشاء صحيح `201`، القراءة والرد والإجراء `200`، جلسة مفقودة `401`، دور غير عميل `403`، معرف أو نوع طلب غير متاح `404`، مدخلات أو ترشيح أو صفحات غير صالحة `400`، وتعارض المفتاح أو الإصدار أو انتقال الحالة `409`.
+
 ## التدفق
 
-1. شاشة «الدعم» تعرض الحالات التي يعيدها `GET /api/v1/support/cases?pageNumber=1&pageSize=20`. استخدم pagination وعناصر القائمة فقط؛ لا تستنتج وجود بيانات محجوبة.
-2. افتح تذكرة عامة أو شكوى عبر `POST /api/v1/support/cases` بحقول `channel: "Customer"`, `kind: "Complaint"` أو `"GeneralRequest"`, و`subject`, `description`, `idempotencyKey`. الشكوى المرتبطة بطلب تضيف `relatedResourceType` و`relatedResourceId` من مصدر موثوق في واجهة العميل؛ الخادم يتحقق من ملكية الطلب ويرفض المورد غير المدعوم/غير المملوك. لا تخترع قائمة resource types؛ العقد المشترك يحدد ما هو مدعوم.
-3. التفاصيل من `GET /api/v1/support/cases/{caseId}`. اعرض الرسائل العامة المرئية، حالة الخادم، المرفقات المقروءة، وموعد SLA إذا أعاده الخادم. لا تعرض المهام الخاصة أو مخرجاتها.
-4. الرد من `POST /api/v1/support/cases/{caseId}/messages` بالـ `body`, `expectedVersion` و`idempotencyKey`. ارفع المرفقات أولاً عبر `POST /api/v1/support/attachments`; أرفق `attachmentKeys` التي أعادها الرفع. التزم بقواعد إعادة المحاولة في README.
-5. اسمح بإغلاق صريح عبر `POST /api/v1/support/cases/{caseId}/actions/close` بعد تأكيد العميل، عندما تسمح حالة الخادم بالانتقال إلى `Closed` (حالياً من `Resolved`). يسمح العقد بإعادة فتح الحالة النهائية `Resolved` أو `Closed` من صاحبها عبر `/actions/reopen` مع سبب؛ لا تحول الإغلاق إلى حذف.
+1. اعرض الخيارات من `GET /api/v1/customer/support/options` ثم افتح شكوى أو اقتراحاً من القائمتين الموضحتين أعلاه. تعرض صفحات `GET /api/v1/customer/support/issues` و`GET /api/v1/customer/support/suggestions` تذاكر العميل فقط.
+2. التفاصيل من `GET /api/v1/customer/support/{requestType}/{caseId}`. كل عنصر قائمة يحتوي `id`, `requestType`, `typeCode` (قد يكون `null` للتصنيف القديم), `category`, `subject`, `status`, `createdAtUtc`, `modifiedAtUtc` (قد يكون `null`), و`version`.
+3. الرد والإرفاق عبر مسار العميل المخصص كما سبق. اعرض الرسائل العامة المرئية، حالة الخادم، المرفقات المقروءة، وموعد SLA إن أعاده الخادم. لا تعرض المهام الخاصة أو مخرجاتها.
+4. الإغلاق متاح من حالة `Resolved` فقط. إعادة الفتح تحتاج سبباً غير فارغ. أرسل الإصدار الحالي ومفتاح idempotency منفصلاً لكل عملية.
+
+للتوافق مع العملاء القديمة، تبقى مسارات `/api/v1/support/cases` المشتركة صالحة لعرض/إنشاء الحالات العامة وفق العقد المشترك؛ استمر باستخدامها لمسار الإشعارات العميق الموجود `/support/cases/{caseId}` حتى يعيد التطبيق تحميل الحالة. لا تخلط أسماء requestType في الواجهة المخصصة مع مسارات `cases` المشتركة.
 
 ## اختيار يوم التوصيل والصندوق المرتبط بالشكوى
 
