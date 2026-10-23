@@ -42,6 +42,7 @@ public sealed class VoiceCallV2PushTransportTests
             ZoneNameAr = "المنطقة", ZoneNameEn = "Zone", MealSummaryAr = "وجبة", MealSummaryEn = "Meal",
             SlotLabel = "12:00 - 15:00"
         };
+        stop.FullAddress = withDriver ? "السالمية، شارع البحر، عمارة 12" : null;
         var call = new CallSession(stop.Id, driverUser, CallParticipantType.Driver,
             customerUser, CallParticipantType.Customer, Guid.NewGuid(), Now);
         db.Trips.Add(trip);
@@ -121,7 +122,9 @@ public sealed class VoiceCallV2PushTransportTests
             var orderCode = recipientRole == "Customer" ? "#BX-9546" : null;
             Assert.Equal(orderCode, location.GetProperty("orderCode").GetString());
             Assert.Equal(orderCode, location.GetProperty("orderNumber").GetString());
-            Assert.False(location.TryGetProperty("deliveryAddress", out _));
+            var address = recipientRole != "Customer" ? null : withDriver
+                ? stop.FullAddress : language == "ar" ? stop.ZoneNameAr : stop.ZoneNameEn;
+            Assert.Equal(address, location.GetProperty("deliveryAddress").GetString());
             Assert.False(location.TryGetProperty("phoneNumber", out _));
         }
     }

@@ -117,7 +117,8 @@ public sealed class DeviceVoiceCallV2PushTransport(
                 DriverName = display.Value.DriverName,
                 DriverRole = display.Value.DriverRole,
                 DriverImageUrl = display.Value.DriverImageUrl,
-                OrderCode = display.Value.OrderCode
+                OrderCode = display.Value.OrderCode,
+                DeliveryAddress = display.Value.DeliveryAddress
             }
         };
     }

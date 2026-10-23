@@ -44,6 +44,7 @@ public sealed record CallSnapshotDto(
     public string? AvatarUrl => DriverImageUrl;
     public string? OrderCode { get; init; }
     public string? OrderNumber => OrderCode;
+    public string? DeliveryAddress { get; init; }
 }
 
 /// <summary>
@@ -70,6 +71,7 @@ public sealed record CallEventEnvelope<T>(
     public string? AvatarUrl => DriverImageUrl;
     public string? OrderCode => (Payload as CallSnapshotDto)?.OrderCode;
     public string? OrderNumber => OrderCode;
+    public string? DeliveryAddress => (Payload as CallSnapshotDto)?.DeliveryAddress;
 }
 
 /// <summary>
