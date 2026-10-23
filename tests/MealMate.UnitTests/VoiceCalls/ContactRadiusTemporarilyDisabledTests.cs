@@ -290,7 +290,7 @@ public sealed class ContactRadiusTemporarilyDisabledTests
     [InlineData(2, "active", false, false, false)]
     [InlineData(1, "resumed", false, true, false)]
     [InlineData(2, "resumed", false, true, true)]
-    public async Task Eligibility_ReturnsCurrentWorkflow_AndMatchesCaseQuery(
+    public async Task Eligibility_ReturnsCurrentWorkflow_WithHoldTemporarilyHiddenForMobileTesting(
         int misses, string holdState, bool canHold, bool canRetry, bool canReveal)
     {
         await using var db = CreateInMemoryDbContext();
@@ -319,13 +319,13 @@ public sealed class ContactRadiusTemporarilyDisabledTests
         result.IsSuccess.Should().BeTrue();
         result.Value.ContactCaseId.Should().Be(contactCase.Id);
         result.Value.CanInitiate.Should().BeTrue();
-        result.Value.CanHold.Should().Be(canHold);
+        result.Value.CanHold.Should().BeFalse();
         result.Value.CanRetry.Should().Be(canRetry);
         result.Value.CanRevealPhone.Should().Be(canReveal);
         var caseResult = await new GetDeliveryContactCaseV2QueryHandler(
             new DeliveryContactCaseService(db, clock, eligibility), db)
             .Handle(new(stop.Id, driver), default);
-        result.Value.CanHold.Should().Be(caseResult.Value.CanHold);
+        caseResult.Value.CanHold.Should().Be(canHold);
         result.Value.CanRevealPhone.Should().Be(caseResult.Value.CanRevealPhone);
 
         // Customer participants see the case, never driver-only action rights.
@@ -343,7 +343,7 @@ public sealed class ContactRadiusTemporarilyDisabledTests
         stale.Value.CanInitiate.Should().BeFalse();
         stale.Value.ReasonCode.Should().Be("contact.location_stale");
         stale.Value.ContactCaseId.Should().Be(contactCase.Id);
-        stale.Value.CanHold.Should().Be(canHold);
+        stale.Value.CanHold.Should().BeFalse();
         stale.Value.CanRetry.Should().BeFalse();
         stale.Value.CanRevealPhone.Should().Be(canReveal);
 

@@ -97,7 +97,8 @@ public sealed class DeliveryContactEligibilityService : IDeliveryContactEligibil
         return Result.Success(verdict.Value with
         {
             ContactCaseId = contactCase.Id,
-            CanHold = driverActionsAllowed && contactCase.QualifiedMissedCount >= 1 && contactCase.HoldId is null,
+            // Temporarily hide Hold in eligibility at user request for mobile call testing.
+            CanHold = false,
             // Resume already enforces cooldown; time alone must never release a hold.
             CanRetry = driverActionsAllowed && verdict.Value.CanInitiate
                 && contactCase.QualifiedMissedCount >= 1 && resumed,
