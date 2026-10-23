@@ -55,6 +55,7 @@ public sealed class ApnsVoiceCallV2Provider(HttpClient http, IOptions<ApnsVoiceC
             Content = new StringContent(JsonSerializer.Serialize(new
             {
                 aps = new Dictionary<string, int> { ["content-available"] = 1 },
+                type = envelope.EventType,
                 envelope
             }, Json), Encoding.UTF8, "application/json")
         };

@@ -10,6 +10,7 @@ using MealMate.Infrastructure.VoiceCalls;
 using MealMate.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MealMate.Infrastructure.Push;
 using NSubstitute;
@@ -18,6 +19,113 @@ namespace MealMate.UnitTests.VoiceCalls;
 
 public sealed class VoiceCallV2PushTransportTests
 {
+    [Theory]
+    [InlineData("android", "en", true, "Yahya", "Delivery Driver", "Customer")]
+    [InlineData("android", "ar", true, "يحيى", "مندوب التوصيل", "Customer")]
+    [InlineData("ios", "ar", true, "يحيى", "مندوب التوصيل", "Customer")]
+    [InlineData("ios", "en", true, "Yahya", "Delivery Driver", "Customer")]
+    [InlineData("android", "ar", false, "", "مندوب التوصيل", "Customer")]
+    [InlineData("ios", "en", false, "", "Delivery Driver", "Customer")]
+    [InlineData("android", "en", true, null, null, "Driver")]
+    [InlineData("ios", "ar", true, null, null, "Driver")]
+    public async Task Incoming_push_contains_persisted_display_aliases_in_envelope_and_payload(
+        string platform, string language, bool withDriver, string? expectedName, string? expectedRole, string recipientRole)
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options, Substitute.For<IDomainEventDispatcher>());
+        var driverUser = Guid.NewGuid();
+        var customerUser = Guid.NewGuid();
+        var trip = new MealMate.Domain.DriverDelivery.Trip { Code = "TRP-9546" };
+        var stop = new MealMate.Domain.DriverDelivery.TripStop
+        {
+            TripId = trip.Id, OrderCode = "#BX-9546", CustomerMaskedId = "CUST-****",
+            ZoneNameAr = "المنطقة", ZoneNameEn = "Zone", MealSummaryAr = "وجبة", MealSummaryEn = "Meal",
+            SlotLabel = "12:00 - 15:00"
+        };
+        var call = new CallSession(stop.Id, driverUser, CallParticipantType.Driver,
+            customerUser, CallParticipantType.Customer, Guid.NewGuid(), Now);
+        db.Trips.Add(trip);
+        db.TripStops.Add(stop);
+        db.CallSessions.Add(call);
+        db.CustomerProfiles.Add(new MealMate.Domain.IdentityAccess.CustomerProfile
+            { UserId = customerUser, PreferredLanguage = language });
+        if (withDriver)
+        {
+            var driver = new MealMate.Domain.IdentityAccess.DriverProfile
+            {
+                UserId = driverUser, FullNameAr = "يحيى", FullNameEn = "Yahya",
+                ProfileImageStorageKey = "drivers/يحيى photo.jpg"
+            };
+            db.DriverProfiles.Add(driver);
+            db.DriverAssignments.Add(new MealMate.Domain.DriverDelivery.DriverAssignment
+                { TripId = trip.Id, DriverProfileId = driver.Id, Status = "Active", AssignedAtUtc = Now });
+        }
+        var token = new MealMate.Domain.IdentityAccess.CustomerDeviceToken
+            { UserId = customerUser, Token = "owned-display-route", Platform = MealMate.Domain.Enums.MobilePlatform.Android };
+        db.CustomerDeviceTokens.Add(token);
+        await db.SaveChangesAsync();
+        var messages = NSubstitute.Substitute.For<MealMate.Application.Common.Localization.ILocalizedMessageProvider>();
+        messages.GetMessage(MealMate.Application.Common.Localization.MessageCodes.VoiceCalls.CallScreenDriverRole,
+            Arg.Any<System.Globalization.CultureInfo>(), Arg.Any<string>(), Arg.Any<object[]>())
+            .Returns(ci => ci.Arg<System.Globalization.CultureInfo>().TwoLetterISOLanguageName == "ar"
+                ? "مندوب التوصيل" : "Delivery Driver");
+        var envelope = Envelope() with { CallId = call.Id };
+        envelope = envelope with { Payload = envelope.Payload with
+            { CallId = call.Id, TripStopId = stop.Id, LocalParticipantRole = recipientRole } };
+        var fcm = Substitute.For<IVoiceCallV2FcmProvider>();
+        string? body = null;
+        fcm.SendAsync(Arg.Any<string>(), Arg.Any<CallEventEnvelope<CallSnapshotDto>>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(ci => {
+                var outgoing = ci.Arg<CallEventEnvelope<CallSnapshotDto>>();
+                var message = FirebaseVoiceCallV2Provider.BuildMessage("owned-display-route", outgoing, TimeSpan.FromSeconds(25));
+                Assert.Equal("incoming", message.Data["type"]);
+                body = message.Data["envelope"];
+                return new VoiceCallPushResult(VoiceCallPushOutcome.Accepted);
+            });
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var capture = new CaptureHandler();
+        var apns = new ApnsVoiceCallV2Provider(new HttpClient(capture), Options.Create(new ApnsVoiceCallOptions
+            { TeamId = "team", KeyId = "key", BundleId = "com.mealmate.customer", DriverBundleId = "com.mealmate.driver",
+                PrivateKeyPem = key.ExportPkcs8PrivateKeyPem() }), Clock());
+        using var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection()
+            .AddSingleton(messages).BuildServiceProvider();
+        var transport = Microsoft.Extensions.DependencyInjection.ActivatorUtilities
+            .CreateInstance<DeviceVoiceCallV2PushTransport>(services, db, fcm, apns, Clock());
+        var result = await transport.SendAsync(new VoiceCallDeviceSession
+        {
+            UserId = customerUser, Platform = platform, FcmDeviceTokenId = token.Id,
+            ApnsVoipToken = new string('a', 64), ExpiresAtUtc = Now.AddHours(1)
+        }, envelope, default);
+        Assert.Equal(VoiceCallPushOutcome.Accepted, result.Outcome);
+        if (platform == "ios")
+        {
+            using var apnsBody = JsonDocument.Parse(capture.Body!);
+            Assert.Equal("incoming", apnsBody.RootElement.GetProperty("type").GetString());
+            body = apnsBody.RootElement.GetProperty("envelope").GetRawText();
+        }
+        using var json = JsonDocument.Parse(body!);
+        var root = json.RootElement;
+        Assert.Equal(call.Id, root.GetProperty("callId").GetGuid());
+        Assert.Equal(17, root.GetProperty("sequence").GetInt64());
+        Assert.Equal("incoming", root.GetProperty("eventType").GetString());
+        foreach (var location in new[] { root, root.GetProperty("payload") })
+        {
+            Assert.Equal(expectedName, location.GetProperty("driverName").GetString());
+            Assert.Equal(expectedName, location.GetProperty("callerName").GetString());
+            Assert.Equal(expectedRole, location.GetProperty("driverRole").GetString());
+            Assert.Equal(expectedRole, location.GetProperty("callerRole").GetString());
+            var image = withDriver && recipientRole == "Customer"
+                ? "/api/v1/uploads/content?key=" + Uri.EscapeDataString("drivers/يحيى photo.jpg") : null;
+            Assert.Equal(image, location.GetProperty("avatarUrl").GetString());
+            Assert.Equal(image, location.GetProperty("driverImageUrl").GetString());
+            var orderCode = recipientRole == "Customer" ? "#BX-9546" : null;
+            Assert.Equal(orderCode, location.GetProperty("orderCode").GetString());
+            Assert.Equal(orderCode, location.GetProperty("orderNumber").GetString());
+            Assert.False(location.TryGetProperty("deliveryAddress", out _));
+            Assert.False(location.TryGetProperty("phoneNumber", out _));
+        }
+    }
+
     private static readonly DateTime Now = new(2026, 10, 7, 12, 0, 0, DateTimeKind.Utc);
     private static IDateTimeProvider Clock()
     {

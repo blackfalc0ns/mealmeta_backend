@@ -1,4 +1,6 @@
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Localization;
+using MealMate.Application.Features.VoiceCalls.Queries;
 using MealMate.Application.Features.VoiceCalls.Abstractions;
 using MealMate.Application.Features.VoiceCalls.V2.Dtos;
 using MealMate.Domain.Enums;
@@ -10,7 +12,7 @@ namespace MealMate.Infrastructure.VoiceCalls;
 /// <summary>Routes an outbox delivery to exactly the authenticated installation's owned registry row.</summary>
 public sealed class DeviceVoiceCallV2PushTransport(
     IAppDbContext db, IVoiceCallV2FcmProvider fcm, IVoiceCallV2ApnsProvider apns,
-    IDateTimeProvider clock) : IVoiceCallV2PushTransport
+    IDateTimeProvider clock, ILocalizedMessageProvider? messages = null) : IVoiceCallV2PushTransport
 {
     public async Task<VoiceCallPushResult> SendAsync(VoiceCallDeviceSession device,
         CallEventEnvelope<CallSnapshotDto> envelope, CancellationToken cancellationToken)
@@ -37,6 +39,7 @@ public sealed class DeviceVoiceCallV2PushTransport(
         {
             if (string.IsNullOrWhiteSpace(device.ApnsVoipToken))
                 return new(VoiceCallPushOutcome.NoRoute, ReasonCode: VoiceCallPushReasons.MissingVoipRoute);
+            envelope = await WithIncomingDisplayAsync(device, envelope, cancellationToken);
             var result = await apns.SendAsync(device.ApnsVoipToken, envelope, cancellationToken);
             if (result.Outcome == VoiceCallPushOutcome.InvalidRoute)
             {
@@ -69,6 +72,15 @@ public sealed class DeviceVoiceCallV2PushTransport(
             return new(VoiceCallPushOutcome.NoRoute, ReasonCode: VoiceCallPushReasons.PlatformMismatch);
         if (string.IsNullOrWhiteSpace(token))
             return new(VoiceCallPushOutcome.NoRoute, ReasonCode: VoiceCallPushReasons.EmptyFcmToken);
+        if (incoming)
+            envelope = await WithIncomingDisplayAsync(device, envelope, cancellationToken);
+        // Display reads consume part of the ring window; never extend the FCM TTL.
+        if (deadline is { } refreshedDeadline)
+        {
+            ttl = refreshedDeadline - clock.UtcNow;
+            if (ttl <= TimeSpan.Zero)
+                return new(VoiceCallPushOutcome.Suppressed, ReasonCode: VoiceCallPushReasons.IncomingExpired);
+        }
         var sent = await fcm.SendAsync(token, envelope, ttl, cancellationToken);
         if (sent.Outcome == VoiceCallPushOutcome.InvalidRoute)
         {
@@ -78,5 +90,43 @@ public sealed class DeviceVoiceCallV2PushTransport(
             return sent with { ReasonCode = VoiceCallPushReasons.ProviderUnregistered };
         }
         return sent;
+    }
+
+    private async Task<CallEventEnvelope<CallSnapshotDto>> WithIncomingDisplayAsync(
+        VoiceCallDeviceSession device, CallEventEnvelope<CallSnapshotDto> envelope, CancellationToken cancellationToken)
+    {
+        // These aliases identify the driver calling a customer. Reverse calls must
+        // not label the receiving driver as their own incoming caller.
+        if (envelope.Payload.LocalParticipantRole != "Customer")
+            return envelope;
+        var language = await db.CustomerProfiles.AsNoTracking()
+            .Where(p => p.UserId == device.UserId).Select(p => p.PreferredLanguage)
+            .FirstOrDefaultAsync(cancellationToken);
+        // Match the persisted recipient locale and Arabic default of voice notifications.
+        var culture = string.Equals(language, "en", StringComparison.OrdinalIgnoreCase)
+            ? SupportedCultures.EnglishCulture : SupportedCultures.ArabicCulture;
+        var localized = new RecipientMessages(messages ?? NullLocalizedMessageProvider.Instance, culture);
+        var display = await new VoiceCallV2CallDisplayQueryHandler(db, localized)
+            .Handle(new(envelope.CallId, device.UserId), cancellationToken);
+        if (display.IsFailure)
+            return envelope; // Missing context must not prevent the incoming call itself.
+        return envelope with
+        {
+            Payload = envelope.Payload with
+            {
+                DriverName = display.Value.DriverName,
+                DriverRole = display.Value.DriverRole,
+                DriverImageUrl = display.Value.DriverImageUrl,
+                OrderCode = display.Value.OrderCode
+            }
+        };
+    }
+
+    private sealed class RecipientMessages(ILocalizedMessageProvider source,
+        System.Globalization.CultureInfo culture) : ILocalizedMessageProvider
+    {
+        public System.Globalization.CultureInfo CurrentCulture => culture;
+        public string GetMessage(string code, string? fallback = null, params object[] arguments)
+            => source.GetMessage(code, culture, fallback, arguments);
     }
 }

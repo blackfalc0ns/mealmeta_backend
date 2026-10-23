@@ -17,8 +17,8 @@ public readonly record struct ProtocolVersion
 public sealed record CallControlContext(Guid UserId, Guid DeviceSessionId);
 
 /// <summary>
-/// Authoritative server snapshot of a call for one participant. Contains no phone,
-/// name, or cross-account identifiers beyond the participant's own role view.
+/// Authoritative server snapshot of a call for one participant. Incoming pushes
+/// may include driver display context, but never phone numbers or credentials.
 /// </summary>
 public sealed record CallSnapshotDto(
     Guid CallId,
@@ -34,7 +34,17 @@ public sealed record CallSnapshotDto(
     int? DurationSeconds,
     DateTime? DeadlineAtUtc,
     Guid? WinningDeviceSessionId,
-    string LocalParticipantRole);
+    string LocalParticipantRole)
+{
+    public string? DriverName { get; init; }
+    public string? CallerName => DriverName;
+    public string? DriverRole { get; init; }
+    public string? CallerRole => DriverRole;
+    public string? DriverImageUrl { get; init; }
+    public string? AvatarUrl => DriverImageUrl;
+    public string? OrderCode { get; init; }
+    public string? OrderNumber => OrderCode;
+}
 
 /// <summary>
 /// Lifecycle event envelope. Ephemeral RTC media (SDP/ICE) never travels in this
@@ -49,7 +59,18 @@ public sealed record CallEventEnvelope<T>(
     DateTime OccurredAtUtc,
     DateTime SentAtUtc,
     DateTime? ExpiresAtUtc,
-    T Payload);
+    T Payload)
+{
+    // Mirror the same display values for mobile clients reading either level.
+    public string? DriverName => (Payload as CallSnapshotDto)?.DriverName;
+    public string? CallerName => DriverName;
+    public string? DriverRole => (Payload as CallSnapshotDto)?.DriverRole;
+    public string? CallerRole => DriverRole;
+    public string? DriverImageUrl => (Payload as CallSnapshotDto)?.DriverImageUrl;
+    public string? AvatarUrl => DriverImageUrl;
+    public string? OrderCode => (Payload as CallSnapshotDto)?.OrderCode;
+    public string? OrderNumber => OrderCode;
+}
 
 /// <summary>
 /// Ephemeral WebRTC relay envelope, scoped to the two winning device sessions.
