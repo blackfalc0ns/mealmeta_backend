@@ -282,6 +282,112 @@ public sealed class ContactRadiusTemporarilyDisabledTests
         savedHold.ResumedAtUtc.Should().NotBeNull();
     }
 
+    [Theory]
+    [InlineData(0, "none", false, false, false)]
+    [InlineData(1, "none", true, false, false)]
+    [InlineData(2, "none", true, false, false)]
+    [InlineData(1, "active", false, false, false)]
+    [InlineData(2, "active", false, false, false)]
+    [InlineData(1, "resumed", false, true, false)]
+    [InlineData(2, "resumed", false, true, true)]
+    public async Task Eligibility_ReturnsCurrentWorkflow_AndMatchesCaseQuery(
+        int misses, string holdState, bool canHold, bool canRetry, bool canReveal)
+    {
+        await using var db = CreateInMemoryDbContext();
+        var (stop, driver, customer) = await SeedDeliveryContext(db);
+        var assignment = await db.DriverAssignments.SingleAsync();
+        var contactCase = new DeliveryContactCase(stop.Id, assignment.Id, 1, DateTime.UtcNow);
+        for (var i = 0; i < misses; i++)
+            contactCase.RecordQualifiedMissedAttempt(Guid.NewGuid(), DateTime.UtcNow);
+        if (holdState != "none")
+        {
+            var hold = new DeliveryHold
+            {
+                TripStopId = stop.Id, ContactCaseId = contactCase.Id, ActorUserId = driver,
+                Reason = "CustomerNoAnswer", Status = holdState == "resumed" ? "Released" : "Active",
+                HeldAtUtc = DateTime.UtcNow.AddMinutes(-5),
+                ResumedAtUtc = holdState == "resumed" ? DateTime.UtcNow.AddMinutes(-2) : null
+            };
+            db.DeliveryHolds.Add(hold);
+            contactCase.AttachHold(hold.Id, DateTime.UtcNow);
+        }
+        db.DeliveryContactCases.Add(contactCase);
+        await db.SaveChangesAsync();
+        var clock = new FixedClock();
+        var eligibility = new DeliveryContactEligibilityService(db, clock);
+        var result = await eligibility.EvaluateAsync(stop.Id, driver, default);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.ContactCaseId.Should().Be(contactCase.Id);
+        result.Value.CanInitiate.Should().BeTrue();
+        result.Value.CanHold.Should().Be(canHold);
+        result.Value.CanRetry.Should().Be(canRetry);
+        result.Value.CanRevealPhone.Should().Be(canReveal);
+        var caseResult = await new GetDeliveryContactCaseV2QueryHandler(
+            new DeliveryContactCaseService(db, clock, eligibility), db)
+            .Handle(new(stop.Id, driver), default);
+        result.Value.CanHold.Should().Be(caseResult.Value.CanHold);
+        result.Value.CanRevealPhone.Should().Be(caseResult.Value.CanRevealPhone);
+
+        // Customer participants see the case, never driver-only action rights.
+        var customerResult = await eligibility.EvaluateAsync(stop.Id, customer, default);
+        customerResult.Value.ContactCaseId.Should().Be(contactCase.Id);
+        customerResult.Value.CanHold.Should().BeFalse();
+        customerResult.Value.CanRetry.Should().BeFalse();
+        customerResult.Value.CanRevealPhone.Should().BeFalse();
+        (await eligibility.EvaluateAsync(stop.Id, Guid.NewGuid(), default)).IsFailure.Should().BeTrue();
+
+        // A stale position must not erase persisted workflow or allow retry.
+        (await db.DeliveryTrackingPoints.SingleAsync()).CapturedAtUtc = DateTime.UtcNow.AddMinutes(-5);
+        await db.SaveChangesAsync();
+        var stale = await eligibility.EvaluateAsync(stop.Id, driver, default);
+        stale.Value.CanInitiate.Should().BeFalse();
+        stale.Value.ReasonCode.Should().Be("contact.location_stale");
+        stale.Value.ContactCaseId.Should().Be(contactCase.Id);
+        stale.Value.CanHold.Should().Be(canHold);
+        stale.Value.CanRetry.Should().BeFalse();
+        stale.Value.CanRevealPhone.Should().Be(canReveal);
+
+        stop.Status = TripStopStatus.Delivered;
+        await db.SaveChangesAsync();
+        var inactive = await eligibility.EvaluateAsync(stop.Id, driver, default);
+        inactive.Value.ContactCaseId.Should().Be(contactCase.Id);
+        inactive.Value.CanHold.Should().BeFalse();
+        inactive.Value.CanRetry.Should().BeFalse();
+        inactive.Value.CanRevealPhone.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("absent")]
+    [InlineData("closed")]
+    [InlineData("previous-assignment")]
+    [InlineData("other-stop")]
+    public async Task Eligibility_NeverCreatesCase_OrInheritsOtherCycleRights(string scope)
+    {
+        await using var db = CreateInMemoryDbContext();
+        var (stop, driver, _) = await SeedDeliveryContext(db);
+        var assignment = await db.DriverAssignments.SingleAsync();
+        if (scope != "absent")
+        {
+            var contactCase = new DeliveryContactCase(scope == "other-stop" ? Guid.NewGuid() : stop.Id,
+                scope == "previous-assignment" ? Guid.NewGuid() : assignment.Id, 1, DateTime.UtcNow);
+            contactCase.RecordQualifiedMissedAttempt(Guid.NewGuid(), DateTime.UtcNow);
+            if (scope == "closed") contactCase.Close(DateTime.UtcNow);
+            db.DeliveryContactCases.Add(contactCase);
+            await db.SaveChangesAsync();
+        }
+        var count = await db.DeliveryContactCases.CountAsync();
+        var result = await new DeliveryContactEligibilityService(db, new FixedClock())
+            .EvaluateAsync(stop.Id, driver, default);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.CanInitiate.Should().BeTrue();
+        result.Value.ContactCaseId.Should().BeNull();
+        result.Value.CanHold.Should().BeFalse();
+        result.Value.CanRetry.Should().BeFalse();
+        result.Value.CanRevealPhone.Should().BeFalse();
+        (await db.DeliveryContactCases.CountAsync()).Should().Be(count);
+        db.ChangeTracker.HasChanges().Should().BeFalse();
+    }
+
     private sealed class FixedClock : IDateTimeProvider
     {
         public DateTime UtcNow => DateTime.UtcNow;

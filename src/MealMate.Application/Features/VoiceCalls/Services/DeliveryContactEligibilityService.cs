@@ -75,6 +75,39 @@ public sealed class DeliveryContactEligibilityService : IDeliveryContactEligibil
             return Result.Failure<DeliveryContactEligibilityDto>(VoiceCallErrors.TripStopNotFound());
         }
 
+        var verdict = await EvaluateCallPolicyAsync(stop, resolved, cancellationToken);
+        // A read must not open a new contact cycle. Never inherit rights from a
+        // previous driver assignment, closed cycle, or another stop.
+        var contactCase = await _db.DeliveryContactCases.AsNoTracking()
+            .Where(c => c.TripStopId == tripStopId
+                && c.ActiveDriverAssignmentId == resolved.ActiveDriverAssignmentId
+                && c.State == DeliveryContactCase.StateOpen)
+            .OrderByDescending(c => c.ContactCycleId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (contactCase is null)
+            return verdict;
+
+        var hold = contactCase.HoldId.HasValue
+            ? await _db.DeliveryHolds.AsNoTracking()
+                .FirstOrDefaultAsync(h => h.Id == contactCase.HoldId.Value, cancellationToken)
+            : null;
+        var resumed = hold?.ResumedAtUtc is not null;
+        var driverActionsAllowed = isDriver && stop.Status == TripStopStatus.PickedUp
+            && stop.Trip?.Status == TripStatus.InProgress;
+        return Result.Success(verdict.Value with
+        {
+            ContactCaseId = contactCase.Id,
+            CanHold = driverActionsAllowed && contactCase.QualifiedMissedCount >= 1 && contactCase.HoldId is null,
+            // Resume already enforces cooldown; time alone must never release a hold.
+            CanRetry = driverActionsAllowed && verdict.Value.CanInitiate
+                && contactCase.QualifiedMissedCount >= 1 && resumed,
+            CanRevealPhone = driverActionsAllowed && contactCase.CanRevealPhone() && resumed
+        });
+    }
+
+    private async Task<Result<DeliveryContactEligibilityDto>> EvaluateCallPolicyAsync(
+        TripStop stop, VoiceCallContactParticipants resolved, CancellationToken cancellationToken)
+    {
         if (stop.Status != TripStopStatus.PickedUp)
         {
             return Deny("contact.stop_not_active", stop, null, null);
@@ -197,7 +230,7 @@ public sealed class DeliveryContactEligibilityService : IDeliveryContactEligibil
             ReasonCode: "contact.eligible",
             DistanceMeters: Math.Round(distance.Value, 1),
             LocationAgeSeconds: Math.Round(ageSeconds, 1),
-            // Hold/retry/reveal verdicts arrive with the contact-case workflow (T14/T15).
+            // EvaluateAsync adds rights from the persisted contact workflow.
             CanHold: false,
             CanRetry: false,
             CanRevealPhone: false,
