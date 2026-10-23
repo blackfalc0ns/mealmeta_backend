@@ -54,6 +54,8 @@ public sealed class LocalFileStorage : IFileStorage
     private const byte EnvelopeVersion = 1;
     private const int NonceSize = 12;
     private const int TagSize = 16;
+    private const long MaxProtectedEvidenceBytes = 25 * 1024 * 1024;
+    private const int EvidenceEnvelopeHeaderBytes = 4 + 1 + NonceSize + TagSize;
 
     private readonly string _root;
     private readonly byte[]? _documentEncryptionKey;
@@ -99,7 +101,7 @@ public sealed class LocalFileStorage : IFileStorage
     {
         var safeName = Path.GetFileName(fileName);
         var key = $"{folder.Trim('/')}/{Guid.NewGuid():N}_{safeName}";
-        var fullPath = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
+        var fullPath = Resolve(key);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         var tempPath = $"{fullPath}.{Guid.NewGuid():N}.tmp";
         long plaintextSize;
@@ -111,7 +113,10 @@ public sealed class LocalFileStorage : IFileStorage
             {
                 var encryptionKey = RequireDocumentEncryptionKey();
                 await using var plaintext = new MemoryStream();
-                await content.CopyToAsync(plaintext, cancellationToken);
+                if (MealMate.Application.Common.Storage.ProtectedEvidenceStorage.IsProtectedKey(key))
+                    await CopyBoundedAsync(content, plaintext, MaxProtectedEvidenceBytes, cancellationToken);
+                else
+                    await content.CopyToAsync(plaintext, cancellationToken);
                 plaintextSize = plaintext.Length;
 
                 var plaintextBytes = plaintext.ToArray();
@@ -193,7 +198,12 @@ public sealed class LocalFileStorage : IFileStorage
             return File.OpenRead(fullPath);
         }
 
-        var envelope = await File.ReadAllBytesAsync(fullPath, cancellationToken);
+        var protectedEvidence = MealMate.Application.Common.Storage.ProtectedEvidenceStorage.IsProtectedKey(storageKey);
+        if (protectedEvidence && new FileInfo(fullPath).Length > MaxProtectedEvidenceBytes + EvidenceEnvelopeHeaderBytes)
+            throw new IOException("Protected evidence exceeds the maximum size.");
+        var envelope = protectedEvidence
+            ? await ReadBoundedBytesAsync(fullPath, MaxProtectedEvidenceBytes + EvidenceEnvelopeHeaderBytes, cancellationToken)
+            : await File.ReadAllBytesAsync(fullPath, cancellationToken);
         if (!HasEnvelopeMagic(envelope))
         {
             // Backward compatibility for documents saved before encryption was enabled.
@@ -240,6 +250,8 @@ public sealed class LocalFileStorage : IFileStorage
 
     public async Task<string> GetReadUrlAsync(string storageKey, TimeSpan ttl, CancellationToken cancellationToken = default)
     {
+        if (MealMate.Application.Common.Storage.ProtectedEvidenceStorage.IsProtectedKey(storageKey))
+            throw new InvalidOperationException("Protected evidence cannot be exposed through a direct local file URL.");
         var fullPath = Resolve(storageKey);
         if (IsDocumentKey(storageKey))
         {
@@ -263,7 +275,8 @@ public sealed class LocalFileStorage : IFileStorage
                "Storage:DocumentEncryptionKey is required to store or read encrypted documents.");
 
     private static bool IsDocumentKey(string storageKey)
-        => storageKey.Replace('\\', '/').StartsWith("documents/", StringComparison.OrdinalIgnoreCase);
+        => storageKey.Replace('\\', '/').StartsWith("documents/", StringComparison.OrdinalIgnoreCase)
+            || MealMate.Application.Common.Storage.ProtectedEvidenceStorage.IsProtectedKey(storageKey);
 
     private static bool HasEncryptedEnvelope(ReadOnlySpan<byte> bytes)
         => bytes.Length >= EnvelopeMagic.Length + 1
@@ -276,13 +289,41 @@ public sealed class LocalFileStorage : IFileStorage
 
     private string Resolve(string storageKey)
     {
-        var fullPath = Path.GetFullPath(Path.Combine(_root, storageKey.Replace('/', Path.DirectorySeparatorChar)));
-        if (!fullPath.StartsWith(Path.GetFullPath(_root), StringComparison.OrdinalIgnoreCase))
+        var root = Path.GetFullPath(_root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var normalized = storageKey.Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(normalized) || Path.IsPathRooted(normalized)
+            || normalized.Split('/').Any(part => part is "" or "." or ".."))
+            throw new InvalidOperationException("Invalid storage key.");
+        var fullPath = Path.GetFullPath(Path.Combine(root, normalized.Replace('/', Path.DirectorySeparatorChar)));
+        if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Invalid storage key.");
         }
 
         return fullPath;
+    }
+
+    private static async Task CopyBoundedAsync(Stream source, Stream destination, long maxBytes, CancellationToken cancellationToken)
+    {
+        var chunk = new byte[81920];
+        long total = 0;
+        int read;
+        while ((read = await source.ReadAsync(chunk, cancellationToken)) > 0)
+        {
+            total += read;
+            if (total > maxBytes) throw new IOException("Protected evidence exceeds the maximum size.");
+            await destination.WriteAsync(chunk.AsMemory(0, read), cancellationToken);
+        }
+    }
+
+    private static async Task<byte[]> ReadBoundedBytesAsync(string path, long maxBytes, CancellationToken cancellationToken)
+    {
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var output = new MemoryStream();
+        await CopyBoundedAsync(input, output, maxBytes, cancellationToken);
+        return output.ToArray();
     }
 
     public bool Exists(string storageKey)

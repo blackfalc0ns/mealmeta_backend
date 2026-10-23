@@ -29,4 +29,10 @@ public sealed class UploadFileRecord : BaseEntity
     public Guid? UploadedByUserId { get; set; }
 
     public DateTime UploadedAtUtc { get; set; }
+
+    /// <summary>Last UTC attempt to remove an unreferenced support-evidence payload.</summary>
+    public DateTime? SupportCleanupLastAttemptAtUtc { get; set; }
+
+    /// <summary>UTC time when the support-evidence payload was confirmed deleted; the upload row remains for receipt audit history.</summary>
+    public DateTime? SupportPayloadDeletedAtUtc { get; set; }
 }

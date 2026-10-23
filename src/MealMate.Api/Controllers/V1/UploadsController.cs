@@ -3,6 +3,7 @@ using MealMate.Api.Common;
 using MealMate.Api.Security;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Security;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.Uploads;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -22,6 +23,8 @@ public sealed class UploadsController : ApiControllerBase
         [FromQuery] string key,
         [FromServices] IFileStorage storage,
         [FromServices] IAppDbContext db,
+        [FromServices] SupportEvidenceScanService evidenceScans,
+        [FromServices] MealMate.Application.Features.UnifiedSupport.DriverEvidenceAccessService staffEvidenceAccess,
         CancellationToken cancellationToken)
     {
         var normalizedKey = key?.Replace('\\', '/').TrimStart('/');
@@ -54,34 +57,33 @@ public sealed class UploadsController : ApiControllerBase
         {
             Response.Headers.CacheControl = "no-store";
             Response.Headers["Referrer-Policy"] = "no-referrer";
+            Response.Headers["X-Content-Type-Options"] = "nosniff";
             var links = HttpContext.RequestServices.GetService<DriverEvidenceReadLinks>();
             var hasReadCapability = links?.Validate(normalizedKey, Request.Query["readToken"].ToString()) == true;
+            var record = await db.UploadFileRecords.AsNoTracking()
+                .SingleOrDefaultAsync(r => r.StorageKey == normalizedKey, cancellationToken);
+            var expectedFolder = normalizedKey.StartsWith(DriversDeliveryPrefix, StringComparison.OrdinalIgnoreCase)
+                ? "delivery" : "issue-evidence";
+            if (record is null || record.Scope != "drivers" || record.Folder != expectedFolder
+                || record.ContentType is not ("image/jpeg" or "image/png" or "image/webp")) return NotFound();
             var userId = User?.FindFirstValue(MealMate.Application.Common.Security.AppClaimTypes.UserId)
                 ?? User?.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier
                     && Guid.TryParse(c.Value, out _))?.Value;
-            var isStaff = User?.Identity?.IsAuthenticated == true
-                && (User.IsInRole(AppRoles.DeliveryManager)
-                    || User.IsInRole(AppRoles.OperationsAdmin)
-                    || User.IsInRole(AppRoles.SuperAdmin));
-
-            if (!hasReadCapability && !isStaff)
+            var isUploader = false;
+            if (User?.Identity?.IsAuthenticated == true && Guid.TryParse(userId, out var callerUserId))
             {
-                if (User?.Identity?.IsAuthenticated != true
-                    || !Guid.TryParse(userId, out var callerUserId))
-                {
-                    return Unauthorized();
-                }
-
-                var record = await db.UploadFileRecords
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(r => r.StorageKey == normalizedKey, cancellationToken);
-
-                if (record is not null
-                    && (record.UploadedByUserId is null || record.UploadedByUserId.Value != callerUserId))
-                {
-                    return Forbid();
-                }
+                isUploader = record.UploadedByUserId == callerUserId
+                    && (await db.GetActiveAccountUserIdsAsync(new[] { callerUserId }, cancellationToken)).Contains(callerUserId);
             }
+            var hasBoundStaffAccess = !hasReadCapability && !isUploader
+                && User?.Identity?.IsAuthenticated == true
+                && await staffEvidenceAccess.CanReadAsync(normalizedKey, cancellationToken);
+            if (!hasReadCapability && !isUploader && !hasBoundStaffAccess)
+                return User?.Identity?.IsAuthenticated == true ? Forbid() : Unauthorized();
+
+            var scanned = await evidenceScans.ReadCleanAsync(record, cancellationToken);
+            if (scanned.Bytes is null) return NotFound();
+            return File(scanned.Bytes, record.ContentType, enableRangeProcessing: false);
         }
 
         var stream = await storage.OpenReadAsync(normalizedKey, cancellationToken);

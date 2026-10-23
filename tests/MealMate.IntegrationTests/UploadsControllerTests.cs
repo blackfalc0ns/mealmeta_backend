@@ -2,6 +2,7 @@ using System.Text;
 using FluentAssertions;
 using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.Uploads;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.InMemory;
@@ -37,7 +38,8 @@ public class UploadsControllerTests
             Arg.Any<CancellationToken>())
             .Returns(Task.FromResult("https://storage.local/uploads/general/images/test-image.png"));
 
-        var handler = new UploadFileCommandHandler(storage, CreateUploadDb(), Substitute.For<MealMate.Application.Common.Abstractions.ICurrentUser>());
+        var evidenceScans = new SupportEvidenceScanService(storage, Substitute.For<IEvidenceMalwareScanner>(), Substitute.For<ISupportEvidenceScanReceiptStore>());
+        var handler = new UploadFileCommandHandler(storage, CreateUploadDb(), Substitute.For<MealMate.Application.Common.Abstractions.ICurrentUser>(), evidenceScans);
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("fake-image-binary-data"));
 
         var command = new UploadFileCommand(
@@ -81,7 +83,8 @@ public class UploadsControllerTests
             Arg.Any<CancellationToken>())
             .Returns(Task.FromResult("https://storage.local/uploads/documents/contracts/contract.pdf"));
 
-        var handler = new UploadFileCommandHandler(storage, CreateUploadDb(), Substitute.For<MealMate.Application.Common.Abstractions.ICurrentUser>());
+        var evidenceScans = new SupportEvidenceScanService(storage, Substitute.For<IEvidenceMalwareScanner>(), Substitute.For<ISupportEvidenceScanReceiptStore>());
+        var handler = new UploadFileCommandHandler(storage, CreateUploadDb(), Substitute.For<MealMate.Application.Common.Abstractions.ICurrentUser>(), evidenceScans);
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("%PDF-1.4 fake pdf content"));
 
         var command = new UploadFileCommand(

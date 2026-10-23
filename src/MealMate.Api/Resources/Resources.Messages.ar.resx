@@ -1503,5 +1503,16 @@
 <data name="driver_support_issue.category.DeliveryIssue" xml:space="preserve"><value>مشكلة في التوصيل</value></data>
   <data name="family.confirmation_not_found" xml:space="preserve"><value>لم يتم العثور على تأكيد عملية الاشتراك العائلي.</value></data>
   <data name="family.confirmation_not_ready" xml:space="preserve"><value>لم يتم التحقق من دفع الاشتراك العائلي بعد.</value></data>
-  <data name="calls.auth_refresh_required" xml:space="preserve"><value>يرجى تجديد الجلسة قبل بدء المكالمة ثم إعادة المحاولة.</value></data>
+  <data name="support.authentication_required" xml:space="preserve"><value>سجّل الدخول لاستخدام الدعم.</value></data>
+  <data name="support.access_denied" xml:space="preserve"><value>لا يمكنك الوصول إلى حالة الدعم أو الإجراء المطلوب.</value></data>
+  <data name="support.case_not_found" xml:space="preserve"><value>لم يتم العثور على حالة الدعم.</value></data>
+  <data name="support.request_invalid" xml:space="preserve"><value>طلب الدعم غير صالح.</value></data>
+  <data name="support.transition_invalid" xml:space="preserve"><value>لا يمكن تغيير حالة الدعم إلى الحالة المطلوبة.</value></data>
+  <data name="support.version_conflict" xml:space="preserve"><value>تم تحديث حالة الدعم. حدّث البيانات ثم حاول مجددًا.</value></data>
+  <data name="support.idempotency_key_reused" xml:space="preserve"><value>سبق استخدام مفتاح الطلب هذا لإجراء دعم مختلف.</value></data>
+  <data name="support.link_target_unsupported" xml:space="preserve"><value>لا يمكن ربط هذا المورد بحالة الدعم.</value></data>
+  <data name="support.task_not_found" xml:space="preserve"><value>لم يتم العثور على مهمة الدعم.</value></data>
+  <data name="support.operational_route_required" xml:space="preserve"><value>يجب إرسال بلاغات التوصيل التشغيلية عبر مسار مشاكل التوصيل المحمي.</value></data>
+  <data name="support.attachment_unsupported" xml:space="preserve"><value>لا يمكن إرفاق هذا الملف. استخدم صورة أو ملف PDF مدعومًا بحجم أقل من 25 ميغابايت.</value></data>
+  <data name="support.attachment_storage_unavailable" xml:space="preserve"><value>تخزين ملفات الدعم الخاصة غير متاح مؤقتًا.</value></data>
 </root>

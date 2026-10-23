@@ -122,6 +122,7 @@ public static class IdentityDataSeeder
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.SupportAdmin,
         [
             PermissionCodes.AuditView, PermissionCodes.CustomersView, PermissionCodes.DocumentsView,
+            PermissionCodes.SupportView, PermissionCodes.SupportReply, PermissionCodes.SupportManage, PermissionCodes.SupportInternal,
         ], cancellationToken);
         await AssignPermissionsToRoleAsync(db, roleManager, AppRoles.RestaurantOwner,
         [

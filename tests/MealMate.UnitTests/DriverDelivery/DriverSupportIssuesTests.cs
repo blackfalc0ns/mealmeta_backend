@@ -30,6 +30,7 @@ public sealed class DriverSupportIssuesTests
         var contact = Issue(profile.Id, ComplaintStatus.UnderReview, "contact");
         var submitted = Issue(profile.Id, ComplaintStatus.Submitted, "submitted");
         var foreign = Issue(other.Id, ComplaintStatus.Submitted, "foreign");
+        AddActiveDriverAccount(db, userId);
         db.AddRange(profile, other, review, contact, submitted, foreign,
             new AuditLog { EntityId = contact.Id, EntityType = nameof(Complaint), Action = "DriverSupportProgressUpdated", AfterJson = "{\"Stage\":\"ContactingCustomer\"}", OccurredAtUtc = DateTime.UtcNow });
         await db.SaveChangesAsync();
@@ -54,6 +55,7 @@ public sealed class DriverSupportIssuesTests
         var userId = Guid.NewGuid(); var profile = new DriverProfile { UserId = userId, FullNameEn = "Driver", FullNameAr = "سائق" };
         var first = Issue(profile.Id, ComplaintStatus.Submitted, "First"); first.Description = "unique search phrase";
         var second = Issue(profile.Id, ComplaintStatus.Submitted, "Second"); second.Description = "ordinary text";
+        AddActiveDriverAccount(db, userId);
         db.AddRange(profile, first, second); await db.SaveChangesAsync();
         var user = Substitute.For<ICurrentUser>(); user.IsAuthenticated.Returns(true); user.UserId.Returns(userId); user.UserType.Returns(UserType.Driver);
         var handler = new DriverSupportIssueQueries(db, user, NullLocalizedMessageProvider.Instance);
@@ -78,6 +80,7 @@ public sealed class DriverSupportIssuesTests
         var ambiguousOrderId = Guid.NewGuid();
         firstAmbiguous.DailyOrderId = ambiguousOrderId; secondAmbiguous.DailyOrderId = ambiguousOrderId;
         var ambiguousIssue = Issue(profile.Id, ComplaintStatus.Submitted, "ambiguous"); ambiguousIssue.RestaurantId = restaurantId; ambiguousIssue.OrderId = ambiguousOrderId;
+        AddActiveDriverAccount(db, userId);
         db.AddRange(profile, trip, uniqueStop, firstAmbiguous, secondAmbiguous, uniqueIssue, ambiguousIssue); await db.SaveChangesAsync();
         var user = Substitute.For<ICurrentUser>(); user.IsAuthenticated.Returns(true); user.UserId.Returns(userId); user.UserType.Returns(UserType.Driver);
         var handler = new DriverSupportIssueQueries(db, user, NullLocalizedMessageProvider.Instance);
@@ -96,6 +99,7 @@ public sealed class DriverSupportIssuesTests
         var userId = Guid.NewGuid(); var profile = new DriverProfile { UserId = userId, FullNameEn = "Driver", FullNameAr = "سائق" };
         var submittedAt = new DateTime(2026, 10, 20, 9, 0, 0, DateTimeKind.Utc);
         var issue = Issue(profile.Id, ComplaintStatus.Resolved, "legacy"); issue.SubmittedAtUtc = submittedAt;
+        AddActiveDriverAccount(db, userId);
         db.AddRange(profile, issue);
         db.AuditLogs.Add(new AuditLog { EntityId = issue.Id, EntityType = nameof(Complaint), Action = "SupportIssueResolved", Reason = "Done", OccurredAtUtc = submittedAt.AddHours(2) });
         await db.SaveChangesAsync();
@@ -108,7 +112,8 @@ public sealed class DriverSupportIssuesTests
         result.Value.Timeline.Single(x => x.Stage == "ContactingCustomer").OccurredAtUtc.Should().BeNull();
         result.Value.ResolvedAtUtc.Should().Be(submittedAt.AddHours(2));
         result.Value.CanContactSupport.Should().BeFalse();
-        var foreignUserId = Guid.NewGuid(); db.DriverProfiles.Add(new DriverProfile { UserId = foreignUserId, FullNameAr = "Another", FullNameEn = "Another" }); await db.SaveChangesAsync();
+        var foreignUserId = Guid.NewGuid(); AddActiveDriverAccount(db, foreignUserId);
+        db.DriverProfiles.Add(new DriverProfile { UserId = foreignUserId, FullNameAr = "Another", FullNameEn = "Another" }); await db.SaveChangesAsync();
         var foreignUser = Substitute.For<ICurrentUser>(); foreignUser.IsAuthenticated.Returns(true); foreignUser.UserId.Returns(foreignUserId); foreignUser.UserType.Returns(UserType.Driver);
         var foreign = await new DriverSupportIssueQueries(db, foreignUser, NullLocalizedMessageProvider.Instance).Handle(new GetDriverSupportIssueQuery(issue.Id), default);
         foreign.Error.Code.Should().Be("DRIVER_SUPPORT_ISSUE_NOT_FOUND");
@@ -129,6 +134,7 @@ public sealed class DriverSupportIssuesTests
     public async Task EmptyDriverListReturnsZeroCounts()
     {
         await using var db = CreateDb(); var userId = Guid.NewGuid();
+        AddActiveDriverAccount(db, userId);
         db.DriverProfiles.Add(new DriverProfile { UserId = userId, FullNameEn = "Driver", FullNameAr = "سائق" }); await db.SaveChangesAsync();
         var user = Substitute.For<ICurrentUser>(); user.IsAuthenticated.Returns(true); user.UserId.Returns(userId); user.UserType.Returns(UserType.Driver);
         var result = await new DriverSupportIssueQueries(db, user, NullLocalizedMessageProvider.Instance).Handle(new GetDriverSupportIssuesQuery(), default);
@@ -142,6 +148,7 @@ public sealed class DriverSupportIssuesTests
         await using var db = CreateDb(); var userId = Guid.NewGuid();
         var profile = new DriverProfile { UserId = userId, FullNameEn = "Driver", FullNameAr = "سائق" };
         var customerComplaint = Issue(profile.Id, ComplaintStatus.Submitted, "customer"); customerComplaint.Category = "FoodQuality";
+        AddActiveDriverAccount(db, userId);
         db.AddRange(profile, customerComplaint); await db.SaveChangesAsync();
         var user = Substitute.For<ICurrentUser>(); user.IsAuthenticated.Returns(true); user.UserId.Returns(userId); user.UserType.Returns(UserType.Driver);
         var handler = new DriverSupportIssueQueries(db, user, NullLocalizedMessageProvider.Instance);
@@ -183,20 +190,20 @@ public sealed class DriverSupportIssuesTests
 
     [Theory]
     [InlineData("uploads/drivers/issue-evidence/evidence.webp")]
-    [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/evidence.webp")]
-    [InlineData("https://cdn.example/uploads/drivers/delivery/evidence.webp")]
     public async Task PhotoBindingChecksOwnershipAndIsIdempotent(string key)
     {
         await using var db = CreateDb();
         var userId = Guid.NewGuid(); var restaurantId = Guid.NewGuid();
         var profile = new DriverProfile { UserId = userId, RestaurantId = restaurantId, FullNameEn = "Driver", FullNameAr = "سائق" };
         var issue = Issue(profile.Id, ComplaintStatus.Submitted, "photos"); issue.RestaurantId = restaurantId;
-        db.AddRange(profile, issue, new MealMate.Domain.Common.UploadFileRecord { StorageKey = key, UploadedByUserId = userId, ContentType = "image/webp", FileName = "evidence.webp", SizeBytes = 10 });
+        AddActiveDriverAccount(db, userId);
+        db.AddRange(profile, issue, new MealMate.Domain.Common.UploadFileRecord { StorageKey = key, UploadedByUserId = userId, ContentType = "image/webp", FileName = "evidence.webp", SizeBytes = 12 });
         await db.SaveChangesAsync();
         var user = Substitute.For<ICurrentUser>(); user.IsAuthenticated.Returns(true); user.UserId.Returns(userId); user.UserType.Returns(UserType.Driver);
         var storage = Substitute.For<IFileStorage>(); storage.ExistsAsync(key, Arg.Any<CancellationToken>()).Returns(true);
+        storage.OpenReadAsync(key, Arg.Any<CancellationToken>()).Returns(_ => Task.FromResult<Stream>(new MemoryStream(WebpBytes(), writable: false)));
         var handler = new AddDriverSupportIssuePhotosHandler(db, user, NullLocalizedMessageProvider.Instance,
-            new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db), storage);
+            new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db), storage, CreateEvidenceScans(storage));
 
         var first = await handler.Handle(new AddDriverSupportIssuePhotosCommand(issue.Id, [key, key]), default);
         first.IsSuccess.Should().BeTrue();
@@ -215,8 +222,18 @@ public sealed class DriverSupportIssuesTests
             .Handle(new GetDriverSupportIssueQuery(issue.Id), default);
         driverDetail.IsSuccess.Should().BeTrue();
         driverDetail.Value.EvidenceUrls.Should().Equal(CatalogImageStorage.ToContentUrl(key));
+        var managerId = Guid.NewGuid();
+        db.Users.Add(new ApplicationUser
+        {
+            Id = managerId,
+            UserName = $"manager-{managerId:N}",
+            UserType = UserType.DeliveryManager,
+            AccountStatus = AccountStatus.Active,
+            RestaurantId = restaurantId
+        });
+        await db.SaveChangesAsync();
         var manager = Substitute.For<ICurrentUser>();
-        manager.IsAuthenticated.Returns(true); manager.UserId.Returns(Guid.NewGuid());
+        manager.IsAuthenticated.Returns(true); manager.UserId.Returns(managerId);
         manager.UserType.Returns(UserType.DeliveryManager); manager.RestaurantId.Returns(restaurantId);
         var managerDetail = await new GetDispatcherProblemDetailsQueryHandler(db, NullLocalizedMessageProvider.Instance, manager)
             .Handle(new GetDispatcherProblemDetailsQuery(issue.Id), default);
@@ -241,6 +258,7 @@ public sealed class DriverSupportIssuesTests
         var key = "uploads/drivers/issue-evidence/foreign.png";
         var mimeKey = "uploads/drivers/issue-evidence/wrong-type.pdf";
         var publicKey = "uploads/catalog/wrong-folder.png";
+        AddActiveDriverAccount(db, owner);
         db.AddRange(profile, foreignProfile, issue, terminal, foreignIssue,
             new MealMate.Domain.Common.UploadFileRecord { StorageKey = key, UploadedByUserId = otherUser, ContentType = "image/png", FileName = "foreign.png", SizeBytes = 10 },
             new MealMate.Domain.Common.UploadFileRecord { StorageKey = mimeKey, UploadedByUserId = owner, ContentType = "application/pdf", FileName = "wrong-type.pdf", SizeBytes = 10 },
@@ -249,7 +267,7 @@ public sealed class DriverSupportIssuesTests
         var user = Substitute.For<ICurrentUser>(); user.IsAuthenticated.Returns(true); user.UserId.Returns(owner); user.UserType.Returns(UserType.Driver);
         var storage = Substitute.For<IFileStorage>(); storage.ExistsAsync(key, Arg.Any<CancellationToken>()).Returns(true);
         var handler = new AddDriverSupportIssuePhotosHandler(db, user, NullLocalizedMessageProvider.Instance,
-            new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db), storage);
+            new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db), storage, CreateEvidenceScans(storage));
         (await handler.Handle(new AddDriverSupportIssuePhotosCommand(issue.Id, [key]), default)).Error.Code.Should().Be("DRIVER_SUPPORT_PHOTO_UPLOAD_INVALID");
         (await handler.Handle(new AddDriverSupportIssuePhotosCommand(issue.Id, [mimeKey]), default)).Error.Code.Should().Be("DRIVER_SUPPORT_PHOTO_UPLOAD_INVALID");
         (await handler.Handle(new AddDriverSupportIssuePhotosCommand(issue.Id, [publicKey]), default)).Error.Code.Should().Be("DRIVER_SUPPORT_PHOTO_UPLOAD_INVALID");
@@ -268,6 +286,7 @@ public sealed class DriverSupportIssuesTests
     [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/%252e%252e/other.jpg")]
     [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/dir%2ffile.jpg")]
     [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/dir%5cfile.jpg")]
+    [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/evidence.webp")]
     [InlineData("uploads/drivers/issue-evidence/../other.jpg")]
     public async Task PhotoBindingRejectsUnsafeOwnedKeyBeforeStorageAccess(string key)
     {
@@ -288,13 +307,14 @@ public sealed class DriverSupportIssuesTests
         var userId = Guid.NewGuid(); var restaurantId = Guid.NewGuid();
         var profile = new DriverProfile { UserId = userId, RestaurantId = restaurantId, FullNameEn = "Driver", FullNameAr = "سائق" };
         var issue = Issue(profile.Id, ComplaintStatus.Submitted, "photos"); issue.RestaurantId = restaurantId;
+        AddActiveDriverAccount(db, userId);
         db.AddRange(profile, issue);
         if (recordExists) db.Add(new MealMate.Domain.Common.UploadFileRecord { StorageKey = key, UploadedByUserId = owned ? userId : Guid.NewGuid(), ContentType = "image/jpeg", FileName = "file.jpg", SizeBytes = 10 });
         await db.SaveChangesAsync();
         var user = Substitute.For<ICurrentUser>(); user.IsAuthenticated.Returns(true); user.UserId.Returns(userId); user.UserType.Returns(UserType.Driver);
         var storage = Substitute.For<IFileStorage>();
         var handler = new AddDriverSupportIssuePhotosHandler(db, user, NullLocalizedMessageProvider.Instance,
-            new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db), storage);
+            new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db), storage, CreateEvidenceScans(storage));
         var result = await handler.Handle(new AddDriverSupportIssuePhotosCommand(issue.Id, [key]), default);
         result.Error.Code.Should().Be("DRIVER_SUPPORT_PHOTO_UPLOAD_INVALID");
         await storage.DidNotReceive().ExistsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -312,6 +332,7 @@ public sealed class DriverSupportIssuesTests
         for (var i = 0; i < 3; i++) issue.EvidencePhotos.Add(new ComplaintEvidencePhoto { StoragePath = $"existing-{i}.png", ContentType = "image/png", UploadedAtUtc = DateTime.UtcNow });
         var missingKey = "uploads/drivers/issue-evidence/missing.png";
         var fourthKey = "uploads/drivers/issue-evidence/fourth.png";
+        AddActiveDriverAccount(db, userId);
         db.AddRange(profile, issue,
             new MealMate.Domain.Common.UploadFileRecord { StorageKey = missingKey, UploadedByUserId = userId, ContentType = "image/png", FileName = "missing.png", SizeBytes = 10 },
             new MealMate.Domain.Common.UploadFileRecord { StorageKey = fourthKey, UploadedByUserId = userId, ContentType = "image/png", FileName = "fourth.png", SizeBytes = 10 });
@@ -319,7 +340,8 @@ public sealed class DriverSupportIssuesTests
         var user = Substitute.For<ICurrentUser>(); user.IsAuthenticated.Returns(true); user.UserId.Returns(userId); user.UserType.Returns(UserType.Driver);
         var storage = Substitute.For<IFileStorage>(); storage.ExistsAsync(missingKey, Arg.Any<CancellationToken>()).Returns(false); storage.ExistsAsync(fourthKey, Arg.Any<CancellationToken>()).Returns(true);
         var handler = new AddDriverSupportIssuePhotosHandler(db, user, NullLocalizedMessageProvider.Instance,
-            new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db), storage);
+            new PostgresApplicationTransactionExecutor(db), new PostgresApplicationLockManager(db), storage, CreateEvidenceScans(storage));
+        storage.OpenReadAsync(fourthKey, Arg.Any<CancellationToken>()).Returns(_ => Task.FromResult<Stream>(new MemoryStream(PngBytes(), writable: false)));
         (await handler.Handle(new AddDriverSupportIssuePhotosCommand(issue.Id, [missingKey]), default)).Error.Code.Should().Be("DRIVER_SUPPORT_PHOTO_MISSING");
         (await handler.Handle(new AddDriverSupportIssuePhotosCommand(issue.Id, [fourthKey]), default)).Error.Code.Should().Be("DRIVER_SUPPORT_PHOTO_LIMIT");
     }
@@ -334,6 +356,17 @@ public sealed class DriverSupportIssuesTests
         SubmittedAtUtc = new DateTime(2026, 10, 20, 8, 0, 0, DateTimeKind.Utc)
     };
 
+    private static void AddActiveDriverAccount(AppDbContext db, Guid userId)
+    {
+        db.Users.Add(new ApplicationUser
+        {
+            Id = userId,
+            UserName = $"driver-{userId:N}",
+            AccountStatus = AccountStatus.Active,
+            UserType = UserType.Driver
+        });
+    }
+
     private static TripStop Stop(Guid tripId, Guid dailyOrderId, string orderCode) => new()
     {
         TripId = tripId,
@@ -346,6 +379,25 @@ public sealed class DriverSupportIssuesTests
         MealSummaryEn = "Meal",
         SlotLabel = "AM"
     };
+
+    private static MealMate.Application.Common.Storage.SupportEvidenceScanService CreateEvidenceScans(IFileStorage storage)
+    {
+        var scanner = Substitute.For<MealMate.Application.Common.Abstractions.IEvidenceMalwareScanner>();
+        scanner.ScanAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new MealMate.Application.Common.Abstractions.EvidenceScanResult(
+                MealMate.Application.Common.Abstractions.EvidenceScanVerdict.Clean, "test")));
+        var receipts = Substitute.For<MealMate.Application.Common.Storage.ISupportEvidenceScanReceiptStore>();
+        receipts.GetOrScanAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<long>(), Arg.Any<string>(), Arg.Any<int>(),
+                Arg.Any<Func<CancellationToken, Task<MealMate.Application.Common.Abstractions.EvidenceScanResult>>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task<MealMate.Application.Common.Abstractions.EvidenceScanResult>>>()(call.Arg<CancellationToken>()));
+        receipts.AppendAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<long>(), Arg.Any<string>(), Arg.Any<int>(),
+                Arg.Any<MealMate.Application.Common.Abstractions.EvidenceScanResult>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        return new MealMate.Application.Common.Storage.SupportEvidenceScanService(storage, scanner, receipts);
+    }
+
+    private static byte[] WebpBytes() => [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50];
+    private static byte[] PngBytes() => [137, 80, 78, 71, 13, 10, 26, 10, 0, 0];
 
     private static AppDbContext CreateDb() => new(new DbContextOptionsBuilder<AppDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options, Substitute.For<IDomainEventDispatcher>());

@@ -10,21 +10,28 @@ public sealed class GetAdminNotificationsQueryHandler
     : IQueryHandler<GetAdminNotificationsQuery, AdminNotificationsListResponse>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
 
-    public GetAdminNotificationsQueryHandler(IAppDbContext db)
+    public GetAdminNotificationsQueryHandler(IAppDbContext db, ICurrentUser currentUser)
     {
         _db = db;
+        _currentUser = currentUser;
     }
 
     public async Task<Result<AdminNotificationsListResponse>> Handle(
         GetAdminNotificationsQuery request,
         CancellationToken cancellationToken)
     {
+        if (!_currentUser.IsAuthenticated || _currentUser.UserId is not { } actorId)
+            return Error.Unauthorized("admin_notifications.authentication_required");
+        if (_currentUser.UserType != MealMate.Domain.Enums.UserType.Admin)
+            return Error.Forbidden("admin_notifications.access_denied");
         var pageSize = request.PageSize > 0 ? request.PageSize : request.Limit;
         pageSize = Math.Clamp(pageSize, 1, 100);
         var page = Math.Max(1, request.Page);
 
-        var query = _db.AdminNotifications.AsNoTracking().AsQueryable();
+        var query = _db.AdminNotifications.AsNoTracking()
+            .Where(n => n.UserId == actorId || n.UserId == null);
 
         if (request.UnreadOnly == true)
         {
@@ -41,7 +48,7 @@ public sealed class GetAdminNotificationsQueryHandler
 
         var unreadCount = await _db.AdminNotifications
             .AsNoTracking()
-            .CountAsync(n => !n.IsRead, cancellationToken);
+            .CountAsync(n => !n.IsRead && (n.UserId == actorId || n.UserId == null), cancellationToken);
 
         var items = notifications.Select(n =>
         {
@@ -88,18 +95,24 @@ public sealed class MarkAdminNotificationReadCommandHandler
     : ICommandHandler<MarkAdminNotificationReadCommand>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
 
-    public MarkAdminNotificationReadCommandHandler(IAppDbContext db)
+    public MarkAdminNotificationReadCommandHandler(IAppDbContext db, ICurrentUser currentUser)
     {
         _db = db;
+        _currentUser = currentUser;
     }
 
     public async Task<Result> Handle(
         MarkAdminNotificationReadCommand request,
         CancellationToken cancellationToken)
     {
+        if (!_currentUser.IsAuthenticated || _currentUser.UserId is not { } actorId)
+            return Error.Unauthorized("admin_notifications.authentication_required");
+        if (_currentUser.UserType != MealMate.Domain.Enums.UserType.Admin)
+            return Error.Forbidden("admin_notifications.access_denied");
         var notification = await _db.AdminNotifications
-            .FirstOrDefaultAsync(n => n.Id == request.Id, cancellationToken);
+            .FirstOrDefaultAsync(n => n.Id == request.Id && (n.UserId == actorId || n.UserId == null), cancellationToken);
 
         if (notification is null)
         {
@@ -116,18 +129,24 @@ public sealed class MarkAllAdminNotificationsReadCommandHandler
     : ICommandHandler<MarkAllAdminNotificationsReadCommand>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUser _currentUser;
 
-    public MarkAllAdminNotificationsReadCommandHandler(IAppDbContext db)
+    public MarkAllAdminNotificationsReadCommandHandler(IAppDbContext db, ICurrentUser currentUser)
     {
         _db = db;
+        _currentUser = currentUser;
     }
 
     public async Task<Result> Handle(
         MarkAllAdminNotificationsReadCommand request,
         CancellationToken cancellationToken)
     {
+        if (!_currentUser.IsAuthenticated || _currentUser.UserId is not { } actorId)
+            return Error.Unauthorized("admin_notifications.authentication_required");
+        if (_currentUser.UserType != MealMate.Domain.Enums.UserType.Admin)
+            return Error.Forbidden("admin_notifications.access_denied");
         var unread = await _db.AdminNotifications
-            .Where(n => !n.IsRead)
+            .Where(n => !n.IsRead && (n.UserId == actorId || n.UserId == null))
             .ToListAsync(cancellationToken);
 
         foreach (var item in unread)

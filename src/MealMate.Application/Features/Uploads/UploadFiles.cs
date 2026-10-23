@@ -65,12 +65,15 @@ public sealed class UploadFileCommandHandler : ICommandHandler<UploadFileCommand
     private readonly IFileStorage _storage;
     private readonly IAppDbContext _db;
     private readonly ICurrentUser _currentUser;
+    private readonly MealMate.Application.Common.Storage.SupportEvidenceScanService _evidenceScans;
 
-    public UploadFileCommandHandler(IFileStorage storage, IAppDbContext db, ICurrentUser currentUser)
+    public UploadFileCommandHandler(IFileStorage storage, IAppDbContext db, ICurrentUser currentUser,
+        MealMate.Application.Common.Storage.SupportEvidenceScanService evidenceScans)
     {
         _storage = storage;
         _db = db;
         _currentUser = currentUser;
+        _evidenceScans = evidenceScans;
     }
 
     public async Task<Result<UploadedFileDto>> Handle(UploadFileCommand request, CancellationToken cancellationToken)
@@ -89,13 +92,36 @@ public sealed class UploadFileCommandHandler : ICommandHandler<UploadFileCommand
 
         // Build folder path for storage
         var storageFolder = $"uploads/{sanitizedScope}/{sanitizedFolder}";
+        var protectedEvidence = MealMate.Application.Common.Storage.ProtectedEvidenceStorage.IsProtectedKey(storageFolder);
+        if (protectedEvidence && (_currentUser.UserType != MealMate.Domain.Enums.UserType.Driver || !_currentUser.UserId.HasValue
+            || sanitizedScope != "drivers" || sanitizedFolder is not ("delivery" or "issue-evidence")
+            || request.ContentType is not ("image/jpeg" or "image/png" or "image/webp")))
+            return Error.Forbidden("UPLOAD_PRIVATE_EVIDENCE_SCOPE_REQUIRED", "Private evidence uploads require a driver account and an approved evidence purpose.");
+
+        MemoryStream? protectedBuffer = null;
+        if (protectedEvidence)
+        {
+            protectedBuffer = new MemoryStream();
+            var inputChunk = new byte[81920];
+            int inputRead;
+            while ((inputRead = await request.Content.ReadAsync(inputChunk, cancellationToken)) > 0)
+            {
+                if (protectedBuffer.Length + inputRead > MaxBytes)
+                    return Error.Validation(MessageCodes.Validation.MaxLength, "File exceeds 25MB limit.");
+                await protectedBuffer.WriteAsync(inputChunk.AsMemory(0, inputRead), cancellationToken);
+            }
+            var incomingBytes = protectedBuffer.ToArray();
+            if (incomingBytes.Length == 0 || !MealMate.Application.Features.UnifiedSupport.SupportCaseService.HasValidSignature(incomingBytes, request.ContentType))
+                return Error.Validation(MessageCodes.Validation.RequiredField, "Evidence content does not match its declared image type.");
+            protectedBuffer.Position = 0;
+        }
 
         // Save through IFileStorage
         StoredFile stored;
         try
         {
             stored = await _storage.SaveAsync(
-                request.Content,
+                (Stream?)protectedBuffer ?? request.Content,
                 request.FileName,
                 request.ContentType,
                 storageFolder,
@@ -103,10 +129,12 @@ public sealed class UploadFileCommandHandler : ICommandHandler<UploadFileCommand
         }
         catch (Exception ex)
         {
+            protectedBuffer?.Dispose();
             return Error.Failure(
                 MessageCodes.Common.ServerError,
                 $"Failed to save file: {ex.Message}");
         }
+        protectedBuffer?.Dispose();
 
         // Check final size after save
         if (stored.SizeBytes > MaxBytes)
@@ -154,18 +182,29 @@ public sealed class UploadFileCommandHandler : ICommandHandler<UploadFileCommand
         // Ownership metadata: persisted so later consumers (delivery proof binding,
         // protected read paths) can verify the key belongs to this uploader. Without
         // this record a storage key is just an unverified string.
-        _db.UploadFileRecords.Add(new MealMate.Domain.Common.UploadFileRecord
+        var uploadRecord = new MealMate.Domain.Common.UploadFileRecord
         {
             StorageKey = stored.StorageKey,
             FileName = stored.FileName,
             ContentType = stored.ContentType,
             SizeBytes = stored.SizeBytes,
-            Scope = request.Scope,
-            Folder = request.Folder,
+            Scope = sanitizedScope,
+            Folder = sanitizedFolder,
             UploadedByUserId = _currentUser.IsAuthenticated ? _currentUser.UserId : null,
             UploadedAtUtc = DateTime.UtcNow
-        });
+        };
+        _db.UploadFileRecords.Add(uploadRecord);
         await _db.SaveChangesAsync(cancellationToken);
+
+        if (protectedEvidence)
+        {
+            var scan = await _evidenceScans.ReadCleanAsync(uploadRecord, cancellationToken);
+            if (scan.Scan.Verdict == MealMate.Application.Common.Abstractions.EvidenceScanVerdict.Unavailable)
+                return Error.Failure("UPLOAD_EVIDENCE_SCAN_UNAVAILABLE", "Evidence scanning is unavailable.");
+            if (scan.Scan.Verdict != MealMate.Application.Common.Abstractions.EvidenceScanVerdict.Clean
+                || scan.Bytes is null || !MealMate.Application.Features.UnifiedSupport.SupportCaseService.HasValidSignature(scan.Bytes, request.ContentType))
+                return Error.Validation("UPLOAD_EVIDENCE_REJECTED", "The evidence was rejected.");
+        }
 
         return new UploadedFileDto(
             stored.StorageKey,

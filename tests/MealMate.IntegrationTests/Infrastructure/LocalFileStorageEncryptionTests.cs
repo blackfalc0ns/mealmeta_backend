@@ -118,6 +118,47 @@ public sealed class LocalFileStorageEncryptionTests : IDisposable
         contents.ToArray().Should().Equal(plaintext);
     }
 
+    [Fact]
+    public async Task Protected_driver_evidence_is_encrypted_and_never_returns_a_direct_url()
+    {
+        var storage = CreateStorage();
+        var plaintext = Encoding.UTF8.GetBytes("private driver evidence");
+        var stored = await storage.SaveAsync(new MemoryStream(plaintext), "delivery photo.png", "image/png", "uploads/drivers/delivery");
+        var raw = await File.ReadAllBytesAsync(Path.Combine(_root, stored.StorageKey.Replace('/', Path.DirectorySeparatorChar)));
+        raw.Should().NotContainInOrder(plaintext);
+        await using var opened = await storage.OpenReadAsync(stored.StorageKey);
+        using var roundTrip = new MemoryStream();
+        await opened.CopyToAsync(roundTrip);
+        roundTrip.ToArray().Should().Equal(plaintext);
+        var directUrl = async () => await storage.GetReadUrlAsync(stored.StorageKey, TimeSpan.FromMinutes(1));
+        await directUrl.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Protected_legacy_plaintext_cannot_return_a_direct_url_and_oversized_files_are_bounded()
+    {
+        var storage = CreateStorage();
+        const string key = "uploads/drivers/delivery/legacy.png";
+        var fullPath = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        await File.WriteAllBytesAsync(fullPath, Encoding.UTF8.GetBytes("legacy bytes"));
+        var directUrl = async () => await storage.GetReadUrlAsync(key, TimeSpan.FromMinutes(1));
+        await directUrl.Should().ThrowAsync<InvalidOperationException>();
+
+        using (var oversized = new FileStream(fullPath, FileMode.Create, FileAccess.Write))
+            oversized.SetLength(25L * 1024 * 1024 + 34);
+        var open = async () => await storage.OpenReadAsync(key);
+        await open.Should().ThrowAsync<IOException>();
+    }
+
+    [Fact]
+    public async Task Local_path_containment_rejects_sibling_prefix_traversal()
+    {
+        var storage = CreateStorage();
+        var open = async () => await storage.OpenReadAsync(".." + Path.DirectorySeparatorChar + Path.GetFileName(_root) + "-outside/secret.bin");
+        await open.Should().ThrowAsync<InvalidOperationException>();
+    }
+
     private LocalFileStorage CreateStorage()
     {
         var configuration = new ConfigurationBuilder()

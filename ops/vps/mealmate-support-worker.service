@@ -1,0 +1,23 @@
+[Unit]
+Description=MealMate support timing and evidence cleanup worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mealmate
+Group=mealmate
+WorkingDirectory=/opt/mealmate/worker-current
+EnvironmentFile=/etc/mealmate/runtime.env
+Environment=DOTNET_ENVIRONMENT=Production
+ExecStart=/usr/bin/dotnet /opt/mealmate/worker-current/MealMate.Worker.dll --support-only
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/mealmate/shared/uploads
+
+[Install]
+WantedBy=multi-user.target

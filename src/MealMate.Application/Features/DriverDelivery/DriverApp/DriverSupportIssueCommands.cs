@@ -16,17 +16,21 @@ public sealed class AddDriverSupportIssuePhotosHandler : ICommandHandler<AddDriv
 {
     private readonly IAppDbContext db; private readonly ICurrentUser user; private readonly ILocalizedMessageProvider messages;
     private readonly IApplicationTransactionExecutor transactions; private readonly IApplicationLockManager locks; private readonly IFileStorage storage;
+    private readonly MealMate.Application.Common.Storage.SupportEvidenceScanService evidenceScans;
     public AddDriverSupportIssuePhotosHandler(IAppDbContext db, ICurrentUser user, ILocalizedMessageProvider messages,
-        IApplicationTransactionExecutor transactions, IApplicationLockManager locks, IFileStorage storage)
-        => (this.db, this.user, this.messages, this.transactions, this.locks, this.storage) = (db, user, messages, transactions, locks, storage);
+        IApplicationTransactionExecutor transactions, IApplicationLockManager locks, IFileStorage storage,
+        MealMate.Application.Common.Storage.SupportEvidenceScanService evidenceScans)
+        => (this.db, this.user, this.messages, this.transactions, this.locks, this.storage, this.evidenceScans) = (db, user, messages, transactions, locks, storage, evidenceScans);
 
-    public Task<Result<DriverSupportIssueMutationDto>> Handle(AddDriverSupportIssuePhotosCommand request, CancellationToken ct)
+    public async Task<Result<DriverSupportIssueMutationDto>> Handle(AddDriverSupportIssuePhotosCommand request, CancellationToken ct)
     {
         if (!user.IsAuthenticated || user.UserType != UserType.Driver || !user.UserId.HasValue)
-            return Task.FromResult<Result<DriverSupportIssueMutationDto>>(Error.Forbidden("DRIVER_SCOPE_REQUIRED", messages.GetMessage("driver_support_issue.forbidden")));
+            return Error.Forbidden("DRIVER_SCOPE_REQUIRED", messages.GetMessage("driver_support_issue.forbidden"));
+        if (!(await db.GetActiveAccountUserIdsAsync(new[] { user.UserId.Value }, ct)).Contains(user.UserId.Value))
+            return Error.Forbidden("DRIVER_ACCOUNT_INACTIVE", messages.GetMessage("driver.account_inactive"));
         if (request.StorageKeys is null || request.StorageKeys.Count == 0 || request.StorageKeys.Any(k => string.IsNullOrWhiteSpace(k) || k.Length > 500))
-            return Task.FromResult<Result<DriverSupportIssueMutationDto>>(Error.Validation("DRIVER_SUPPORT_PHOTOS_INVALID", messages.GetMessage("driver_support_issue.photos_invalid")));
-        return transactions.ExecuteResultAsync(ct2 => AttachAsync(request, ct2), ct);
+            return Error.Validation("DRIVER_SUPPORT_PHOTOS_INVALID", messages.GetMessage("driver_support_issue.photos_invalid"));
+        return await transactions.ExecuteResultAsync(ct2 => AttachAsync(request, ct2), ct);
     }
 
     private async Task<Result<DriverSupportIssueMutationDto>> AttachAsync(AddDriverSupportIssuePhotosCommand request, CancellationToken ct)
@@ -44,7 +48,12 @@ public sealed class AddDriverSupportIssuePhotosHandler : ICommandHandler<AddDriv
         if (records.Count != keys.Length || records.Any(x => x.ContentType is not ("image/jpeg" or "image/png" or "image/webp")
             || !IsDriverEvidenceKey(x.StorageKey)))
             return Error.Validation("DRIVER_SUPPORT_PHOTO_UPLOAD_INVALID", messages.GetMessage("driver_support_issue.photo_upload_invalid"));
-        foreach (var record in records) if (!await storage.ExistsAsync(record.StorageKey, ct)) return Error.Validation("DRIVER_SUPPORT_PHOTO_MISSING", messages.GetMessage("driver_support_issue.photo_missing"));
+        foreach (var record in records)
+        {
+            if (!await storage.ExistsAsync(record.StorageKey, ct)) return Error.Validation("DRIVER_SUPPORT_PHOTO_MISSING", messages.GetMessage("driver_support_issue.photo_missing"));
+            if ((await evidenceScans.ReadCleanAsync(record, ct)).Bytes is null)
+                return Error.Validation("DRIVER_SUPPORT_PHOTO_UPLOAD_INVALID", messages.GetMessage("driver_support_issue.photo_upload_invalid"));
+        }
         var existing = complaint.EvidencePhotos.Select(x => x.StoragePath).ToHashSet(StringComparer.Ordinal);
         var added = keys.Where(k => !existing.Contains(k)).ToArray();
         if (existing.Count + added.Length > 3) return Error.Validation("DRIVER_SUPPORT_PHOTO_LIMIT", messages.GetMessage("driver_support_issue.photo_limit"));
@@ -62,32 +71,20 @@ public sealed class AddDriverSupportIssuePhotosHandler : ICommandHandler<AddDriv
         return Result.Success(new DriverSupportIssueMutationDto(complaint.Id, DriverSupportIssueProjection.Bucket(complaint.Status, hasContactStage), complaint.EvidencePhotos.Select(x => MealMate.Application.Common.Storage.CatalogImageStorage.ToContentUrl(x.StoragePath) ?? string.Empty).ToArray()));
     }
     // The owned UploadFileRecord is matched by the original key before validating its folder.
-    // CDN providers may persist an HTTPS URL rather than a relative storage path.
     private static bool IsDriverEvidenceKey(string key)
     {
-        if (key.Any(char.IsWhiteSpace) || key.Contains('\\') || key.Contains('?') || key.Contains('#')) return false;
-        var path = key;
-        if (Uri.TryCreate(key, UriKind.Absolute, out var uri))
-        {
-            if (uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo)
-                || !Uri.IsWellFormedUriString(key, UriKind.Absolute)) return false;
-            // Read the original path: Uri.AbsolutePath canonicalizes away traversal segments.
-            var pathStart = key.IndexOf('/', key.IndexOf("://", StringComparison.Ordinal) + 3);
-            if (pathStart < 0) return false;
-            path = key[(pathStart + 1)..];
-        }
-        var segments = path.Split('/');
+        if (key.Any(char.IsWhiteSpace) || key.Contains('\\') || key.Contains('?') || key.Contains('#')
+            || Uri.TryCreate(key, UriKind.Absolute, out _)) return false;
+        var segments = key.Split('/');
         foreach (var segment in segments)
         {
             var decoded = Uri.UnescapeDataString(segment);
             if (decoded.Length == 0 || decoded is "." or ".." || decoded.Contains('/')
                 || decoded.Contains('\\') || decoded.Contains('%') || decoded.Any(char.IsControl)) return false;
         }
-        var offset = segments[0] == "uploads" ? 0 : 1;
-        return segments.Length > offset + 3 && segments[offset] == "uploads"
-            && segments[offset + 1] == "drivers"
-            && segments[offset + 2] is "issue-evidence" or "delivery"
-            && (offset == 0 || Uri.TryCreate(key, UriKind.Absolute, out _));
+        return segments.Length > 3 && segments[0] == "uploads"
+            && segments[1] == "drivers"
+            && segments[2] is "issue-evidence" or "delivery";
     }
     private Result<DriverSupportIssueMutationDto> NotFound() => Error.NotFound("DRIVER_SUPPORT_ISSUE_NOT_FOUND", messages.GetMessage("driver_support_issue.not_found"));
 }

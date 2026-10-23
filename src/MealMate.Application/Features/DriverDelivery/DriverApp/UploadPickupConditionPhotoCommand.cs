@@ -25,17 +25,26 @@ public sealed class UploadPickupConditionPhotoCommandHandler
     private readonly ICurrentUser _currentUser;
     private readonly IFileStorage _storage;
     private readonly ILocalizedMessageProvider _messages;
+    private readonly MealMate.Application.Common.Storage.SupportEvidenceScanService? _evidenceScans;
+    private readonly IApplicationTransactionExecutor? _transactions;
+    private readonly IApplicationLockManager? _locks;
 
     public UploadPickupConditionPhotoCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         IFileStorage storage,
-        ILocalizedMessageProvider messages)
+        ILocalizedMessageProvider messages,
+        MealMate.Application.Common.Storage.SupportEvidenceScanService? evidenceScans = null,
+        IApplicationTransactionExecutor? transactions = null,
+        IApplicationLockManager? locks = null)
     {
         _db = db;
         _currentUser = currentUser;
         _storage = storage;
         _messages = messages;
+        _evidenceScans = evidenceScans;
+        _transactions = transactions;
+        _locks = locks;
     }
 
     public async Task<Result<UploadPickupConditionPhotoResponseDto>> Handle(
@@ -51,12 +60,14 @@ public sealed class UploadPickupConditionPhotoCommandHandler
 
         var driver = await _db.DriverProfiles
             .AsNoTracking()
-            .FirstOrDefaultAsync(d => d.UserId == _currentUser.UserId.Value, cancellationToken);
+            .FirstOrDefaultAsync(d => d.UserId == _currentUser.UserId.Value && !d.IsDeleted, cancellationToken);
 
         if (driver is null)
         {
             return Error.NotFound("DRIVER_NOT_FOUND", _messages.GetMessage("DRIVER_NOT_FOUND", "Driver profile not found."));
         }
+        if (!(await _db.GetActiveAccountUserIdsAsync(new[] { driver.UserId }, cancellationToken)).Contains(driver.UserId))
+            return Error.Forbidden("DRIVER_ACCOUNT_INACTIVE", _messages.GetMessage("driver.account_inactive", "The driver account is not active."));
 
         if (string.IsNullOrWhiteSpace(request.ValidationToken))
         {
@@ -88,7 +99,8 @@ public sealed class UploadPickupConditionPhotoCommandHandler
         // Verify active assignment unchanged
         var activeAssignmentExists = await _db.DriverAssignments
             .AsNoTracking()
-            .AnyAsync(da => da.Id == validation.DriverAssignmentId && da.Status == "Active", cancellationToken);
+            .AnyAsync(da => da.Id == validation.DriverAssignmentId && da.DriverProfileId == driver.Id
+                && da.TripId == validation.TripId && da.Status == "Active", cancellationToken);
 
         if (!activeAssignmentExists)
         {
@@ -102,21 +114,26 @@ public sealed class UploadPickupConditionPhotoCommandHandler
             return Error.Validation("PHOTO_INVALID_TYPE", "Only JPEG, PNG, and WebP images are allowed.");
         }
 
-        if (request.ContentStream is null || request.ContentStream.Length == 0)
+        if (request.ContentStream is null)
         {
             return Error.Validation("PHOTO_REQUIRED", "Condition photo file stream is required.");
         }
 
-        if (request.ContentStream.Length > MaxFileSizeBytes)
+        // Buffer under the ingress limit before saving; request streams may not be seekable.
+        await using var boundedContent = new MemoryStream();
+        var copyBuffer = new byte[81920];
+        int copied;
+        while ((copied = await request.ContentStream.ReadAsync(copyBuffer, cancellationToken)) > 0)
         {
-            return Error.Validation("PHOTO_TOO_LARGE", "Condition photo must not exceed 10 MiB.");
+            if (boundedContent.Length + copied > MaxFileSizeBytes)
+                return Error.Validation("PHOTO_TOO_LARGE", "Condition photo must not exceed 10 MiB.");
+            await boundedContent.WriteAsync(copyBuffer.AsMemory(0, copied), cancellationToken);
         }
-
-        // Verify magic bytes signature
-        request.ContentStream.Position = 0;
-        var header = new byte[12];
-        var read = await request.ContentStream.ReadAsync(header.AsMemory(0, Math.Min(12, (int)request.ContentStream.Length)), cancellationToken);
-        request.ContentStream.Position = 0;
+        if (boundedContent.Length == 0)
+            return Error.Validation("PHOTO_REQUIRED", "Condition photo file stream is required.");
+        var contentBytes = boundedContent.ToArray();
+        var header = contentBytes.AsSpan(0, Math.Min(12, contentBytes.Length)).ToArray();
+        var read = header.Length;
 
         if (!IsValidImageSignature(header, read, contentType))
         {
@@ -124,12 +141,8 @@ public sealed class UploadPickupConditionPhotoCommandHandler
         }
 
         var folder = $"uploads/drivers/delivery/pickup-condition/{validation.TripId}/{validation.BoxId}";
-        var storedFile = await _storage.SaveAsync(request.ContentStream, request.FileName, contentType, folder, cancellationToken);
-
-        // Check if a previous unconfirmed photo existed for this validation; if so, replace it
-        var existingPhotos = await _db.PickupConditionPhotos
-            .Where(p => p.PickupValidationId == validation.Id && p.ConfirmedAtUtc == null && p.DeletedAtUtc == null)
-            .ToListAsync(cancellationToken);
+        await using var contentToSave = new MemoryStream(contentBytes, writable: false);
+        var storedFile = await _storage.SaveAsync(contentToSave, request.FileName, contentType, folder, cancellationToken);
 
         var nowUtc = DateTime.UtcNow;
         var photoRecord = new PickupConditionPhoto
@@ -145,35 +158,64 @@ public sealed class UploadPickupConditionPhotoCommandHandler
             UploadedAtUtc = nowUtc
         };
 
-        _db.PickupConditionPhotos.Add(photoRecord);
+        var uploadRecord = new MealMate.Domain.Common.UploadFileRecord
+        {
+            StorageKey = storedFile.StorageKey, FileName = Path.GetFileName(request.FileName),
+            ContentType = contentType, SizeBytes = storedFile.SizeBytes, Scope = "drivers",
+            Folder = "delivery", UploadedByUserId = _currentUser.UserId, UploadedAtUtc = nowUtc,
+        };
+        _db.UploadFileRecords.Add(uploadRecord);
         await _db.SaveChangesAsync(cancellationToken);
+        if (_evidenceScans is null)
+            return Error.Failure("UPLOAD_EVIDENCE_SCAN_FAILED", "Evidence scanning is unavailable.");
+        var scan = await _evidenceScans.ReadCleanAsync(uploadRecord, cancellationToken);
+        if (scan.Bytes is null || !MealMate.Application.Features.UnifiedSupport.SupportCaseService.HasValidSignature(scan.Bytes, contentType))
+            return Error.Failure("UPLOAD_EVIDENCE_SCAN_FAILED", "The condition photo could not be verified as clean.");
+        if (_transactions is null || _locks is null)
+            return Error.Failure("PICKUP_INFRASTRUCTURE_UNAVAILABLE", "Pickup photo confirmation requires transaction and lock support.");
 
-        // Safely clean up previous replaced unconfirmed files
-        foreach (var oldPhoto in existingPhotos)
+        var committed = await _transactions.ExecuteResultAsync(async ct =>
         {
-            try
-            {
-                await _storage.DeleteAsync(oldPhoto.StorageKey, cancellationToken);
-                oldPhoto.DeletedAtUtc = nowUtc;
-            }
-            catch
-            {
-                // Non-fatal cleanup log
-            }
-        }
-        if (existingPhotos.Count > 0)
-        {
-            await _db.SaveChangesAsync(cancellationToken);
-        }
+            await _locks.LockTripAsync(validation.TripId, ct);
+            var currentValidation = await _db.PickupValidations.FirstOrDefaultAsync(v => v.Id == validation.Id
+                && v.BoxId == request.BoxId && v.DriverProfileId == driver.Id && v.TokenHash == tokenHash, ct);
+            if (currentValidation is null || currentValidation.ExpiresAtUtc < DateTime.UtcNow
+                || currentValidation.ConsumedAtUtc.HasValue)
+                return Error.Conflict("VALIDATION_CHANGED", "The pickup validation changed while the photo was being verified.");
+            var assignmentStillActive = await _db.DriverAssignments.AsNoTracking().AnyAsync(da =>
+                da.Id == currentValidation.DriverAssignmentId && da.DriverProfileId == driver.Id
+                && da.TripId == currentValidation.TripId && da.Status == "Active", ct);
+            if (!assignmentStillActive)
+                return Error.Conflict("BOX_ASSIGNMENT_CHANGED", "Driver assignment for this trip has changed.");
 
-        return Result.Success(new UploadPickupConditionPhotoResponseDto(
-            BoxId: validation.BoxId,
-            StorageKey: storedFile.StorageKey,
-            ContentType: contentType,
-            SizeBytes: storedFile.SizeBytes,
-            UploadedAtUtc: nowUtc,
-            ScanStatus: "PhotoUploaded",
-            NextAction: "ConfirmPickup"));
+            var previous = await _db.PickupConditionPhotos
+                .Where(p => p.PickupValidationId == currentValidation.Id && p.ConfirmedAtUtc == null && p.DeletedAtUtc == null)
+                .ToListAsync(ct);
+            _db.PickupConditionPhotos.Add(photoRecord);
+            await _db.SaveChangesAsync(ct);
+
+            foreach (var oldPhoto in previous)
+            {
+                try
+                {
+                    await _storage.DeleteAsync(oldPhoto.StorageKey, ct);
+                    oldPhoto.DeletedAtUtc = nowUtc;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch { /* Cleanup failure does not invalidate the newly verified photo. */ }
+            }
+            if (previous.Count > 0) await _db.SaveChangesAsync(ct);
+            return Result.Success(new UploadPickupConditionPhotoResponseDto(
+                BoxId: currentValidation.BoxId, StorageKey: storedFile.StorageKey, ContentType: contentType,
+                SizeBytes: storedFile.SizeBytes, UploadedAtUtc: nowUtc, ScanStatus: "PhotoUploaded",
+                NextAction: "ConfirmPickup", ReadUrl: $"/api/v1/uploads/content?key={Uri.EscapeDataString(storedFile.StorageKey)}"));
+        }, cancellationToken);
+        if (!committed.IsSuccess)
+        {
+            try { await _storage.DeleteAsync(storedFile.StorageKey, cancellationToken); } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; } catch { }
+            return committed.Error;
+        }
+        return committed;
     }
 
     private static bool IsValidImageSignature(byte[] header, int read, string contentType)

@@ -22,6 +22,7 @@ using MealMate.Application.Features.DocumentTemplates;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using MealMate.Application.Features.ProgramsSubscriptions;
 using MealMate.Application.Features.RestaurantOrders;
+using MealMate.ApiTests.Support;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Common;
 using MealMate.Domain.DriverDelivery;
@@ -139,11 +140,14 @@ public sealed class TestPayzahPaymentService : IPaymentGatewayService
 public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
 {
     private MealMate.Testing.PostgresTestDatabase _container = null!;
+    private string? _supportStorageRoot;
     public WebApplicationFactory<Program> Factory { get; private set; } = null!;
     public TestPayzahPaymentService PaymentService { get; } = new();
     public TestDriverPushNotifier PushNotifier { get; } = new();
+    public SupportEvidenceTestScanner? EvidenceScannerOverride { get; private set; }
     public TestClock Clock { get; } = new();
     public string ConnectionString => _container.GetConnectionString();
+    public string SupportStorageRoot => _supportStorageRoot ?? throw new InvalidOperationException("Test support storage root is not initialized.");
 
     public async Task InitializeAsync()
     {
@@ -166,8 +170,16 @@ public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
                 builder.UseSetting("ConnectionStrings:MealMateDb", _container.GetConnectionString());
                 builder.UseSetting("Seed:Identity", "false");
                 builder.UseSetting("Email:SecretsEncryptionKey", Convert.ToBase64String(new byte[32]));
+                _supportStorageRoot = Path.Combine(Path.GetTempPath(), "mealmate-support-tests", Guid.NewGuid().ToString("N"));
+                builder.UseSetting("Storage:LocalRoot", _supportStorageRoot);
+                builder.UseSetting("Storage:DocumentEncryptionKey", Convert.ToBase64String(new byte[32]));
                 builder.ConfigureTestServices(services =>
                 {
+                    if (EvidenceScannerOverride is not null)
+                    {
+                        services.RemoveAll<IEvidenceMalwareScanner>();
+                        services.AddSingleton<IEvidenceMalwareScanner>(EvidenceScannerOverride);
+                    }
                     services.RemoveAll<IDateTimeProvider>();
                     services.AddSingleton<IDateTimeProvider>(Clock);
                     // Keep the container connection local to this host. A process-wide override
@@ -214,6 +226,15 @@ public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
         {
             await _container.DisposeAsync();
         }
+        if (_supportStorageRoot is not null)
+        {
+            var approvedRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "mealmate-support-tests"));
+            var resolvedTarget = Path.GetFullPath(_supportStorageRoot);
+            var targetLeaf = Path.GetFileName(resolvedTarget);
+            if (string.Equals(Path.GetDirectoryName(resolvedTarget), approvedRoot, StringComparison.OrdinalIgnoreCase)
+                && Guid.TryParseExact(targetLeaf, "N", out _) && Directory.Exists(resolvedTarget))
+                Directory.Delete(resolvedTarget, recursive: true);
+        }
     }
 
     public AppDbContext CreateDbContext()
@@ -234,6 +255,9 @@ public sealed class OrderLifecycleEndToEndFixture : IAsyncLifetime
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
         return client;
     }
+
+    public SupportEvidenceTestScanner EnableSupportEvidenceTestScanner()
+        => EvidenceScannerOverride ??= new SupportEvidenceTestScanner();
 }
 
 public sealed record FixtureEntities(

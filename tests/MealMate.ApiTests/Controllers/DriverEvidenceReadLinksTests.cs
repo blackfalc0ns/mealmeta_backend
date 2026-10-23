@@ -9,7 +9,9 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.DriverDelivery.DriverApp;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
+using MealMate.Application.Features.UnifiedSupport;
 using MealMate.Application.Features.Uploads;
+using MealMate.Domain.Common;
 using MealMate.Persistence;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -29,6 +31,7 @@ namespace MealMate.ApiTests.Controllers;
 public class DriverEvidenceReadLinksTests
 {
     private const string Key = "uploads/drivers/issue-evidence/evidence.webp";
+    private static readonly byte[] ValidWebp = [0x52, 0x49, 0x46, 0x46, 0x0c, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50];
 
     [Fact]
     public void WebApiRegistersGlobalFilterAndReadLinkDependencies()
@@ -69,11 +72,26 @@ public class DriverEvidenceReadLinksTests
         url.Should().Contain("readToken=");
         filtered.Http.Response.Headers.CacheControl.ToString().Should().Be("no-store");
 
-        var (controller, storage, db) = BuildReader(links, url);
+        var (controller, storage, db, evidenceScans, staffAccess) = BuildReader(links, url);
         await using (db)
         {
-            var result = await controller.Read(key, storage, db, default);
-            result.Should().BeOfType<FileStreamResult>();
+            var expectedFolder = key.StartsWith("uploads/drivers/delivery/", StringComparison.OrdinalIgnoreCase)
+                ? "delivery" : "issue-evidence";
+            db.UploadFileRecords.Add(new UploadFileRecord
+            {
+                StorageKey = key,
+                FileName = "evidence.webp",
+                ContentType = "image/webp",
+                SizeBytes = ValidWebp.Length,
+                Scope = "drivers",
+                Folder = expectedFolder,
+                UploadedByUserId = Guid.NewGuid(),
+                UploadedAtUtc = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+
+            var result = await controller.Read(key, storage, db, evidenceScans, staffAccess, default);
+            result.Should().BeOfType<FileContentResult>();
             controller.Response.Headers.CacheControl.ToString().Should().Be("no-store");
         }
     }
@@ -91,10 +109,23 @@ public class DriverEvidenceReadLinksTests
         if (invalidity == "expired") clock.Now += TimeSpan.FromMinutes(16);
         if (invalidity == "tampered") url += "changed";
         if (invalidity == "different-key") key = "uploads/drivers/issue-evidence/another.webp";
-        var (controller, storage, db) = BuildReader(links, url);
+        var (controller, storage, db, evidenceScans, staffAccess) = BuildReader(links, url);
         await using (db)
         {
-            (await controller.Read(key, storage, db, default)).Should().BeOfType<UnauthorizedResult>();
+            db.UploadFileRecords.Add(new UploadFileRecord
+            {
+                StorageKey = key,
+                FileName = "evidence.webp",
+                ContentType = "image/webp",
+                SizeBytes = ValidWebp.Length,
+                Scope = "drivers",
+                Folder = "issue-evidence",
+                UploadedByUserId = Guid.NewGuid(),
+                UploadedAtUtc = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+
+            (await controller.Read(key, storage, db, evidenceScans, staffAccess, default)).Should().BeOfType<UnauthorizedResult>();
             await storage.DidNotReceive().OpenReadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
         }
     }
@@ -148,14 +179,28 @@ public class DriverEvidenceReadLinksTests
         return (result, http);
     }
 
-    private static (UploadsController Controller, IFileStorage Storage, AppDbContext Db) BuildReader(DriverEvidenceReadLinks links, string url)
+    private static (UploadsController Controller, IFileStorage Storage, AppDbContext Db, SupportEvidenceScanService EvidenceScans, DriverEvidenceAccessService StaffAccess) BuildReader(DriverEvidenceReadLinks links, string url)
     {
         var storage = Substitute.For<IFileStorage>();
-        storage.OpenReadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(new MemoryStream(Encoding.UTF8.GetBytes("image bytes")));
+        storage.OpenReadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new MemoryStream(ValidWebp));
         var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options, Substitute.For<IDomainEventDispatcher>());
         var http = new DefaultHttpContext { RequestServices = new ServiceCollection().AddSingleton(links).BuildServiceProvider() };
         http.Request.QueryString = new QueryString(new Uri("https://api.local" + url).Query);
-        return (new UploadsController { ControllerContext = new ControllerContext { HttpContext = http } }, storage, db);
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(false);
+
+        var scanner = Substitute.For<IEvidenceMalwareScanner>();
+        scanner.ScanAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns(new EvidenceScanResult(EvidenceScanVerdict.Clean, "clamd", FailureCode: "clean"));
+        var receipts = Substitute.For<ISupportEvidenceScanReceiptStore>();
+        receipts.GetOrScanAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<long>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<Func<CancellationToken, Task<EvidenceScanResult>>>(), Arg.Any<CancellationToken>())
+            .Returns(new EvidenceScanResult(EvidenceScanVerdict.Clean, "clamd", FailureCode: "clean"));
+        var evidenceScans = new SupportEvidenceScanService(storage, scanner, receipts);
+        var staffAccess = new DriverEvidenceAccessService(db, currentUser);
+
+        return (new UploadsController { ControllerContext = new ControllerContext { HttpContext = http } }, storage, db, evidenceScans, staffAccess);
     }
 
     private sealed class Clock : TimeProvider

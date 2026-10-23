@@ -82,6 +82,8 @@ public static class DependencyInjection
         {
             client.Timeout = TimeSpan.FromSeconds(30);
         });
+        services.AddOptions<ClamdEvidenceOptions>().Bind(configuration.GetSection(ClamdEvidenceOptions.SectionName));
+        services.AddScoped<IEvidenceMalwareScanner, ClamdEvidenceMalwareScanner>();
         services.AddScoped<IFileStorage, RoutingFileStorage>();
 
         services
@@ -138,6 +140,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IFcmMessagingClient, FirebaseFcmMessagingClient>();
         services.AddScoped<MediatR.INotificationHandler<MealMate.Application.Common.Outbox.OutboxLifecycleNotification>, DeliveryManagerSupportPushHandler>();
+        services.AddScoped<MediatR.INotificationHandler<MealMate.Application.Common.Outbox.OutboxLifecycleNotification>, SupportCasePushHandler>();
         services.AddScoped<ICustomerPushNotifier, FirebaseCustomerPushNotifier>();
         services.AddScoped<IDriverPushNotifier, FirebaseDriverPushNotifier>();
         services.AddScoped<ICustomerPushTestService, CustomerPushTestService>();

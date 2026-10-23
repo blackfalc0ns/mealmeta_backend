@@ -76,6 +76,7 @@ public sealed class DriverSupportIssueQueries(IAppDbContext db, ICurrentUser use
     private async Task<Guid?> DriverProfileIdAsync(CancellationToken ct)
     {
         if (!user.IsAuthenticated || user.UserType != UserType.Driver || !user.UserId.HasValue) return null;
+        if (!(await db.GetActiveAccountUserIdsAsync(new[] { user.UserId.Value }, ct)).Contains(user.UserId.Value)) return null;
         return await db.DriverProfiles.AsNoTracking().Where(d => d.UserId == user.UserId.Value && !d.IsDeleted).Select(d => (Guid?)d.Id).FirstOrDefaultAsync(ct);
     }
     private async Task<Dictionary<Guid, TripStop?>> ResolveStopsMapAsync(List<Complaint> complaints, CancellationToken ct)

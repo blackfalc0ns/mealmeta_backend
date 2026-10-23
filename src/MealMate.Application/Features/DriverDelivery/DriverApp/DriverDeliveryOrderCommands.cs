@@ -104,6 +104,7 @@ public sealed class DriverDeliveryOrderCommandHandlers
     private readonly IFileStorage? _fileStorage;
     private readonly IApplicationTransactionExecutor? _transactions;
     private readonly IApplicationLockManager? _locks;
+    private readonly MealMate.Application.Common.Storage.SupportEvidenceScanService? _evidenceScans;
 
     /// <summary>Text cap matching the 250-character counter on screens 08.01/08.02.</summary>
     private const int MaxIssueTextLength = 250;
@@ -119,7 +120,8 @@ public sealed class DriverDeliveryOrderCommandHandlers
         ICustomerPushNotifier? customerPushNotifier = null,
         IFileStorage? fileStorage = null,
         IApplicationTransactionExecutor? transactions = null,
-        IApplicationLockManager? locks = null)
+        IApplicationLockManager? locks = null,
+        MealMate.Application.Common.Storage.SupportEvidenceScanService? evidenceScans = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -129,6 +131,7 @@ public sealed class DriverDeliveryOrderCommandHandlers
         _fileStorage = fileStorage;
         _transactions = transactions;
         _locks = locks;
+        _evidenceScans = evidenceScans;
     }
 
     public Task<Result<PickupBoxResponseDto>> Handle(PickupBoxCommand request, CancellationToken cancellationToken)
@@ -192,6 +195,18 @@ public sealed class DriverDeliveryOrderCommandHandlers
             codeToVerify = request.BarcodeValue;
         }
 
+        var driverId = request.DriverId;
+        if (!driverId.HasValue && _currentUser.UserId.HasValue)
+        {
+            driverId = await _db.DriverProfiles.AsNoTracking()
+                .Where(d => d.UserId == _currentUser.UserId.Value && !d.IsDeleted)
+                .Select(d => (Guid?)d.Id).FirstOrDefaultAsync(cancellationToken);
+        }
+        if (!driverId.HasValue || string.IsNullOrWhiteSpace(request.ConditionPhotoStorageKey))
+            return Error.Forbidden("Orders.ProofPhotoForbidden", _messages.IsArabic() ? "تعذر التحقق من حساب السائق أو صورة الحالة." : "The driver account or condition photo could not be verified.");
+        var photoError = await ValidateProofPhotoAsync(request.ConditionPhotoStorageKey, driverId, _messages.IsArabic(), cancellationToken);
+        if (photoError is not null) return photoError.Error;
+
         // Validate code matches the box order code or subscription day
         var cleanInputCode = codeToVerify.Trim().TrimStart('#');
         var cleanOrderCode = stop.OrderCode?.Trim().TrimStart('#') ?? string.Empty;
@@ -238,22 +253,13 @@ public sealed class DriverDeliveryOrderCommandHandlers
             stop.Trip.StartedAtUtc ??= now;
         }
 
-        var driverId = request.DriverId;
-        if (!driverId.HasValue && _currentUser.UserId.HasValue)
-        {
-            driverId = await _db.DriverProfiles
-                .Where(d => d.UserId == _currentUser.UserId.Value)
-                .Select(d => d.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
-
         // Record pickup scan with barcode/manual-code, documented condition photo, and manual entry audit tracking
         var scan = new PickupScan
         {
             TripId = stop.TripId,
             OrderId = stop.DailyOrderId,
             SubscriptionDayId = stop.SubscriptionDayId,
-            DriverProfileId = driverId ?? Guid.Empty,
+            DriverProfileId = driverId.Value,
             BarcodeValue = cleanInputCode,
             PhotoPath = request.ConditionPhotoStorageKey,
             Latitude = request.Latitude,
@@ -660,6 +666,10 @@ public sealed class DriverDeliveryOrderCommandHandlers
                 : "The proof photo key does not reference a real uploaded file. Upload the photo through the approved upload endpoint first.");
         }
 
+        if (record.Scope != "drivers" || record.Folder != "delivery"
+            || !proofPhotoStorageKey.StartsWith("uploads/drivers/delivery/", StringComparison.Ordinal))
+            return Error.Validation("Orders.ProofPhotoNotFound", isAr ? "الغرض من صورة الإثبات غير صالح." : "The proof photo purpose is invalid.");
+
         if (driverId.HasValue)
         {
             var ownedByDriver = record.UploadedByUserId.HasValue && await _db.DriverProfiles
@@ -688,6 +698,11 @@ public sealed class DriverDeliveryOrderCommandHandlers
                 ? "ملف صورة الإثبات لم يعد موجودًا في التخزين. أعد رفع الصورة."
                 : "The proof photo file is no longer available in storage. Please re-upload the photo.");
         }
+        if (_evidenceScans is null) return Error.Failure("UPLOAD_EVIDENCE_SCAN_FAILED", "Evidence scanning is unavailable.");
+        var scan = await _evidenceScans.ReadCleanAsync(record, cancellationToken);
+        if (scan.Bytes is null || !MealMate.Application.Features.UnifiedSupport.SupportCaseService.HasValidSignature(
+                scan.Bytes, contentType == "image/jpg" ? "image/jpeg" : contentType))
+            return Error.Validation("Orders.ProofPhotoInvalidType", isAr ? "صورة الإثبات غير صالحة." : "The proof photo is invalid.");
 
         return null;
     }
@@ -1516,6 +1531,10 @@ public sealed class DriverDeliveryOrderCommandHandlers
                 : "The evidence photo key does not reference a real uploaded file. Upload the photo through the approved upload endpoint first.");
         }
 
+        if (record.Scope != "drivers" || record.Folder != "issue-evidence"
+            || !photoKey.StartsWith("uploads/drivers/issue-evidence/", StringComparison.Ordinal))
+            return Error.Validation(MessageCodes.DriverIssues.Report.PhotoNotFound, isAr ? "الغرض من صورة البلاغ غير صالح." : "The evidence photo purpose is invalid.");
+
         if (driverId.HasValue)
         {
             var ownedByDriver = record.UploadedByUserId.HasValue && await _db.DriverProfiles
@@ -1544,6 +1563,11 @@ public sealed class DriverDeliveryOrderCommandHandlers
                 ? "ملف صورة البلاغ لم يعد موجودًا في التخزين. أعد رفع الصورة."
                 : "The evidence photo file is no longer available in storage. Please re-upload the photo.");
         }
+        if (_evidenceScans is null) return Error.Failure("UPLOAD_EVIDENCE_SCAN_FAILED", "Evidence scanning is unavailable.");
+        var scan = await _evidenceScans.ReadCleanAsync(record, cancellationToken);
+        if (scan.Bytes is null || !MealMate.Application.Features.UnifiedSupport.SupportCaseService.HasValidSignature(
+                scan.Bytes, contentType == "image/jpg" ? "image/jpeg" : contentType))
+            return Error.Validation(MessageCodes.DriverIssues.Report.PhotoInvalidType, isAr ? "صورة البلاغ غير صالحة." : "The evidence photo is invalid.");
 
         return null;
     }

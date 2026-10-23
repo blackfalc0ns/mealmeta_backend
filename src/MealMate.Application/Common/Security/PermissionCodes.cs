@@ -58,6 +58,12 @@ public static class PermissionCodes
     public const string CustomersSuspend = "customers.suspend";
     public const string CustomersWalletsManage = "customers.wallets.manage";
 
+    // Unified support
+    public const string SupportView = "support:view";
+    public const string SupportReply = "support.reply";
+    public const string SupportManage = "support.manage";
+    public const string SupportInternal = "support.internal";
+
     // Settings
     public const string SettingsManage = "settings.manage";
 
@@ -135,6 +141,10 @@ public static class PermissionCodes
         (CustomersView, "View customers", "عرض العملاء", Module),
         (CustomersSuspend, "Suspend customers", "إيقاف العملاء", Module),
         (CustomersWalletsManage, "Manage customer wallets", "إدارة محافظ العملاء", Module),
+        (SupportView, "View support cases", "عرض حالات الدعم", Module),
+        (SupportReply, "Reply to support cases", "الرد على حالات الدعم", Module),
+        (SupportManage, "Manage support cases", "إدارة حالات الدعم", Module),
+        (SupportInternal, "Write internal support notes", "كتابة ملاحظات الدعم الداخلية", Module),
         (SettingsManage, "Manage system settings", "إدارة إعدادات النظام", Module),
         (ProgramsView, "View nutrition programs", "عرض البرامج الغذائية", ModulePrograms),
         (ProgramsManage, "Manage nutrition programs", "إدارة البرامج الغذائية", ModulePrograms),

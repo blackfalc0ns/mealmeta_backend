@@ -47,19 +47,22 @@ public sealed class DriverOfflineSyncCommandHandler
     private readonly ILocalizedMessageProvider _messages;
     private readonly IApplicationTransactionExecutor? _transactions;
     private readonly IApplicationLockManager? _locks;
+    private readonly MealMate.Application.Common.Storage.SupportEvidenceScanService? _evidenceScans;
 
     public DriverOfflineSyncCommandHandler(
         IAppDbContext db,
         ICurrentUser currentUser,
         ILocalizedMessageProvider messages,
         IApplicationTransactionExecutor? transactions = null,
-        IApplicationLockManager? locks = null)
+        IApplicationLockManager? locks = null,
+        MealMate.Application.Common.Storage.SupportEvidenceScanService? evidenceScans = null)
     {
         _db = db;
         _currentUser = currentUser;
         _messages = messages;
         _transactions = transactions;
         _locks = locks;
+        _evidenceScans = evidenceScans;
     }
 
     public async Task<Result<DriverOfflineSyncResponseDto>> Handle(
@@ -134,6 +137,12 @@ public sealed class DriverOfflineSyncCommandHandler
                 {
                     case "pickup":
                     case "pickupscan":
+                        if (!await ValidateOfflineEvidenceAsync(item.PhotoStorageKey, driverId, cancellationToken))
+                        {
+                            results.Add(new OfflineSyncItemResultDto(item.ClientActionId, item.BoxId, item.ActionType, false,
+                                "A clean owned delivery evidence upload is required."));
+                            break;
+                        }
                         if (stop.Status == TripStopStatus.ReturnedToKitchen || stop.Status == TripStopStatus.Failed)
                         {
                             results.Add(new OfflineSyncItemResultDto(item.ClientActionId, item.BoxId, item.ActionType, false, "Stop cannot be reopened."));
@@ -144,11 +153,12 @@ public sealed class DriverOfflineSyncCommandHandler
                             stop.Status = TripStopStatus.PickedUp;
                             _db.PickupScans.Add(new PickupScan
                             {
+                                TripId = stop.TripId,
                                 OrderId = stop.DailyOrderId,
                                 SubscriptionDayId = stop.SubscriptionDayId,
                                 DriverProfileId = driverId,
                                 BarcodeValue = item.BarcodeValue ?? stop.OrderCode ?? "PICKED_UP",
-                                PhotoPath = item.PhotoStorageKey ?? "offline_sync_photo.jpg",
+                                PhotoPath = item.PhotoStorageKey!,
                                 Latitude = item.Latitude,
                                 Longitude = item.Longitude,
                                 ScannedAtUtc = eventTime
@@ -160,6 +170,12 @@ public sealed class DriverOfflineSyncCommandHandler
                     case "deliver":
                     case "delivery":
                     case "deliveryconfirmation":
+                        if (!await ValidateOfflineEvidenceAsync(item.PhotoStorageKey, driverId, cancellationToken))
+                        {
+                            results.Add(new OfflineSyncItemResultDto(item.ClientActionId, item.BoxId, item.ActionType, false,
+                                "A clean owned delivery evidence upload is required."));
+                            break;
+                        }
                         if (stop.Status == TripStopStatus.ReturnedToKitchen || stop.Status == TripStopStatus.Failed)
                         {
                             results.Add(new OfflineSyncItemResultDto(item.ClientActionId, item.BoxId, item.ActionType, false, "Stop cannot be reopened."));
@@ -176,7 +192,7 @@ public sealed class DriverOfflineSyncCommandHandler
                                 SubscriptionDayId = stop.SubscriptionDayId,
                                 DriverProfileId = driverId,
                                 BarcodeValue = item.BarcodeValue ?? stop.OrderCode ?? "DELIVERED",
-                                PhotoPath = item.PhotoStorageKey ?? "offline_delivery_photo.jpg",
+                                PhotoPath = item.PhotoStorageKey!,
                                 Latitude = item.Latitude,
                                 Longitude = item.Longitude,
                                 ScannedAtUtc = eventTime
@@ -208,6 +224,7 @@ public sealed class DriverOfflineSyncCommandHandler
                         break;
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 results.Add(new OfflineSyncItemResultDto(
@@ -231,5 +248,20 @@ public sealed class DriverOfflineSyncCommandHandler
             Results: results,
             SyncedAtUtc: now
         ));
+    }
+
+    private async Task<bool> ValidateOfflineEvidenceAsync(string? key, Guid driverId, CancellationToken ct)
+    {
+        if (_evidenceScans is null || string.IsNullOrWhiteSpace(key)
+            || !key.StartsWith("uploads/drivers/delivery/", StringComparison.Ordinal)) return false;
+        var driverUserId = await _db.DriverProfiles.AsNoTracking().Where(x => x.Id == driverId && !x.IsDeleted)
+            .Select(x => (Guid?)x.UserId).SingleOrDefaultAsync(ct);
+        if (driverUserId is null) return false;
+        var record = await _db.UploadFileRecords.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.StorageKey == key, ct);
+        if (record is null || record.UploadedByUserId != driverUserId || record.Scope != "drivers"
+            || record.Folder != "delivery" || record.ContentType is not ("image/jpeg" or "image/png" or "image/webp")) return false;
+        var scan = await _evidenceScans.ReadCleanAsync(record, ct);
+        return scan.Bytes is not null && MealMate.Application.Features.UnifiedSupport.SupportCaseService.HasValidSignature(scan.Bytes, record.ContentType);
     }
 }

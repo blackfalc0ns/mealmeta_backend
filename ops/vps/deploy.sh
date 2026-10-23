@@ -19,12 +19,16 @@ fi
 # Every build uses a fresh directory, so a failed build is never promoted.
 release="$(mktemp -d "$base/releases/$commit.XXXXXX")"
 chown mealmate-deploy:mealmate "$release"
-as_deployer mkdir "$release/source" "$release/app"
+as_deployer mkdir "$release/source" "$release/app" "$release/worker"
 as_deployer git --git-dir="$repo" archive "$commit" | as_deployer tar -x -C "$release/source"
 as_deployer dotnet publish "$release/source/src/MealMate.Api/MealMate.Api.csproj" \
   --configuration Release --output "$release/app" --nologo \
   -p:DebugType=None -p:DebugSymbols=false
 test -s "$release/app/MealMate.Api.dll"
+as_deployer dotnet publish "$release/source/src/MealMate.Worker/MealMate.Worker.csproj" \
+  --configuration Release --output "$release/worker" --nologo \
+  -p:DebugType=None -p:DebugSymbols=false
+test -s "$release/worker/MealMate.Worker.dll"
 chmod -R g+rX "$release"
 
 # Keep runtime data outside release directories.
@@ -36,14 +40,20 @@ for directory in uploads logs; do
 done
 
 previous="$(readlink "$base/current" || true)"
+previous_worker="$(readlink "$base/worker-current" || true)"
+worker_enabled=0
+if systemctl cat mealmate-support-worker.service >/dev/null 2>&1; then worker_enabled=1; fi
 # Preserve the database before startup can apply pending EF migrations.
 backup="$base/backups/pre-$commit-$(date -u +%Y%m%dT%H%M%SZ).dump"
 runuser -u postgres -- pg_dump --format=custom mealmate_db > "$backup"
 test -s "$backup"
 chmod 600 "$backup"
+if [[ "$worker_enabled" == 1 ]]; then systemctl stop mealmate-support-worker.service || true; fi
 
 ln -s "$release/app" "$base/current.next"
 mv -Tf "$base/current.next" "$base/current"
+ln -s "$release/worker" "$base/worker-current.next"
+mv -Tf "$base/worker-current.next" "$base/worker-current"
 systemctl restart mealmate-api.service
 ready=0
 for attempt in $(seq 1 60); do
@@ -57,13 +67,24 @@ done
 if [[ "$ready" != 1 ]]; then
   echo "Readiness failed for $commit; database backup: $backup"
   systemctl stop mealmate-api.service
+  if [[ "$worker_enabled" == 1 ]]; then systemctl stop mealmate-support-worker.service || true; fi
   if [[ -n "$previous" ]]; then
     ln -s "$previous" "$base/current.rollback"
     mv -Tf "$base/current.rollback" "$base/current"
     systemctl start mealmate-api.service
+    if [[ "$worker_enabled" == 1 && -n "$previous_worker" ]]; then
+      ln -s "$previous_worker" "$base/worker-current.rollback"
+      mv -Tf "$base/worker-current.rollback" "$base/worker-current"
+      systemctl start mealmate-support-worker.service
+    fi
     echo "Previous application release restored; database schema was not rolled back."
   fi
   exit 1
+fi
+if [[ "$worker_enabled" == 1 ]]; then
+  systemctl restart mealmate-support-worker.service
+  sleep 2
+  systemctl is-active --quiet mealmate-support-worker.service || { echo "Support worker failed after API readiness; inspect service logs."; exit 1; }
 fi
 printf '%s\n' "$commit" > "$base/deployed-commit"
 echo "Deployed $commit; readiness passed."

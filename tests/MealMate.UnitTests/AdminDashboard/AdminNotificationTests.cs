@@ -49,7 +49,7 @@ public sealed class AdminNotificationTests
             });
         await db.SaveChangesAsync();
 
-        var handler = new GetAdminNotificationsQueryHandler(db);
+        var handler = new GetAdminNotificationsQueryHandler(db, CreateAdminUser());
         var result = await handler.Handle(new GetAdminNotificationsQuery(10), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
@@ -76,7 +76,7 @@ public sealed class AdminNotificationTests
         db.AdminNotifications.Add(notif);
         await db.SaveChangesAsync();
 
-        var handler = new MarkAdminNotificationReadCommandHandler(db);
+        var handler = new MarkAdminNotificationReadCommandHandler(db, CreateAdminUser());
         var result = await handler.Handle(new MarkAdminNotificationReadCommand(notif.Id), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
@@ -94,7 +94,7 @@ public sealed class AdminNotificationTests
             new AdminNotification { TitleAr = "N2", TitleEn = "N2", IsRead = false, SentAtUtc = DateTime.UtcNow });
         await db.SaveChangesAsync();
 
-        var handler = new MarkAllAdminNotificationsReadCommandHandler(db);
+        var handler = new MarkAllAdminNotificationsReadCommandHandler(db, CreateAdminUser());
         var result = await handler.Handle(new MarkAllAdminNotificationsReadCommand(), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
@@ -243,6 +243,15 @@ public sealed class AdminNotificationTests
 
         var otherUnread = await db.RestaurantNotifications.CountAsync(x => x.UserId == otherUserId && !x.IsRead);
         otherUnread.Should().Be(1);
+    }
+
+    private static ICurrentUser CreateAdminUser()
+    {
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+        currentUser.UserId.Returns(Guid.NewGuid());
+        currentUser.UserType.Returns(UserType.Admin);
+        return currentUser;
     }
 }
 

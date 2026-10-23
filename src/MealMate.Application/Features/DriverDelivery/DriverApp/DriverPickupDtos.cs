@@ -49,7 +49,8 @@ public sealed record DriverPickupBoxItemDto(
     string ScanStatusText, // "لم يتم المسح", "تم المسح", "تالف", "مفقود"
     bool IsScanned,
     DateTime? ScannedAtUtc,
-    string? ConditionPhotoStorageKey);
+    string? ConditionPhotoStorageKey,
+    string? ConditionPhotoReadUrl = null);
 
 public sealed record ValidatePickupBarcodeResponse(
     bool IsValid,

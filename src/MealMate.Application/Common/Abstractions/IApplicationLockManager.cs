@@ -42,6 +42,9 @@ public interface IApplicationLockManager
     Task LockSupportHandoverAsync(Guid handoverId, CancellationToken cancellationToken = default);
     Task LockDriverAsync(Guid driverProfileId, CancellationToken cancellationToken = default);
     Task LockSupportHandoverKeyAsync(Guid userId, string idempotencyKey, CancellationToken cancellationToken = default);
+    Task LockSupportCaseAsync(Guid caseId, CancellationToken cancellationToken = default);
+    Task LockSupportEvidenceUploadAsync(Guid uploadFileRecordId, CancellationToken cancellationToken = default);
+    Task LockSupportTimingPolicyCatalogAsync(CancellationToken cancellationToken = default);
     Task LockSupportComplaintAsync(Guid complaintId, CancellationToken cancellationToken = default);
     Task LockFinancialRuleScopeAsync(Guid legalEntityId, string ruleKey, RuleScopeType scopeType, Guid? scopeEntityId, CancellationToken cancellationToken = default) => Task.CompletedTask;
 

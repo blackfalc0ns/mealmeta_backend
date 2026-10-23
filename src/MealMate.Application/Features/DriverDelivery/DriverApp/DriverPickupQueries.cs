@@ -222,7 +222,8 @@ public sealed class DriverPickupQueryHandlers
                 ScanStatusText: scanText,
                 IsScanned: isScanned,
                 ScannedAtUtc: scan?.ScannedAtUtc,
-                ConditionPhotoStorageKey: scan?.PhotoPath
+                ConditionPhotoStorageKey: scan?.PhotoPath,
+                ConditionPhotoReadUrl: string.IsNullOrWhiteSpace(scan?.PhotoPath) ? null : $"/api/v1/uploads/content?key={Uri.EscapeDataString(scan.PhotoPath)}"
             ));
         }
 
@@ -258,6 +259,13 @@ public sealed class DriverPickupQueryHandlers
         ));
     }
 
-    private Task<DriverProfile?> ResolveDriverAsync(Guid? driverId, CancellationToken cancellationToken)
-        => DriverResolutionHelper.ResolveDriverAsync(_db, _currentUser, driverId, cancellationToken);
+    private async Task<DriverProfile?> ResolveDriverAsync(Guid? requestedDriverId, CancellationToken cancellationToken)
+    {
+        if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue) return null;
+        var driver = await _db.DriverProfiles.AsNoTracking().SingleOrDefaultAsync(
+            d => d.UserId == _currentUser.UserId.Value && !d.IsDeleted, cancellationToken);
+        if (driver is null || requestedDriverId.HasValue && requestedDriverId != driver.Id
+            || !(await _db.GetActiveAccountUserIdsAsync(new[] { driver.UserId }, cancellationToken)).Contains(driver.UserId)) return null;
+        return driver;
+    }
 }

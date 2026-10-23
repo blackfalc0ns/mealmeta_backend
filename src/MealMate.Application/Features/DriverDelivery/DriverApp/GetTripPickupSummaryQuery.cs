@@ -45,6 +45,8 @@ public sealed class GetTripPickupSummaryQueryHandler
         {
             return Error.NotFound("DRIVER_NOT_FOUND", _messages.GetMessage("DRIVER_NOT_FOUND", "Driver profile not found."));
         }
+        if (driver.IsDeleted || !(await _db.GetActiveAccountUserIdsAsync(new[] { driver.UserId }, cancellationToken)).Contains(driver.UserId))
+            return Error.Forbidden("DRIVER_ACCOUNT_INACTIVE", _messages.GetMessage("driver.account_inactive", "The driver account is not active."));
 
         var trip = await _db.Trips
             .AsNoTracking()

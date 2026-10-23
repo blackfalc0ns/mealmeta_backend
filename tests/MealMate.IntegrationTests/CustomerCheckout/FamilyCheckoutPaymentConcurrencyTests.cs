@@ -1166,6 +1166,12 @@ public sealed class FamilyCheckoutPaymentConcurrencyTests : IAsyncLifetime
             => inner.LockDriverAsync(driverProfileId, cancellationToken);
         public Task LockSupportHandoverKeyAsync(Guid userId, string idempotencyKey, CancellationToken cancellationToken = default)
             => inner.LockSupportHandoverKeyAsync(userId, idempotencyKey, cancellationToken);
+        public Task LockSupportCaseAsync(Guid caseId, CancellationToken cancellationToken = default)
+            => inner.LockSupportCaseAsync(caseId, cancellationToken);
+        public Task LockSupportEvidenceUploadAsync(Guid uploadFileRecordId, CancellationToken cancellationToken = default)
+            => inner.LockSupportEvidenceUploadAsync(uploadFileRecordId, cancellationToken);
+        public Task LockSupportTimingPolicyCatalogAsync(CancellationToken cancellationToken = default)
+            => inner.LockSupportTimingPolicyCatalogAsync(cancellationToken);
         public Task LockSupportComplaintAsync(Guid complaintId, CancellationToken cancellationToken = default)
             => inner.LockSupportComplaintAsync(complaintId, cancellationToken);
         public Task LockPickupBoxAsync(Guid subscriptionDayId, CancellationToken cancellationToken = default)

@@ -30,7 +30,8 @@ public sealed record UploadPickupConditionPhotoResponseDto(
     long SizeBytes,
     DateTime UploadedAtUtc,
     string ScanStatus,
-    string NextAction)
+    string NextAction,
+    string? ReadUrl = null)
 {
     public string ConditionPhotoStorageKey => StorageKey;
 }

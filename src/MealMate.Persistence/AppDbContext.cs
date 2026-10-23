@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using MealMate.Application.Common.Abstractions;
+using MealMate.Application.Common.Models;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.CentralAccounting;
@@ -80,6 +81,39 @@ public sealed class AppDbContext
             .Where(user => userIds.Contains(user.Id) && user.AccountStatus == MealMate.Domain.Enums.AccountStatus.Active)
             .Select(user => user.Id)
             .ToHashSetAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SupportOperatorCandidate>> GetActiveSupportOperatorCandidatesAsync(CancellationToken cancellationToken)
+    {
+        var users = await Users.AsNoTracking()
+            .Where(user => user.UserType == MealMate.Domain.Enums.UserType.Admin
+                && user.AccountStatus == MealMate.Domain.Enums.AccountStatus.Active)
+            .Select(user => user.Id).ToArrayAsync(cancellationToken);
+        if (users.Length == 0) return [];
+
+        var roleRows = await (from userRole in UserRoles.AsNoTracking()
+                              join role in Roles.AsNoTracking() on userRole.RoleId equals role.Id
+                              where users.Contains(userRole.UserId)
+                              select new { userRole.UserId, RoleName = role.Name! })
+            .ToListAsync(cancellationToken);
+        var permissionRows = await (from userRole in UserRoles.AsNoTracking()
+                                    join rolePermission in RolePermissions.AsNoTracking() on userRole.RoleId equals rolePermission.RoleId
+                                    join permission in Permissions.AsNoTracking() on rolePermission.PermissionId equals permission.Id
+                                    where users.Contains(userRole.UserId) && permission.IsActive && !permission.IsDeleted
+                                    select new { userRole.UserId, permission.Code })
+            .Distinct().ToListAsync(cancellationToken);
+        var scopeRows = await (from userScope in UserScopes.AsNoTracking()
+                               join scope in AccessScopes.AsNoTracking() on userScope.AccessScopeId equals scope.Id
+                               where users.Contains(userScope.UserId) && scope.IsActive && !scope.IsDeleted
+                               select new { userScope.UserId, Scope = new SupportOperatorScope(scope.Id, scope.ScopeType,
+                                   scope.CountryId, scope.RegionId, scope.RestaurantId, scope.EntityId, scope.EntityType, scope.TenantId) })
+            .ToListAsync(cancellationToken);
+
+        return users.Select(userId => new SupportOperatorCandidate(userId, MealMate.Domain.Enums.UserType.Admin,
+            roleRows.Where(row => row.UserId == userId).Select(row => row.RoleName).ToHashSet(StringComparer.OrdinalIgnoreCase),
+            permissionRows.Where(row => row.UserId == userId).Select(row => row.Code).ToHashSet(StringComparer.Ordinal),
+            scopeRows.Where(row => row.UserId == userId).Select(row => row.Scope).ToArray()))
+            .ToArray();
     }
 
     public async Task<IReadOnlySet<Guid>> GetDeliveryManagerUserIdsAsync(Guid restaurantId, CancellationToken cancellationToken)
@@ -395,6 +429,21 @@ public sealed class AppDbContext
 
     // â”€â”€ Voice Calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public DbSet<CallSession> CallSessions => Set<CallSession>();
+    public DbSet<SupportCase> SupportCases => Set<SupportCase>();
+    public DbSet<SupportCaseMessage> SupportCaseMessages => Set<SupportCaseMessage>();
+    public DbSet<SupportCaseTask> SupportCaseTasks => Set<SupportCaseTask>();
+    public DbSet<SupportCaseLink> SupportCaseLinks => Set<SupportCaseLink>();
+    public DbSet<SupportCaseEvent> SupportCaseEvents => Set<SupportCaseEvent>();
+    public DbSet<SupportTimingPolicy> SupportTimingPolicies => Set<SupportTimingPolicy>();
+    public DbSet<SupportTimingRule> SupportTimingRules => Set<SupportTimingRule>();
+    public DbSet<SupportCaseTimingCycle> SupportCaseTimingCycles => Set<SupportCaseTimingCycle>();
+    public DbSet<SupportEvidenceScanReceipt> SupportEvidenceScanReceipts => Set<SupportEvidenceScanReceipt>();
+
+    public void MarkSupportCaseModified(SupportCase supportCase)
+    {
+        Entry(supportCase).Property(x => x.ModifiedAtUtc).IsModified = true;
+    }
+
 
     public DbSet<VoiceCallDeviceSession> VoiceCallDeviceSessions => Set<VoiceCallDeviceSession>();
 
@@ -626,4 +675,3 @@ public sealed class AppDbContext
         }
     }
 }
-

@@ -1,3 +1,4 @@
+using MealMate.Application.Common.Models;
 using MealMate.Domain.AdminDashboard;
 using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.Advertising;
@@ -23,6 +24,7 @@ namespace MealMate.Application.Common.Abstractions;
 /// </summary>
 public interface IAppDbContext
 {
+    Task<IReadOnlyList<SupportOperatorCandidate>> GetActiveSupportOperatorCandidatesAsync(CancellationToken cancellationToken);
     Task<IReadOnlySet<Guid>> GetActiveAccountUserIdsAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken);
 
     /// <summary>Active delivery-manager accounts currently authorized for the restaurant.</summary>
@@ -313,6 +315,16 @@ public interface IAppDbContext
 
     // Voice Calls
     DbSet<MealMate.Domain.VoiceCalls.CallSession> CallSessions { get; }
+    DbSet<MealMate.Domain.ComplaintsSupport.SupportCase> SupportCases { get; }
+    DbSet<MealMate.Domain.ComplaintsSupport.SupportCaseMessage> SupportCaseMessages { get; }
+    DbSet<MealMate.Domain.ComplaintsSupport.SupportCaseTask> SupportCaseTasks { get; }
+    DbSet<MealMate.Domain.ComplaintsSupport.SupportCaseLink> SupportCaseLinks { get; }
+    DbSet<MealMate.Domain.ComplaintsSupport.SupportCaseEvent> SupportCaseEvents { get; }
+    DbSet<MealMate.Domain.ComplaintsSupport.SupportTimingPolicy> SupportTimingPolicies { get; }
+    DbSet<MealMate.Domain.ComplaintsSupport.SupportTimingRule> SupportTimingRules { get; }
+    DbSet<MealMate.Domain.ComplaintsSupport.SupportCaseTimingCycle> SupportCaseTimingCycles { get; }
+    DbSet<MealMate.Domain.ComplaintsSupport.SupportEvidenceScanReceipt> SupportEvidenceScanReceipts { get; }
+    void MarkSupportCaseModified(MealMate.Domain.ComplaintsSupport.SupportCase supportCase);
 
     DbSet<TEntity> Set<TEntity>() where TEntity : class;
 

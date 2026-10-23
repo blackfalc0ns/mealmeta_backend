@@ -42,7 +42,7 @@ public abstract class ApiControllerBase : ControllerBase
             ? ProblemFromError(Error.Failure("common.null_result", "Operation returned a null result."))
             : result.IsSuccess ? Created(location, result.Value) : ProblemFromError(result.Error);
 
-    private IActionResult ProblemFromError(Error error)
+    protected IActionResult ProblemFromError(Error error)
     {
         var problem = Localizer?.CreateFromError(error) ?? new ProblemDetails
         {

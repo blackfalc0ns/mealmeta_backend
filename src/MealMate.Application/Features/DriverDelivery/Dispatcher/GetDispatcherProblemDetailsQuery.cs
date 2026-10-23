@@ -3,6 +3,7 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Common.Storage;
+using MealMate.Application.Features.UnifiedSupport;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
@@ -17,6 +18,7 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
     private readonly IAppDbContext _db;
     private readonly ILocalizedMessageProvider _messages;
     private readonly ICurrentUser _currentUser;
+    private readonly SupportCaseAccess _access;
 
     public GetDispatcherProblemDetailsQueryHandler(
         IAppDbContext db,
@@ -26,6 +28,7 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         _db = db;
         _messages = messages;
         _currentUser = currentUser;
+        _access = new SupportCaseAccess(db, currentUser);
     }
 
     public async Task<Result<SupportProblemDetailsDto>> Handle(
@@ -39,6 +42,12 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
         {
             return Error.Forbidden("DISPATCHER_SCOPE_REQUIRED", _messages.GetMessage("dispatcher_support.forbidden", "Dispatcher access is required."));
         }
+        if (_currentUser.UserType == UserType.Admin
+            && !await _access.HasPersistedPermissionAsync(MealMate.Application.Common.Security.PermissionCodes.SupportView, cancellationToken))
+            return Error.Forbidden("DISPATCHER_SCOPE_REQUIRED", _messages.GetMessage("dispatcher_support.forbidden", "Dispatcher access is required."));
+        if (_currentUser.UserType == UserType.DeliveryManager
+            && !await _access.IsCurrentDeliveryManagerForRestaurantAsync(_currentUser.RestaurantId!.Value, cancellationToken))
+            return Error.Forbidden("DISPATCHER_SCOPE_REQUIRED", _messages.GetMessage("dispatcher_support.forbidden", "Dispatcher access is required."));
 
         // 1. Try finding in Complaints
         var complaint = await _db.Complaints
@@ -86,6 +95,12 @@ public sealed class GetDispatcherProblemDetailsQueryHandler : IQueryHandler<GetD
                     return Error.Conflict("DISPATCHER_SUPPORT_STOP_AMBIGUOUS", _messages.GetMessage("dispatcher_support.stop_ambiguous", "The support issue is linked to multiple delivery attempts."));
             }
         }
+
+        var resourceRestaurantId = complaint?.RestaurantId ?? stop?.Trip?.RestaurantId;
+        if (_currentUser.UserType == UserType.Admin
+            && !await _access.CanReadRestaurantAsync(resourceRestaurantId, cancellationToken))
+            return Error.NotFound(MessageCodes.DispatcherSupport.IssueNotFound,
+                _messages.GetMessage(MessageCodes.DispatcherSupport.IssueNotFound, "Support issue was not found."));
 
         // 2. Resolve Driver
         Guid? driverId = complaint?.DriverProfileId;

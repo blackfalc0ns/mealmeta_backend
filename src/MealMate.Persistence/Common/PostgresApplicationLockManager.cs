@@ -288,4 +288,38 @@ public sealed class PostgresApplicationLockManager : IApplicationLockManager
         var key = $"ledger-economic:{legalEntityId:N}:{sourceType}:{sourceId:N}:{serviceDayKey:N}:{effect}:{adjustmentKey:N}";
         await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
     }
+    public async Task LockSupportCaseAsync(Guid caseId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = $"unified-support-case:{caseId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT \"Id\" FROM \"SupportCases\" WHERE \"Id\" = {caseId} FOR UPDATE", cancellationToken);
+        var tracked = _db.ChangeTracker.Entries<MealMate.Domain.ComplaintsSupport.SupportCase>()
+            .SingleOrDefault(entry => entry.Entity.Id == caseId);
+        if (tracked is not null && tracked.State != EntityState.Added)
+            await tracked.ReloadAsync(cancellationToken);
+        foreach (var task in _db.ChangeTracker.Entries<MealMate.Domain.ComplaintsSupport.SupportCaseTask>()
+                     .Where(entry => entry.Entity.SupportCaseId == caseId && entry.State != EntityState.Added).ToList())
+            await task.ReloadAsync(cancellationToken);
+        foreach (var cycle in _db.ChangeTracker.Entries<MealMate.Domain.ComplaintsSupport.SupportCaseTimingCycle>()
+                     .Where(entry => entry.Entity.SupportCaseId == caseId && entry.State != EntityState.Added).ToList())
+            await cycle.ReloadAsync(cancellationToken);
+    }
+
+    public async Task LockSupportEvidenceUploadAsync(Guid uploadFileRecordId, CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        var key = $"unified-support-evidence-upload:{uploadFileRecordId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+    }
+
+    public async Task LockSupportTimingPolicyCatalogAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        const string key = "unified-support-timing-policy-catalog";
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+    }
+
 }

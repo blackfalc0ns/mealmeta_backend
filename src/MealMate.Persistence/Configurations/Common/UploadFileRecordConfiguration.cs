@@ -19,5 +19,7 @@ public sealed class UploadFileRecordConfiguration : IEntityTypeConfiguration<Upl
 
         builder.HasIndex(x => x.StorageKey).IsUnique();
         builder.HasIndex(x => x.UploadedByUserId);
+        builder.HasIndex(x => new { x.Scope, x.Folder, x.SupportPayloadDeletedAtUtc, x.SupportCleanupLastAttemptAtUtc, x.UploadedAtUtc })
+            .HasDatabaseName("IX_UploadFileRecords_SupportCleanup");
     }
 }

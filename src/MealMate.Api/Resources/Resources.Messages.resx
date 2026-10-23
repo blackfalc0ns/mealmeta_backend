@@ -1563,5 +1563,16 @@
 <data name="driver_support_issue.category.DeliveryIssue" xml:space="preserve"><value>Delivery issue</value></data>
   <data name="family.confirmation_not_found" xml:space="preserve"><value>Family checkout confirmation was not found.</value></data>
   <data name="family.confirmation_not_ready" xml:space="preserve"><value>The family payment has not been verified yet.</value></data>
-  <data name="calls.auth_refresh_required" xml:space="preserve"><value>Refresh your session before starting the call, then retry.</value></data>
+  <data name="support.authentication_required" xml:space="preserve"><value>Sign in to use support.</value></data>
+  <data name="support.access_denied" xml:space="preserve"><value>You cannot access this support case or action.</value></data>
+  <data name="support.case_not_found" xml:space="preserve"><value>The support case was not found.</value></data>
+  <data name="support.request_invalid" xml:space="preserve"><value>The support request is invalid.</value></data>
+  <data name="support.transition_invalid" xml:space="preserve"><value>This support case cannot make that status change.</value></data>
+  <data name="support.version_conflict" xml:space="preserve"><value>This support case changed. Refresh it and try again.</value></data>
+  <data name="support.idempotency_key_reused" xml:space="preserve"><value>This request key was already used for a different support action.</value></data>
+  <data name="support.link_target_unsupported" xml:space="preserve"><value>This resource cannot be linked to a support case.</value></data>
+  <data name="support.task_not_found" xml:space="preserve"><value>The support task was not found.</value></data>
+  <data name="support.operational_route_required" xml:space="preserve"><value>Operational driver reports must use the guarded delivery issue workflow.</value></data>
+  <data name="support.attachment_unsupported" xml:space="preserve"><value>This file cannot be attached. Use a supported image or PDF file smaller than 25 MB.</value></data>
+  <data name="support.attachment_storage_unavailable" xml:space="preserve"><value>Private support file storage is temporarily unavailable.</value></data>
 </root>

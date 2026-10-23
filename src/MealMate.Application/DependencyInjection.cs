@@ -170,6 +170,13 @@ public static class DependencyInjection
         // Governed subscription pricing and immutable quote workflows.
         services.AddScoped<Features.Finance.Governance.FinancialRulePayloadValidator>();
 
+        services.AddScoped<Features.UnifiedSupport.SupportCaseService>();
+        services.AddScoped<Features.UnifiedSupport.DriverOperationalSupportService>();
+        services.AddScoped<Features.UnifiedSupport.Timing.SupportTimingPolicyService>();
+        services.AddScoped<Features.UnifiedSupport.Timing.ISupportTimingProcessor, Features.UnifiedSupport.Timing.SupportTimingProcessor>();
+        services.AddScoped<Common.Storage.SupportEvidenceScanService>();
+        services.AddScoped<Features.UnifiedSupport.Storage.OrphanSupportEvidenceCleanupService>();
+        services.AddScoped<Features.UnifiedSupport.DriverEvidenceAccessService>();
         return services;
     }
 
@@ -185,12 +192,26 @@ public static class DependencyInjection
         services.AddHostedService<Features.CustomerCheckout.BackgroundJobs.CustomerDeliveryPrepPushJob>();
         services.AddScoped<Features.DriverDelivery.SupervisorNotifications.DeliveryDelayEscalationService>();
         services.AddHostedService<Features.DriverDelivery.SupervisorNotifications.DeliveryDelayEscalationJob>();
+        services.AddScoped<Features.UnifiedSupport.SupportCaseService>();
+        services.AddScoped<Features.UnifiedSupport.DriverOperationalSupportService>();
+        services.AddScoped<Features.UnifiedSupport.Timing.SupportTimingPolicyService>();
+        services.AddScoped<Features.UnifiedSupport.Timing.ISupportTimingProcessor, Features.UnifiedSupport.Timing.SupportTimingProcessor>();
+        services.AddScoped<Common.Storage.SupportEvidenceScanService>();
+        services.AddScoped<Features.UnifiedSupport.Storage.OrphanSupportEvidenceCleanupService>();
+        services.AddScoped<Features.UnifiedSupport.DriverEvidenceAccessService>();
         return services;
     }
 
     public static IServiceCollection AddVoiceCallBackgroundJobs(this IServiceCollection services)
     {
         services.AddHostedService<Features.VoiceCalls.BackgroundJobs.VoiceCallRecoveryJob>();
+        services.AddScoped<Features.UnifiedSupport.SupportCaseService>();
+        services.AddScoped<Features.UnifiedSupport.DriverOperationalSupportService>();
+        services.AddScoped<Features.UnifiedSupport.Timing.SupportTimingPolicyService>();
+        services.AddScoped<Features.UnifiedSupport.Timing.ISupportTimingProcessor, Features.UnifiedSupport.Timing.SupportTimingProcessor>();
+        services.AddScoped<Common.Storage.SupportEvidenceScanService>();
+        services.AddScoped<Features.UnifiedSupport.Storage.OrphanSupportEvidenceCleanupService>();
+        services.AddScoped<Features.UnifiedSupport.DriverEvidenceAccessService>();
         return services;
     }
 }

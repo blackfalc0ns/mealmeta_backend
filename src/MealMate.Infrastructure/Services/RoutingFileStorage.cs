@@ -101,6 +101,7 @@ public sealed class RoutingFileStorage : IFileStorage
     {
         var normalized = value.Replace('\\', '/');
         return normalized.StartsWith("documents/", StringComparison.OrdinalIgnoreCase)
-            || normalized.Contains("/documents/", StringComparison.OrdinalIgnoreCase);
+            || normalized.Contains("/documents/", StringComparison.OrdinalIgnoreCase)
+            || MealMate.Application.Common.Storage.ProtectedEvidenceStorage.IsProtectedKey(normalized);
     }
 }

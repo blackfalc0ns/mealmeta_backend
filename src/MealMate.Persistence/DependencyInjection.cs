@@ -43,6 +43,7 @@ public static class DependencyInjection
             options.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
         });
 
+        services.AddScoped<MealMate.Application.Common.Storage.ISupportEvidenceScanReceiptStore, SupportEvidenceScanReceiptStore>();
         services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<AppDbContext>());
         services.AddScoped<ICapacityConcurrencyLock, PostgresCapacityConcurrencyLock>();
         services.AddScoped<PostgresApplicationTransactionExecutor>();

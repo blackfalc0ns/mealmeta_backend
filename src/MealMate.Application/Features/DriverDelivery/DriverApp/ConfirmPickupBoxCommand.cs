@@ -34,6 +34,7 @@ public sealed class ConfirmPickupBoxCommandHandler
     private readonly IApplicationLockManager? _locks;
     private readonly IOrderLifecycleFailureInjector _failureInjector;
     private readonly IRestaurantDeliveryNotifier? _restaurantNotifier;
+    private readonly MealMate.Application.Common.Storage.SupportEvidenceScanService? _evidenceScans;
 
     public ConfirmPickupBoxCommandHandler(
         IAppDbContext db,
@@ -42,7 +43,8 @@ public sealed class ConfirmPickupBoxCommandHandler
         IApplicationTransactionExecutor? transactionExecutor = null,
         IOrderLifecycleFailureInjector? failureInjector = null,
         IRestaurantDeliveryNotifier? restaurantNotifier = null,
-        IApplicationLockManager? locks = null)
+        IApplicationLockManager? locks = null,
+        MealMate.Application.Common.Storage.SupportEvidenceScanService? evidenceScans = null)
     {
         _db = db;
         _currentUser = currentUser;
@@ -51,6 +53,7 @@ public sealed class ConfirmPickupBoxCommandHandler
         _locks = locks;
         _failureInjector = failureInjector ?? NullOrderLifecycleFailureInjector.Instance;
         _restaurantNotifier = restaurantNotifier;
+        _evidenceScans = evidenceScans;
     }
 
     public async Task<Result<ConfirmPickupBoxResponseDto>> Handle(
@@ -66,7 +69,7 @@ public sealed class ConfirmPickupBoxCommandHandler
 
         var driver = await _db.DriverProfiles
             .AsNoTracking()
-            .FirstOrDefaultAsync(d => d.UserId == _currentUser.UserId.Value, cancellationToken);
+            .FirstOrDefaultAsync(d => d.UserId == _currentUser.UserId.Value && !d.IsDeleted, cancellationToken);
 
         if (driver is null)
         {
@@ -160,7 +163,8 @@ public sealed class ConfirmPickupBoxCommandHandler
 
         var activeAssignmentExists = await _db.DriverAssignments
             .AsNoTracking()
-            .AnyAsync(da => da.Id == validation.DriverAssignmentId && da.Status == "Active", cancellationToken);
+            .AnyAsync(da => da.Id == validation.DriverAssignmentId && da.DriverProfileId == driver.Id
+                && da.TripId == validation.TripId && da.Status == "Active", cancellationToken);
 
         if (!activeAssignmentExists)
         {
@@ -177,6 +181,16 @@ public sealed class ConfirmPickupBoxCommandHandler
         {
             return Error.Validation("PHOTO_NOT_UPLOADED", "No condition photo record found matching this storage key and validation.");
         }
+
+        var upload = await _db.UploadFileRecords.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.StorageKey == photo.StorageKey, cancellationToken);
+        if (upload is null || upload.UploadedByUserId != _currentUser.UserId || upload.Scope != "drivers"
+            || upload.Folder != "delivery" || upload.ContentType != photo.ContentType)
+            return Error.Validation("PHOTO_UPLOAD_INVALID", "The condition photo does not match an owned driver evidence upload.");
+        if (_evidenceScans is null) return Error.Failure("UPLOAD_EVIDENCE_SCAN_FAILED", "Evidence scanning is unavailable.");
+        var scanned = await _evidenceScans.ReadCleanAsync(upload, cancellationToken);
+        if (scanned.Bytes is null || !MealMate.Application.Features.UnifiedSupport.SupportCaseService.HasValidSignature(scanned.Bytes, upload.ContentType))
+            return Error.Validation("PHOTO_UPLOAD_INVALID", "The condition photo could not be verified as clean.");
 
         var stop = await _db.TripStops
             .FirstOrDefaultAsync(s => (s.Id == request.BoxId || s.SubscriptionDayId == request.BoxId) && s.TripId == validation.TripId, cancellationToken);
