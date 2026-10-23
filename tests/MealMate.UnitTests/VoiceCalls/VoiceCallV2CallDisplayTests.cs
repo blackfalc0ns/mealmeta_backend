@@ -22,6 +22,64 @@ namespace MealMate.UnitTests.VoiceCalls;
 /// </summary>
 public class VoiceCallV2CallDisplayTests
 {
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    public async Task Display_ServesCustomerIdentityToBothParticipants_InBothDirections(
+        bool customerCalls, bool customerReads, bool withImage)
+    {
+        await using var db = CreateDb();
+        var (driver, customer, stopId, call) = SeedCall(db);
+        db.Users.Add(new MealMate.Persistence.Identity.ApplicationUser
+        {
+            Id = customer, FullName = "أحمد العميل", UserName = "customer-display",
+            PhoneNumber = "+96551112222"
+        });
+        db.CustomerProfiles.Add(new CustomerProfile
+        {
+            UserId = customer,
+            ProfileImageStorageKey = withImage ? "customers/أحمد photo.jpg" : null
+        });
+        db.CustomerProfiles.Add(new CustomerProfile
+            { UserId = Guid.NewGuid(), ProfileImageStorageKey = "customers/other.jpg" });
+        if (customerCalls)
+        {
+            call = new CallSession(stopId, customer, CallParticipantType.Customer,
+                driver, CallParticipantType.Driver, Guid.NewGuid(), DateTime.UtcNow);
+            db.CallSessions.Add(call);
+        }
+        await db.SaveChangesAsync();
+        var result = await CreateHandler(db).Handle(new(call.Id, customerReads ? customer : driver), default);
+        result.IsSuccess.Should().BeTrue();
+        using var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(
+            result.Value, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+        var root = json.RootElement;
+        root.GetProperty("customerName").GetString().Should().Be("أحمد العميل");
+        var expectedImage = withImage
+            ? "/api/v1/uploads/content?key=" + Uri.EscapeDataString("customers/أحمد photo.jpg") : null;
+        root.GetProperty("customerImageUrl").GetString().Should().Be(expectedImage);
+        result.Value.DriverName.Should().Be("Mohamed Ali");
+        result.Value.DeliveryAddress.Should().Be("السالمية، شارع البحر، عمارة 12");
+        result.Value.DeliveryZone.Should().Be("Salmiya");
+        root.GetRawText().Should().NotContain("+96551112222").And.NotContain("phoneNumber");
+    }
+
+    [Fact]
+    public async Task Display_MissingCustomerAccountAndProfile_DoesNotFabricateIdentity()
+    {
+        await using var db = CreateDb();
+        var (driver, _, _, call) = SeedCall(db);
+        var result = await CreateHandler(db).Handle(new(call.Id, driver), default);
+        using var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(
+            result.Value, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+        json.RootElement.GetProperty("customerName").GetString().Should().BeEmpty();
+        json.RootElement.GetProperty("customerImageUrl").GetString().Should().BeNull();
+    }
+
     private static AppDbContext CreateDb()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()

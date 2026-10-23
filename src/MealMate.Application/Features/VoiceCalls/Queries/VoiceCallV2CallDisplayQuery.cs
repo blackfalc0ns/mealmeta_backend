@@ -3,12 +3,13 @@ using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
 using MealMate.Application.Features.VoiceCalls.Errors;
+using MealMate.Domain.VoiceCalls;
 using Microsoft.EntityFrameworkCore;
 
 namespace MealMate.Application.Features.VoiceCalls.Queries;
 
 /// <summary>
-/// Call-screen display context for one v2 call: driver identity, role, delivery
+/// Call-screen display context for either participant: driver and customer identity, delivery
 /// address and the linked order data. Scoped to the call's two participants and
 /// deliberately excludes any phone number — the customer phone is only ever
 /// released by the delivery-contact reveal flow after qualified attempts.
@@ -29,7 +30,11 @@ public sealed record VoiceCallDisplayDto(
     string MealSummary,
     string SlotLabel,
     int BoxCount,
-    string StopStatus);
+    string StopStatus)
+{
+    public string CustomerName { get; init; } = string.Empty;
+    public string? CustomerImageUrl { get; init; }
+}
 
 public sealed class VoiceCallV2CallDisplayQueryHandler
     : IQueryHandler<VoiceCallV2CallDisplayQuery, VoiceCallDisplayDto>
@@ -98,6 +103,18 @@ public sealed class VoiceCallV2CallDisplayQueryHandler
         var zone = _messages.Localize(stop.ZoneNameAr, stop.ZoneNameEn);
         var address = string.IsNullOrWhiteSpace(stop.FullAddress) ? zone : stop.FullAddress;
 
+        // Resolve the actual customer participant in either call direction; never
+        // use the requesting user or another profile on the same delivery trip.
+        Guid? customerUserId = call.CallerType == CallParticipantType.Customer ? call.CallerUserId
+            : call.ReceiverType == CallParticipantType.Customer ? call.ReceiverUserId : null;
+        var customerName = customerUserId.HasValue
+            ? await _db.GetUserDisplayNameAsync(customerUserId.Value, cancellationToken) : null;
+        var customerImageKey = customerUserId.HasValue
+            ? await _db.CustomerProfiles.AsNoTracking()
+                .Where(p => p.UserId == customerUserId.Value)
+                .Select(p => p.ProfileImageStorageKey).FirstOrDefaultAsync(cancellationToken)
+            : null;
+
         return Result.Success(new VoiceCallDisplayDto(
             CallId: call.Id,
             TripStopId: stop.Id,
@@ -113,7 +130,12 @@ public sealed class VoiceCallV2CallDisplayQueryHandler
             MealSummary: _messages.Localize(stop.MealSummaryAr, stop.MealSummaryEn),
             SlotLabel: stop.SlotLabel ?? string.Empty,
             BoxCount: stop.BoxCount,
-            StopStatus: stop.Status.ToString()));
+            StopStatus: stop.Status.ToString())
+        {
+            CustomerName = customerName ?? string.Empty,
+            CustomerImageUrl = string.IsNullOrWhiteSpace(customerImageKey)
+                ? null : DriverImagePath + Uri.EscapeDataString(customerImageKey)
+        });
     }
 
     private sealed record DriverProfileDto(
