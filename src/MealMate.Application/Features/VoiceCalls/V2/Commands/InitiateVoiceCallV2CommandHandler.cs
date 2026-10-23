@@ -29,7 +29,11 @@ public sealed record InitiateVoiceCallV2Command(
     VoiceCallDeviceContext Actor) : ICommand<CallSnapshotDto>, IVoiceCallV2Command;
 
 /// <summary>Authenticated device context for a v2 mutation (resolved at the boundary).</summary>
-public sealed record VoiceCallDeviceContext(Guid UserId, Guid DeviceSessionId);
+public sealed record VoiceCallDeviceContext(Guid UserId, Guid DeviceSessionId)
+{
+    /// <summary>Trusted JWT expiry supplied by the API, never by the request body.</summary>
+    public DateTime? AccessTokenExpiresAtUtc { get; init; }
+}
 
 /// <summary>Request body for v2 initiation — identity never comes from here.</summary>
 public sealed record InitiateVoiceCallV2BodyRequest(Guid TripStopId, Guid ClientRequestId);
@@ -106,6 +110,9 @@ public sealed class InitiateVoiceCallV2CommandHandler : ICommandHandler<Initiate
                 : receiptCall.ReceiverType;
             return Result.Success(ToSnapshot(receiptCall, receiptRole));
         }
+
+        if (RequiresAuthRefresh(request.Actor))
+            return Result.Failure<CallSnapshotDto>(AuthRefreshRequired());
 
         // 2. Fast participants + eligibility (UI parity; re-checked under lock).
         var fastParticipants = await _eligibilityService.ResolveParticipantsAsync(request.TripStopId, cancellationToken);
@@ -213,6 +220,10 @@ public sealed class InitiateVoiceCallV2CommandHandler : ICommandHandler<Initiate
                         .FirstAsync(c => c.Id == Guid.Parse(receiptUnderLock.ResourceUri), ct);
                     return Result.Success(winner);
                 }
+
+                // Recheck after awaited reads/lock acquisition, before staging writes.
+                if (RequiresAuthRefresh(request.Actor))
+                    return Result.Failure<CallSession>(AuthRefreshRequired());
 
                 // Busy: v2 database Busy rows (cross-role, one slot per user) or a
                 // legacy ongoing call (drain-compat while v1 sessions live).
@@ -348,6 +359,20 @@ public sealed class InitiateVoiceCallV2CommandHandler : ICommandHandler<Initiate
 
         return Result.Success(ToSnapshot(session, callerType));
     }
+
+    private bool RequiresAuthRefresh(VoiceCallDeviceContext actor)
+    {
+        // Internal command callers may omit JWT metadata. The HTTP boundary always
+        // supplies it. Cover the entire ring/setup window plus transport clock skew.
+        var minimumSeconds = Math.Max(5d, _options.Value.RingTimeoutSeconds)
+            + Math.Max(0d, _options.Value.AcceptedSetupTimeoutSeconds)
+            + Math.Max(0d, _options.Value.ConnectingTimeoutSeconds) + 30d;
+        return actor.AccessTokenExpiresAtUtc is { } expiry
+            && (expiry - _clock.UtcNow).TotalSeconds <= minimumSeconds;
+    }
+
+    private static Error AuthRefreshRequired() => Error.Conflict("calls.auth_refresh_required",
+        "Refresh your session before starting a new call, then retry with the same clientRequestId.");
 
     private static CallSnapshotDto ToSnapshot(CallSession session, CallParticipantType localRole) => new(
         session.Id,

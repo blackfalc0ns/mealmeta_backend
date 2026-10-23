@@ -123,6 +123,14 @@ public sealed class VoiceCallsV2Controller : ApiControllerBase
                 type: "about:blank");
         }
 
+        // Only the validated JWT can supply expiry. Never accept it from mobile
+        // headers/body or extend token validity for calls.
+        if (!long.TryParse(User.FindFirstValue("exp"), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var expiresUnix)
+            || expiresUnix < -62135596800L || expiresUnix > 253402300799L)
+            return Unauthorized();
+        context = context with { AccessTokenExpiresAtUtc = DateTimeOffset.FromUnixTimeSeconds(expiresUnix).UtcDateTime };
+
         var result = await Sender.Send(new MealMate.Application.Features.VoiceCalls.V2.Commands.InitiateVoiceCallV2Command(
             request.TripStopId,
             request.ClientRequestId,

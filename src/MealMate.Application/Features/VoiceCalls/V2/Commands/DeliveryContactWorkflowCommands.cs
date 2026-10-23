@@ -170,7 +170,16 @@ public sealed class DeliveryContactCaseService
             : 0;
         var reasonNoAnswer = call.EndReason == CallEndReason.NoAnswer;
 
-        var qualifies = directionDriverToCustomer && reasonNoAnswer && hasRingingReceipt
+        // Evaluate at call end, not delayed outbox-processing time: later logout or
+        // session expiry must not erase a legitimate attempt retroactively.
+        var callerSessionValid = call.ProtocolVersion != 2;
+        if (call.ProtocolVersion == 2 && call.EndedAtUtc is { } endedAt
+            && call.CallerDeviceSessionId is { } callerDeviceId)
+            callerSessionValid = await _db.VoiceCallDeviceSessions.AsNoTracking().AnyAsync(s =>
+                s.Id == callerDeviceId && s.UserId == call.CallerUserId
+                && s.ExpiresAtUtc > endedAt && (s.RevokedAtUtc == null || s.RevokedAtUtc > endedAt), cancellationToken);
+
+        var qualifies = directionDriverToCustomer && reasonNoAnswer && hasRingingReceipt && callerSessionValid
                         && observedRingSeconds >= DeliveryContactThresholds.QualifyingObservedRingSeconds;
 
         var ordinal = await _db.DeliveryContactAttempts

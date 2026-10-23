@@ -388,6 +388,83 @@ public sealed class ContactRadiusTemporarilyDisabledTests
         db.ChangeTracker.HasChanges().Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData(5, 30, 20, 30)]
+    [InlineData(150, 60, 30, 40)]
+    public async Task Initiation_NearExpiryToken_RequiresRefreshWithoutCreatingAttempt_AndRetryKeepsCall(
+        int secondsRemaining, int ringSeconds, int acceptedSeconds, int connectingSeconds)
+    {
+        await using var db = CreateInMemoryDbContext();
+        var (stop, driver, _) = await SeedDeliveryContext(db);
+        var actor = new VoiceCallDeviceContext(driver, Guid.NewGuid())
+            { AccessTokenExpiresAtUtc = DateTime.UtcNow.AddSeconds(secondsRemaining) };
+        var clock = new FixedClock();
+        var handler = new InitiateVoiceCallV2CommandHandler(db, clock,
+            new DeliveryContactEligibilityService(db, clock), options: Options.Create(new VoiceCallOptions
+            {
+                RingTimeoutSeconds = ringSeconds, AcceptedSetupTimeoutSeconds = acceptedSeconds,
+                ConnectingTimeoutSeconds = connectingSeconds
+            }));
+        var request = new InitiateVoiceCallV2Command(stop.Id, Guid.NewGuid(), actor);
+        var blocked = await handler.Handle(request, default);
+        blocked.IsFailure.Should().BeTrue();
+        blocked.Error.Code.Should().Be("calls.auth_refresh_required");
+        blocked.Error.Type.Should().Be(ErrorType.Conflict);
+        (await db.CallSessions.CountAsync()).Should().Be(0);
+        (await db.VoiceCallBusyParticipants.CountAsync()).Should().Be(0);
+        (await db.OutboxMessages.CountAsync(m => m.EventType.StartsWith("voice-call.lifecycle."))).Should().Be(0);
+        (await db.IdempotencyRecords.CountAsync()).Should().Be(0);
+        (await db.DeliveryContactAttempts.CountAsync()).Should().Be(0);
+        request = request with { Actor = actor with { AccessTokenExpiresAtUtc = DateTime.UtcNow.AddHours(1) } };
+        var created = await handler.Handle(request, default);
+        created.IsSuccess.Should().BeTrue();
+        request = request with { Actor = actor };
+        var replay = await handler.Handle(request, default);
+        replay.IsSuccess.Should().BeTrue();
+        replay.Value.CallId.Should().Be(created.Value.CallId);
+        (await db.CallSessions.CountAsync()).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("valid", true)]
+    [InlineData("expired", false)]
+    [InlineData("revoked", false)]
+    [InlineData("missing", false)]
+    [InlineData("foreign-owner", false)]
+    [InlineData("revoked-after-call", true)]
+    [InlineData("expired-after-call", true)]
+    public async Task MissedQualification_ChecksCallerSessionAtCallEnd_NotOutboxProcessingTime(string state, bool qualifies)
+    {
+        await using var db = CreateInMemoryDbContext();
+        var (stop, driver, customer) = await SeedDeliveryContext(db);
+        var ended = DateTime.UtcNow.AddMinutes(-2);
+        var started = ended.AddSeconds(-30);
+        var device = new VoiceCallDeviceSession
+        {
+            UserId = state == "foreign-owner" ? Guid.NewGuid() : driver,
+            InstallationId = "driver-auth-test", Platform = "android", ControlProofHash = new string('a', 64),
+            ExpiresAtUtc = state == "expired" ? ended.AddSeconds(-1)
+                : state == "expired-after-call" ? ended.AddSeconds(1) : ended.AddDays(1),
+            RevokedAtUtc = state == "revoked" ? ended.AddSeconds(-1)
+                : state == "revoked-after-call" ? ended.AddSeconds(1) : null
+        };
+        if (state != "missing") db.VoiceCallDeviceSessions.Add(device);
+        var call = new CallSession(stop.Id, driver, CallParticipantType.Driver,
+            customer, CallParticipantType.Customer, Guid.NewGuid(), started);
+        call.MarkRingingV2(started, ended, device.Id);
+        call.MarkMissed(ended);
+        db.CallSessions.Add(call);
+        db.VoiceCallDeviceReceipts.Add(new VoiceCallDeviceReceipt(call.Id, Guid.NewGuid(), started));
+        await db.SaveChangesAsync();
+        var clock = new FixedClock();
+        var service = new DeliveryContactCaseService(db, clock, new DeliveryContactEligibilityService(db, clock));
+        await service.RecordAttemptForMissedCallAsync(call, default);
+        await service.RecordAttemptForMissedCallAsync(call, default);
+        var attempt = await db.DeliveryContactAttempts.SingleAsync();
+        attempt.QualifiesAsNoAnswer.Should().Be(qualifies);
+        (await db.DeliveryContactCases.SingleAsync()).QualifiedMissedCount.Should().Be(qualifies ? 1 : 0);
+    }
+
     private sealed class FixedClock : IDateTimeProvider
     {
         public DateTime UtcNow => DateTime.UtcNow;

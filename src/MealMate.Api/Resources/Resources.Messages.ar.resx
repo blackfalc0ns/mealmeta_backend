@@ -1503,4 +1503,5 @@
 <data name="driver_support_issue.category.DeliveryIssue" xml:space="preserve"><value>مشكلة في التوصيل</value></data>
   <data name="family.confirmation_not_found" xml:space="preserve"><value>لم يتم العثور على تأكيد عملية الاشتراك العائلي.</value></data>
   <data name="family.confirmation_not_ready" xml:space="preserve"><value>لم يتم التحقق من دفع الاشتراك العائلي بعد.</value></data>
+  <data name="calls.auth_refresh_required" xml:space="preserve"><value>يرجى تجديد الجلسة قبل بدء المكالمة ثم إعادة المحاولة.</value></data>
 </root>
