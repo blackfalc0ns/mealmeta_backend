@@ -48,7 +48,8 @@ public sealed class DriverOperationalSupportService(
     {
         if (!currentUser.IsAuthenticated || currentUser.UserId is null) return Error.Unauthorized(SupportCaseProblemCodes.AuthenticationRequired);
         if (!HasSupportedRole()) return Error.Forbidden(SupportCaseProblemCodes.AccessDenied);
-        if (pageNumber < 1 || pageSize is < 1 or > 100) return Error.Validation(SupportCaseProblemCodes.InvalidRequest);
+        if (pageNumber < 1 || pageSize is < 1 or > 100 || (long)pageNumber * pageSize > int.MaxValue)
+            return Error.Validation(SupportCaseProblemCodes.InvalidRequest);
         if (currentUser.UserType == UserType.Admin && !await _access.HasPersistedPermissionAsync(
                 MealMate.Application.Common.Security.PermissionCodes.SupportView, ct))
             return Error.Forbidden(SupportCaseProblemCodes.AccessDenied);

@@ -14,6 +14,7 @@ using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
 using MealMate.Persistence;
+using MealMate.Persistence.Identity;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using Xunit;
@@ -2081,6 +2082,17 @@ public class DriverAppTests
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-203", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
         db.Trips.Add(trip);
+        var customer = new ApplicationUser { Id = Guid.NewGuid(), UserType = UserType.Customer, AccountStatus = AccountStatus.Active };
+        var program = new Program { Code = $"REASSIGN-{Guid.NewGuid():N}", NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle { ProgramId = program.Id, Code = $"REASSIGN-{Guid.NewGuid():N}", NameAr = "باقة", NameEn = "Bundle", MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true };
+        var subscription = new Subscription
+        {
+            CustomerUserId = customer.Id, ProgramId = program.Id, BundleId = bundle.Id, SelectedTier = RestaurantTier.Basic,
+            DurationDays = 1, IncludeFriday = true, Status = SubscriptionStatus.Active,
+            StartDate = DateOnly.FromDateTime(DateTime.UtcNow), EndDate = DateOnly.FromDateTime(DateTime.UtcNow), PaidAmount = new MealMate.Domain.ValueObjects.Money(1m, "KWD")
+        };
+        var subscriptionDay = new SubscriptionDay { SubscriptionId = subscription.Id, ServiceDate = subscription.StartDate };
+        db.AddRange(customer, program, bundle, subscription, subscriptionDay);
         db.DriverAssignments.Add(new DriverAssignment
         {
             TripId = trip.Id,
@@ -2099,7 +2111,8 @@ public class DriverAppTests
             MealSummaryAr = "1 وجبة",
             MealSummaryEn = "1 meal",
             SlotLabel = "01:00 م",
-            Status = TripStopStatus.PickedUp
+            Status = TripStopStatus.PickedUp,
+            SubscriptionDayId = subscriptionDay.Id
         };
         db.TripStops.Add(stop);
         await db.SaveChangesAsync();

@@ -40,6 +40,9 @@ public sealed partial class SupportCaseService
         }
         if (request.Channel == SupportCaseChannel.Driver && request.Kind == SupportCaseKind.OperationalReport)
             return Error.Validation(SupportCaseProblemCodes.OperationalRouteRequired);
+        if (_currentUser.UserType == MealMate.Domain.Enums.UserType.Driver
+            && !await _access.HasActiveDriverIdentityAsync(ct))
+            return Forbidden();
         await _locks.LockSupportHandoverKeyAsync(actorId.Value, request.IdempotencyKey, ct);
 
         var hash = Hash(new { Operation = "create", Request = request });

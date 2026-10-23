@@ -12,7 +12,9 @@ using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Domain.RestaurantOperations;
+using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
+using MealMate.Persistence.Identity;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using Xunit;
@@ -531,6 +533,17 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         db.DriverProfiles.Add(driverB);
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var customer = new ApplicationUser { Id = Guid.NewGuid(), UserType = UserType.Customer, AccountStatus = AccountStatus.Active };
+        var program = new Program { Code = $"EMERGENCY-{Guid.NewGuid():N}", NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle { ProgramId = program.Id, Code = $"EMERGENCY-{Guid.NewGuid():N}", NameAr = "باقة", NameEn = "Bundle", MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true };
+        var subscription = new Subscription
+        {
+            CustomerUserId = customer.Id, ProgramId = program.Id, BundleId = bundle.Id, SelectedTier = RestaurantTier.Basic,
+            DurationDays = 1, IncludeFriday = true, Status = SubscriptionStatus.Active,
+            StartDate = today, EndDate = today, PaidAmount = new Money(1m, "KWD")
+        };
+        var subscriptionDay = new SubscriptionDay { SubscriptionId = subscription.Id, RestaurantId = restaurant.Id, ServiceDate = today };
+        db.AddRange(customer, program, bundle, subscription, subscriptionDay);
         var trip = new Trip
         {
             RestaurantId = restaurant.Id,
@@ -543,6 +556,7 @@ public class EndToEndSubscriptionToDeliveryFlowTests
         var stop = new TripStop
         {
             TripId = trip.Id,
+            SubscriptionDayId = subscriptionDay.Id,
             OrderCode = "BX-EMERGENCY-99",
             CustomerMaskedId = "CUST-99",
             Status = TripStopStatus.PickedUp,

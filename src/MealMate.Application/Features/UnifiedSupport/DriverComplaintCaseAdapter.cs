@@ -16,6 +16,7 @@ internal sealed class DriverComplaintCaseAdapter(IAppDbContext db, ICurrentUser 
         if (!user.IsAuthenticated || user.UserId is null) return query.Where(_ => false);
         if (user.UserType == UserType.Driver)
         {
+            if (!await access.HasActiveDriverIdentityAsync(ct)) return query.Where(_ => false);
             var profileId = await db.DriverProfiles.AsNoTracking().Where(x => x.UserId == user.UserId && !x.IsDeleted)
                 .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
             return profileId is null ? query.Where(_ => false) : query.Where(c => c.DriverProfileId == profileId);

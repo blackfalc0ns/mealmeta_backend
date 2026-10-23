@@ -80,7 +80,7 @@ public sealed class ResolveSupportIssueCommandHandler : ICommandHandler<ResolveS
             if (complaint is null) return Error.NotFound(MessageCodes.DispatcherSupport.IssueNotFound, _messages.GetMessage(MessageCodes.DispatcherSupport.IssueNotFound, "Support issue was not found."));
             if (_currentUser!.UserType == UserType.DeliveryManager && _currentUser.RestaurantId != complaint.RestaurantId)
                 return Error.Forbidden("DISPATCHER_SCOPE_FORBIDDEN", _messages.GetMessage("dispatcher_support.forbidden", "You cannot access this restaurant issue."));
-            if (complaint.Status == ComplaintStatus.Resolved || complaint.Status == ComplaintStatus.Closed)
+            if (complaint.Status is ComplaintStatus.Resolved or ComplaintStatus.Closed or ComplaintStatus.Rejected)
             {
                 return Error.Conflict(
                     "ISSUE_ALREADY_RESOLVED",

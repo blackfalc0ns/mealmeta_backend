@@ -18,6 +18,7 @@ public sealed partial class SupportCaseService
         string fileName, string contentType, Stream content, CancellationToken ct = default)
     {
         if (ActorId is not { } actorId) return Unauthorized();
+        if (_currentUser.UserType == UserType.Driver && !await _access.HasActiveDriverIdentityAsync(ct)) return Forbidden();
         var extension = Path.GetExtension(fileName).ToLowerInvariant();
         if (!SupportedContent(contentType, extension) || string.IsNullOrWhiteSpace(Path.GetFileName(fileName))
             || fileName.Length > 255) return Error.Validation(SupportCaseProblemCodes.AttachmentUnsupported);

@@ -6,9 +6,9 @@
 
 | الحاجة | المسار الموجود | السلوك |
 |---|---|---|
-| سؤال/طلب عام غير مرتبط ببلاغ رحلة | `POST /api/v1/support/cases` بـ `channel: "Driver"`, `kind: "GeneralRequest"` | احتفظ بـ `idempotencyKey`; قائمة وتفاصيل الحالة من `/api/v1/support/cases`. |
+| سؤال/طلب عام غير مرتبط ببلاغ رحلة | `POST /api/v1/support/cases` بـ `channel: "Driver"`, `kind: "GeneralRequest"` | يتطلب حساباً نشطاً وملف سائق محفوظاً؛ احتفظ بـ `idempotencyKey`; قائمة وتفاصيل الحالة من `/api/v1/support/cases`. |
 | رد على محادثة عامة | `POST /api/v1/support/cases/{caseId}/messages` | يتطلب `expectedVersion` و`idempotencyKey`. |
-| بلاغ عطل/حادث/مشكلة مرتبطة بالتوصيل | `POST /api/v1/driver/orders/{boxId}/report-issue` | المسار التشغيلي القديم؛ `{boxId}` هو TripStop ID (ليس رقم العرض أو DailyOrderId). يحتفظ بالتصنيف وسجل البلاغ. راجع عقد العهدة لحقول الطلب. |
+| بلاغ عطل/حادث/مشكلة مرتبطة بالتوصيل | `POST /api/v1/driver/orders/{boxId}/report-issue` | يتطلب حساباً نشطاً، ملف سائق محفوظاً، وتعييناً وعهدة صالحة. `{boxId}` هو TripStop ID (ليس رقم العرض أو DailyOrderId). يدعم `idempotencyKey` اختياريّاً لإعادة الطلب المطابق بأمان؛ راجع عقد العهدة للحقول والأخطاء. |
 | طلب إعادة تعيين سائق/صندوق | `POST /api/v1/driver/orders/{boxId}/request-reassignment` | طلب عهدة مستقل. ضياع الرد يعالج بقراءة `GET /api/v1/driver/reassignment-requests?boxId={tripStopId}&page=1&pageSize=20`; التكرار قد يرجع conflict ويجب بعدها إعادة القراءة. |
 | استعادة طلب إعادة التعيين | `GET /api/v1/driver/reassignment-requests?boxId={tripStopId}&page=1&pageSize=20`, `GET /api/v1/driver/reassignment-requests/{requestId}` | للطالب الأصلي فقط؛ استخدمها للمصالحة بعد نتيجة POST غير مؤكدة. |
 | قائمة وتفاصيل البلاغ التشغيلي | `GET /api/v1/driver/support/issues`, `GET /api/v1/driver/support/issues/{issueId}` | لا تعتبره حالة الدعم العامة. |
@@ -28,7 +28,8 @@
 
 - احفظ المسودة ومفتاح idempotency تحت actor وAPI base URL، وامسحهما عند logout أو تبديل الحساب.
 - للحالة العامة: أعد فقط أوامر العقد التي تدعم replay بالمفتاح والـ payload الثابت نفسيهما. `409 version_conflict` يتطلب إعادة جلب ومراجعة السائق ثم مفتاحاً جديداً.
-- للبلاغ التشغيلي legacy: `progress` و`resolve` لا يملكان idempotency key في عقودهما الحالية. عند نتيجة غامضة أعد GET أولاً، ثم دع المستخدم يختار الإجراء التالي؛ لا تعِد POST تلقائياً.
+- لبلاغ الرحلة: أرسل `idempotencyKey` اختياريّاً (1–100 حرف بعد trim) مع أول طلب. بعد timeout أعد الجسم والمفتاح نفسيهما؛ replay المطابق يعيد نفس `issueId`، والحمولة المختلفة للمفتاح نفسه ترجع 409. بلا مفتاح، لا تعِد إنشاء البلاغ تلقائياً عند نتيجة غامضة؛ أعد قراءة القائمة أولاً. `progress` و`resolve` لا يملكان مفتاحاً في عقدهما الحالي.
+- نجاح البلاغ بالمفتاح أو بدونه يظل `200` وجسم JSON عبارة عن GUID خام. المفتاح يُقصّ بالـ trim، ومجاله السائق المصادق وعملية البلاغ؛ استعماله مع TripStop آخر أو حمولة normalized مختلفة يرجع 409، والطول الفارغ أو أكثر من 100 حرف يرجع 400. الـ replay يتطلب السائق النشط المالك، لكنه يستعيد النتيجة المحفوظة بعد انتهاء custody. إنشاء بلاغ أو طلب إعادة تعيين يتطلب رابط عميل حقيقياً إلى الاشتراك؛ عند غيابه يرجع 404 بلا كتابة. يدعم التوافق القديم ربط `DailyOrderId` عبر الطلب اليومي ويوم الاشتراك والاشتراك إذا كان `SubscriptionDayId` في TripStop فارغاً.
 - لإعادة التعيين، استخدم GET للتحقق بعد timeout/conflict كما يحدد عقد العهدة. لا تستنتج انتقال custody من طلب مقبول؛ العهدة لا تنتقل حتى اكتمال handover.
 - إذا فشل رفع صورة بنتيجة مجهولة، لا تكرر الرفع تلقائياً ولا تفترض أن الملف انحذف؛ احتفظ بالمفتاح إن وصل، وصالح الرفع قبل ربطه بالبلاغ.
 

@@ -146,7 +146,8 @@ public sealed record ReportIssueRequest(
     string? Description = null,
     string? EvidencePhotoStorageKey = null,
     string[]? EvidencePhotoStorageKeys = null,
-    string Severity = "Medium");
+    string Severity = "Medium",
+    string? IdempotencyKey = null);
 
 public sealed record RegisterDeviceTokenRequest(
     string Token,

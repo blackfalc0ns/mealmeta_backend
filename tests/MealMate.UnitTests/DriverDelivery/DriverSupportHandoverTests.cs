@@ -9,6 +9,8 @@ using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
+using MealMate.Domain.ValueObjects;
 using MealMate.Persistence;
 using MealMate.Persistence.Common;
 using MealMate.Persistence.Identity;
@@ -38,10 +40,20 @@ public class DriverSupportHandoverTests
         var original = new DriverProfile { UserId = Guid.NewGuid(), RestaurantId = trip.RestaurantId, FullNameAr = "السائق", FullNameEn = "Original", IsAvailable = true };
         var replacement = new DriverProfile { UserId = Guid.NewGuid(), RestaurantId = trip.RestaurantId, FullNameAr = "البديل", FullNameEn = "Replacement", IsAvailable = true, VerificationStatus = VerificationStatus.Approved };
         var managerUserId = Guid.NewGuid();
-        var barcode = new MealMate.Domain.RestaurantOperations.MealBarcode { SubscriptionDayId = Guid.NewGuid(), BarcodeValue = "BARCODE-1", Status = MealBarcodeStatus.Printed };
-        var stop = new TripStop { TripId = trip.Id, MealBarcodeId = barcode.Id, OrderCode = "BX-1", CustomerMaskedId = "C1", ZoneNameAr = "منطقة", ZoneNameEn = "Area", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "AM", Status = TripStopStatus.Failed, FailureReason = "VehicleBreakdown" };
+        var customer = new ApplicationUser { Id = Guid.NewGuid(), UserType = UserType.Customer, AccountStatus = AccountStatus.Active };
+        var program = new Program { Code = $"HANDOVER-{Guid.NewGuid():N}", NameAr = "برنامج", NameEn = "Program", Status = ProgramStatus.Active, IsActive = true };
+        var bundle = new Bundle { ProgramId = program.Id, Code = $"HANDOVER-{Guid.NewGuid():N}", NameAr = "باقة", NameEn = "Bundle", MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true };
+        var subscription = new Subscription
+        {
+            CustomerUserId = customer.Id, ProgramId = program.Id, BundleId = bundle.Id, SelectedTier = RestaurantTier.Basic,
+            DurationDays = 1, IncludeFriday = true, Status = SubscriptionStatus.Active,
+            StartDate = DateOnly.FromDateTime(Now), EndDate = DateOnly.FromDateTime(Now), PaidAmount = new Money(1m, "KWD")
+        };
+        var subscriptionDay = new SubscriptionDay { SubscriptionId = subscription.Id, RestaurantId = trip.RestaurantId, ServiceDate = subscription.StartDate };
+        var barcode = new MealMate.Domain.RestaurantOperations.MealBarcode { SubscriptionDayId = subscriptionDay.Id, BarcodeValue = "BARCODE-1", Status = MealBarcodeStatus.Printed };
+        var stop = new TripStop { TripId = trip.Id, SubscriptionDayId = subscriptionDay.Id, MealBarcodeId = barcode.Id, OrderCode = "BX-1", CustomerMaskedId = "C1", ZoneNameAr = "منطقة", ZoneNameEn = "Area", MealSummaryAr = "وجبة", MealSummaryEn = "Meal", SlotLabel = "AM", Status = TripStopStatus.Failed, FailureReason = "VehicleBreakdown" };
         var issue = new Complaint { OrderId = stop.Id, RestaurantId = trip.RestaurantId, DriverProfileId = original.Id, Category = "DriverReassignmentRequested", Title = "VehicleBreakdown", Description = "Breakdown", Latitude = 29.3m, Longitude = 47.9m, SubmittedAtUtc = Now };
-        _db.AddRange(original, replacement, trip, stop, barcode, issue,
+        _db.AddRange(original, replacement, trip, stop, barcode, issue, customer, program, bundle, subscription, subscriptionDay,
             new ApplicationUser { Id = replacement.UserId, UserType = UserType.Driver, AccountStatus = AccountStatus.Active },
             new ApplicationUser { Id = original.UserId, UserType = UserType.Driver, AccountStatus = AccountStatus.Active },
             new ApplicationUser { Id = managerUserId, UserType = UserType.DeliveryManager, AccountStatus = AccountStatus.Active, RestaurantId = trip.RestaurantId },

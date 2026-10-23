@@ -3,12 +3,15 @@ using MealMate.Application.Common.Abstractions;
 using MealMate.Application.Common.Localization;
 using MealMate.Application.Common.Messaging;
 using MealMate.Application.Common.Models;
+using MealMate.Application.Features.UnifiedSupport;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
 using MealMate.Domain.RestaurantOperations;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace MealMate.Application.Features.DriverDelivery.DriverApp;
@@ -83,7 +86,8 @@ public sealed record ReportDriverIssueCommand(
     Guid? DriverId = null,
     string? EvidencePhotoStorageKey = null,
     string[]? EvidencePhotoStorageKeys = null,
-    string Severity = "Medium") : ICommand<Guid>;
+    string Severity = "Medium",
+    string? IdempotencyKey = null) : ICommand<Guid>;
 
 public sealed class DriverDeliveryOrderCommandHandlers
     : ICommandHandler<PickupBoxCommand, PickupBoxResponseDto>,
@@ -708,8 +712,86 @@ public sealed class DriverDeliveryOrderCommandHandlers
     }
 
     public Task<Result<Guid>> Handle(ReportDriverIssueCommand request, CancellationToken cancellationToken)
-        => ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
-            token => ReportDriverIssueCoreAsync(request, token), cancellationToken);
+    {
+        if (request.IdempotencyKey is null)
+            return ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+                token => ReportDriverIssueCoreAsync(request, token), cancellationToken);
+
+        return ReportDriverIssueIdempotentlyAsync(request, cancellationToken);
+    }
+
+    private async Task<Result<Guid>> ReportDriverIssueIdempotentlyAsync(ReportDriverIssueCommand request, CancellationToken ct)
+    {
+        if (!_currentUser.IsAuthenticated || !_currentUser.UserId.HasValue || _currentUser.UserType != UserType.Driver)
+            return Error.Unauthorized(MessageCodes.Auth.InvalidCredentials, _messages.GetMessage(MessageCodes.Auth.InvalidCredentials, "An authenticated driver is required."));
+        var key = request.IdempotencyKey!.Trim();
+        if (key.Length == 0 || key.Length > 100)
+            return Error.Validation(SupportCaseProblemCodes.InvalidRequest, _messages.GetMessage(
+                SupportCaseProblemCodes.InvalidRequest, "The idempotency key must contain 1 to 100 characters."));
+        if (_transactions is null || _locks is null)
+            return Error.Conflict("DELIVERY_TRANSACTION_UNAVAILABLE", _messages.GetMessage(
+                "driver_support_handover.transaction_unavailable", "Delivery mutation requires a transaction and application locks."));
+
+        var issueType = DriverIssueCatalog.NormalizeIssueType(request.IssueType);
+        var severity = DriverIssueCatalog.NormalizeSeverity(request.Severity);
+        var description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+        if (issueType is null || severity is null || description?.Length > MaxIssueTextLength)
+            return await ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+                token => ReportDriverIssueCoreAsync(request, token), ct);
+        var photos = MergeEvidencePhotoKeys(request.EvidencePhotoStorageKey, request.EvidencePhotoStorageKeys);
+        if (photos.Count > MaxIssueEvidencePhotos)
+            return await ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+                token => ReportDriverIssueCoreAsync(request, token), ct);
+
+        var identity = await _db.DriverProfiles.AsNoTracking().Where(x => x.UserId == _currentUser.UserId.Value && !x.IsDeleted)
+            .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
+        if (!identity.HasValue || request.DriverId.HasValue && request.DriverId.Value != identity.Value)
+            return Error.Forbidden("DRIVER_IDENTITY_MISMATCH", _messages.GetMessage(
+                "driver.identity_mismatch", "The supplied driver ID does not match the authenticated driver."));
+        if (!(await _db.GetActiveAccountUserIdsAsync([_currentUser.UserId.Value], ct)).Contains(_currentUser.UserId.Value))
+            return Error.Forbidden("DRIVER_ACCOUNT_INACTIVE", _messages.GetMessage("driver.account_inactive", "The driver account is not active."));
+
+        var hashJson = DriverIssueFingerprint(request.BoxId, issueType, severity, description, photos);
+        var actorId = _currentUser.UserId.Value;
+        return await _transactions.ExecuteResultAsync(async token =>
+        {
+            await _locks.LockSupportHandoverKeyAsync(actorId, key, token);
+            var replay = await _db.AuditLogs.AsNoTracking().SingleOrDefaultAsync(x => x.Action == "DriverReportedIssue"
+                && x.EntityType == "TripStop" && x.ActorUserId == actorId
+                && x.CorrelationId == key, token);
+            if (replay is not null)
+            {
+                if (!string.Equals(replay.BeforeJson, hashJson, StringComparison.Ordinal))
+                    return Error.Conflict(SupportCaseProblemCodes.IdempotencyKeyReused, _messages.GetMessage(
+                        SupportCaseProblemCodes.IdempotencyKeyReused, "The idempotency key was already used for another issue request."));
+                if (!Guid.TryParse(ReadJsonGuid(replay.AfterJson, "ComplaintId"), out var complaintId)
+                    || !await _db.Complaints.AsNoTracking().AnyAsync(x => x.Id == complaintId && x.DriverProfileId == identity.Value, token))
+                    return Error.NotFound(MessageCodes.Orders.NotFound, _messages.GetMessage(MessageCodes.Orders.NotFound, "The saved issue was not found."));
+                return Result.Success(complaintId);
+            }
+
+            return await ExecuteAssignedStopMutationAsync(request.BoxId, request.DriverId,
+                innerToken => ReportDriverIssueCoreAsync(request, innerToken), token);
+        }, ct);
+    }
+
+    private static string? ReadJsonGuid(string? json, string property)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty(property, out var value) ? value.GetString() : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private static string DriverIssueFingerprint(Guid boxId, string issueType, string severity, string? description, IReadOnlyList<string> photos)
+        => JsonSerializer.Serialize(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+        {
+            Operation = "driver-report-issue", BoxId = boxId, IssueType = issueType, Severity = severity,
+            Description = description, EvidencePhotoStorageKeys = photos
+        })))));
 
     private async Task<Result<Guid>> ReportDriverIssueCoreAsync(ReportDriverIssueCommand request, CancellationToken cancellationToken)
     {
@@ -796,6 +878,8 @@ public sealed class DriverDeliveryOrderCommandHandlers
         var (labelAr, labelEn) = DriverIssueCatalog.DescribeIssueType(issueType);
         var issueLabel = isAr ? labelAr : labelEn;
         var customerUserId = await ResolveStopCustomerUserIdAsync(stop, cancellationToken);
+        if (customerUserId == Guid.Empty)
+            return Error.NotFound(MessageCodes.Orders.NotFound, _messages.GetMessage(MessageCodes.Orders.NotFound, "The customer linked to this delivery was not found."));
 
         var complaint = new Complaint
         {
@@ -837,14 +921,22 @@ public sealed class DriverDeliveryOrderCommandHandlers
         // Keep the stop-level marker other dispatcher surfaces already read.
         stop.FailureReason = $"[{issueType}] {description}".TrimEnd();
 
-        _db.AuditLogs.Add(new MealMate.Domain.IdentityAccess.AuditLog
+        var audit = new MealMate.Domain.IdentityAccess.AuditLog
         {
             Action = "DriverReportedIssue",
             EntityType = "TripStop",
             EntityId = request.BoxId,
             Reason = stop.FailureReason,
-            ActorUserId = _currentUser.UserId
-        });
+            ActorUserId = _currentUser.UserId,
+            OccurredAtUtc = now
+        };
+        if (request.IdempotencyKey is { } idempotencyKey)
+        {
+            audit.CorrelationId = idempotencyKey.Trim();
+            audit.BeforeJson = DriverIssueFingerprint(request.BoxId, issueType, severity, description, photoKeys);
+            audit.AfterJson = JsonSerializer.Serialize(new { ComplaintId = complaint.Id });
+        }
+        _db.AuditLogs.Add(audit);
 
         await AddDriverSupportIssueEventAsync(complaint, stop, "created", now, cancellationToken);
 
@@ -1283,6 +1375,8 @@ public sealed class DriverDeliveryOrderCommandHandlers
         var (labelAr, labelEn) = DriverIssueCatalog.DescribeReassignmentReason(reason);
         var reasonLabel = isAr ? labelAr : labelEn;
         var customerUserId = await ResolveStopCustomerUserIdAsync(stop, cancellationToken);
+        if (customerUserId == Guid.Empty)
+            return Error.NotFound(MessageCodes.Orders.NotFound, _messages.GetMessage(MessageCodes.Orders.NotFound, "The customer linked to this delivery was not found."));
 
         stop.FailureReason = $"[ReassignmentRequested: {reason}] {notes}".TrimEnd();
 
@@ -1468,15 +1562,26 @@ public sealed class DriverDeliveryOrderCommandHandlers
 
     private async Task<Guid> ResolveStopCustomerUserIdAsync(TripStop stop, CancellationToken cancellationToken)
     {
-        if (!stop.SubscriptionDayId.HasValue)
+        var subscriptionDayId = stop.SubscriptionDayId;
+        if (!subscriptionDayId.HasValue && stop.DailyOrderId is { } dailyOrderId)
+        {
+            subscriptionDayId = await _db.RestaurantDailyOrders.AsNoTracking()
+                .Where(x => x.Id == dailyOrderId)
+                .Select(x => (Guid?)x.SubscriptionDayId)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        if (!subscriptionDayId.HasValue)
         {
             return Guid.Empty;
         }
 
-        return await _db.SubscriptionDays
-            .Where(d => d.Id == stop.SubscriptionDayId.Value)
+        var customerUserId = await _db.SubscriptionDays
+            .Where(d => d.Id == subscriptionDayId.Value)
             .Join(_db.Subscriptions, d => d.SubscriptionId, s => s.Id, (d, s) => s.CustomerUserId)
             .FirstOrDefaultAsync(cancellationToken);
+        if (customerUserId == Guid.Empty)
+            return Guid.Empty;
+        return customerUserId;
     }
 
     /// <summary>Merges the legacy singular evidence key (kept for backward

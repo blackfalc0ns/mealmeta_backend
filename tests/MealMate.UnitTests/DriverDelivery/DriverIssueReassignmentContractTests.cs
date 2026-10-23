@@ -6,16 +6,19 @@ using MealMate.Application.Common.Storage;
 using MealMate.Application.Features.DriverDelivery.DriverApp;
 using MealMate.Application.Features.DriverDelivery.Dispatcher;
 using MealMate.Domain.Common;
+using MealMate.Domain.CalendarMeals;
 using MealMate.Domain.ComplaintsSupport;
 using MealMate.Domain.DriverDelivery;
 using MealMate.Domain.Enums;
 using MealMate.Domain.IdentityAccess;
+using MealMate.Domain.ProgramsSubscriptions;
 using MealMate.Persistence;
 using MealMate.Persistence.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using NSubstitute;
 using System.Globalization;
+using MealMate.Domain.ValueObjects;
 using Xunit;
 
 namespace MealMate.UnitTests.DriverDelivery;
@@ -52,7 +55,33 @@ public class DriverIssueReassignmentContractTests
     {
         var storage = Substitute.For<IFileStorage>();
         storage.ExistsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(true);
+        storage.OpenReadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult<Stream>(new MemoryStream(EvidenceBytes(call.Arg<string>()))));
         return storage;
+    }
+
+    private static byte[] EvidenceBytes(string key) => Path.GetExtension(key).ToLowerInvariant() switch
+    {
+        ".png" => [137, 80, 78, 71, 13, 10, 26, 10, 0, 0],
+        ".webp" => [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50],
+        ".pdf" => "%PDF-1.7"u8.ToArray(),
+        _ => [0xff, 0xd8, 0xff, 0xd9]
+    };
+
+    private static MealMate.Application.Common.Storage.SupportEvidenceScanService CreateEvidenceScans(IFileStorage storage)
+    {
+        var scanner = Substitute.For<MealMate.Application.Common.Abstractions.IEvidenceMalwareScanner>();
+        scanner.ScanAsync(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new MealMate.Application.Common.Abstractions.EvidenceScanResult(
+                MealMate.Application.Common.Abstractions.EvidenceScanVerdict.Clean, "test")));
+        var receipts = Substitute.For<MealMate.Application.Common.Storage.ISupportEvidenceScanReceiptStore>();
+        receipts.GetOrScanAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<long>(), Arg.Any<string>(), Arg.Any<int>(),
+                Arg.Any<Func<CancellationToken, Task<MealMate.Application.Common.Abstractions.EvidenceScanResult>>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task<MealMate.Application.Common.Abstractions.EvidenceScanResult>>>()(call.Arg<CancellationToken>()));
+        receipts.AppendAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<long>(), Arg.Any<string>(), Arg.Any<int>(),
+                Arg.Any<MealMate.Application.Common.Abstractions.EvidenceScanResult>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        return new MealMate.Application.Common.Storage.SupportEvidenceScanService(storage, scanner, receipts);
     }
 
     private static DriverProfile SeedDriver(AppDbContext db, ICurrentUser currentUser)
@@ -73,6 +102,27 @@ public class DriverIssueReassignmentContractTests
     private static (Trip Trip, TripStop Stop) SeedAssignedStop(
         AppDbContext db, DriverProfile driver, TripStopStatus status = TripStopStatus.PickedUp, string code = "BX-0801")
     {
+        var suffix = Guid.NewGuid().ToString("N");
+        var customer = new ApplicationUser { Id = Guid.NewGuid(), UserType = UserType.Customer, AccountStatus = AccountStatus.Active };
+        var program = new MealMate.Domain.ProgramsSubscriptions.Program
+        {
+            Code = $"DRIVER-ISSUE-{suffix}", NameAr = "برنامج اختبار البلاغ", NameEn = "Issue contract program",
+            Status = ProgramStatus.Active, IsActive = true
+        };
+        var bundle = new Bundle
+        {
+            ProgramId = program.Id, Code = $"ISSUE-{suffix}", NameAr = "باقة اختبار", NameEn = "Issue contract bundle",
+            MealsPerDay = 1, LunchCount = 1, Status = ProgramStatus.Active, IsActive = true
+        };
+        var subscription = new Subscription
+        {
+            CustomerUserId = customer.Id, ProgramId = program.Id, BundleId = bundle.Id, SelectedTier = RestaurantTier.Basic,
+            DurationDays = 1, IncludeFriday = true, Status = SubscriptionStatus.Active,
+            StartDate = DateOnly.FromDateTime(DateTime.UtcNow), EndDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            PaidAmount = new Money(1m, "KWD")
+        };
+        var subscriptionDay = new SubscriptionDay { SubscriptionId = subscription.Id, ServiceDate = subscription.StartDate };
+        db.AddRange(customer, program, bundle, subscription, subscriptionDay);
         var trip = new Trip
         {
             RestaurantId = Guid.NewGuid(),
@@ -98,7 +148,8 @@ public class DriverIssueReassignmentContractTests
             MealSummaryAr = "2 وجبة",
             MealSummaryEn = "2 meals",
             SlotLabel = "09:20 ص",
-            Status = status
+            Status = status,
+            SubscriptionDayId = subscriptionDay.Id
         };
         db.TripStops.Add(stop);
         return (trip, stop);
@@ -112,7 +163,9 @@ public class DriverIssueReassignmentContractTests
             StorageKey = key,
             FileName = "evidence.jpg",
             ContentType = contentType,
-            SizeBytes = 2048,
+            SizeBytes = EvidenceBytes(key).Length,
+            Scope = "drivers",
+            Folder = "issue-evidence",
             UploadedByUserId = ownerUserId,
             UploadedAtUtc = DateTime.UtcNow
         };
@@ -123,6 +176,7 @@ public class DriverIssueReassignmentContractTests
     private static DriverDeliveryOrderCommandHandlers CreateHandler(
         AppDbContext db, ICurrentUser currentUser, ILocalizedMessageProvider messages, IFileStorage? storage = null)
         => new(db, currentUser, messages, fileStorage: storage,
+            evidenceScans: storage is null ? null : CreateEvidenceScans(storage),
             transactions: DriverDeliveryTestConcurrency.Transactions(), locks: DriverDeliveryTestConcurrency.Locks());
 
     #region 08.01 Report issue
@@ -309,7 +363,7 @@ public class DriverIssueReassignmentContractTests
         var result = await handler.Handle(new ReportDriverIssueCommand(
             stop.Id, IssueType: "SevereDelay", Description: "   "), CancellationToken.None);
 
-        result.IsSuccess.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue(result.Error?.ToString());
         var saved = await db.Complaints.SingleAsync();
         saved.Description.Should().NotBeNullOrWhiteSpace();
         saved.Title.Should().NotBeNullOrWhiteSpace();
@@ -365,7 +419,6 @@ public class DriverIssueReassignmentContractTests
 
     [Theory]
     [InlineData("uploads/drivers/issue-evidence/a.jpg")]
-    [InlineData("https://cdn.example/account/uploads/drivers/issue-evidence/a.jpg")]
     public async Task ReportIssue_MultipleKeys_PersistUpToThree_MergedWithLegacyAndDeduped(string firstKey)
     {
         await using var db = CreateDb();
@@ -373,8 +426,8 @@ public class DriverIssueReassignmentContractTests
         var driver = SeedDriver(db, currentUser);
         var (_, stop) = SeedAssignedStop(db, driver);
         SeedUpload(db, driver.UserId, firstKey);
-        SeedUpload(db, driver.UserId, "uploads/drivers/issue-evidence/b.png");
-        SeedUpload(db, driver.UserId, "uploads/drivers/issue-evidence/c.webp");
+        SeedUpload(db, driver.UserId, "uploads/drivers/issue-evidence/b.png", "image/png");
+        SeedUpload(db, driver.UserId, "uploads/drivers/issue-evidence/c.webp", "image/webp");
         await db.SaveChangesAsync();
 
         var handler = CreateHandler(db, currentUser, messages, ExistingStorage());
@@ -409,14 +462,40 @@ public class DriverIssueReassignmentContractTests
             .Handle(new GetDriverSupportIssueQuery(result.Value), default);
         driverDetail.IsSuccess.Should().BeTrue();
         driverDetail.Value.EvidenceUrls.Should().BeEquivalentTo(expectedUrls);
+        var managerUserId = Guid.NewGuid();
+        db.Users.Add(new ApplicationUser
+        {
+            Id = managerUserId, UserType = UserType.DeliveryManager, AccountStatus = AccountStatus.Active,
+            RestaurantId = saved.RestaurantId
+        });
+        await db.SaveChangesAsync();
         var manager = Substitute.For<ICurrentUser>();
-        manager.IsAuthenticated.Returns(true); manager.UserId.Returns(Guid.NewGuid());
+        manager.IsAuthenticated.Returns(true); manager.UserId.Returns(managerUserId);
         manager.UserType.Returns(UserType.DeliveryManager); manager.RestaurantId.Returns(saved.RestaurantId);
         var managerDetail = await new GetDispatcherProblemDetailsQueryHandler(db, NullLocalizedMessageProvider.Instance, manager)
             .Handle(new GetDispatcherProblemDetailsQuery(result.Value), default);
         managerDetail.IsSuccess.Should().BeTrue();
         managerDetail.Value.EvidencePhotos.Select(p => p.Url).Should().BeEquivalentTo(expectedUrls);
         managerDetail.Value.EvidencePhotos.Select(p => p.Id).Should().BeEquivalentTo(saved.EvidencePhotos.Select(p => p.Id));
+    }
+
+    [Fact]
+    public async Task ReportIssue_ExternalCdnPhotoKey_IsRejected()
+    {
+        await using var db = CreateDb();
+        var (currentUser, messages) = CreateMocks();
+        var driver = SeedDriver(db, currentUser);
+        var (_, stop) = SeedAssignedStop(db, driver);
+        await db.SaveChangesAsync();
+
+        var handler = CreateHandler(db, currentUser, messages, ExistingStorage());
+        var result = await handler.Handle(new ReportDriverIssueCommand(
+            stop.Id, IssueType: "TrafficAccident", Description: "حادث",
+            EvidencePhotoStorageKey: "https://cdn.example/account/uploads/drivers/issue-evidence/a.jpg"), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error!.Code.Should().Be("driver.issue.photo_not_found");
+        db.Complaints.Should().BeEmpty();
     }
 
     [Fact]

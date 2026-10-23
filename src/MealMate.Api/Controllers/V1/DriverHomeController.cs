@@ -264,7 +264,8 @@ public sealed class DriverHomeController : ApiControllerBase
             DriverId: driverId,
             EvidencePhotoStorageKey: request.EvidencePhotoStorageKey,
             EvidencePhotoStorageKeys: request.EvidencePhotoStorageKeys,
-            Severity: request.Severity), cancellationToken);
+            Severity: request.Severity,
+            IdempotencyKey: request.IdempotencyKey), cancellationToken);
 
         if (!result.IsSuccess)
         {

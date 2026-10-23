@@ -20,6 +20,14 @@ internal sealed class SupportCaseAccess(IAppDbContext db, ICurrentUser currentUs
     public bool CanManage => IsSuperAdmin || (IsSupportAdmin && currentUser.HasPermission(PermissionCodes.SupportManage));
     public bool CanWriteInternal => IsSuperAdmin || (IsSupportAdmin && currentUser.HasPermission(PermissionCodes.SupportInternal));
 
+    public async Task<bool> HasActiveDriverIdentityAsync(CancellationToken ct)
+    {
+        if (!currentUser.IsAuthenticated || currentUser.UserType != UserType.Driver || ActorId is not { } actorId)
+            return false;
+        if (!await db.DriverProfiles.AsNoTracking().AnyAsync(x => x.UserId == actorId, ct)) return false;
+        return (await db.GetActiveAccountUserIdsAsync([actorId], ct)).Contains(actorId);
+    }
+
     public async Task<bool> HasPersistedPermissionAsync(string permissionCode, CancellationToken ct)
     {
         if (ActorId is not { } actorId) return false;
@@ -158,6 +166,7 @@ internal sealed class SupportCaseAccess(IAppDbContext db, ICurrentUser currentUs
     public async Task<bool> CanReadAsync(SupportCase supportCase, CancellationToken ct)
     {
         if (!currentUser.IsAuthenticated || !ActorId.HasValue) return false;
+        if (currentUser.UserType == UserType.Driver && !await HasActiveDriverIdentityAsync(ct)) return false;
         if (IsSupportAdmin || IsSuperAdmin) return await IsWithinAdminScopeAsync(supportCase, ct);
         if (supportCase.RequesterUserId == ActorId.Value) return true;
 
@@ -188,6 +197,8 @@ internal sealed class SupportCaseAccess(IAppDbContext db, ICurrentUser currentUs
     public async Task<IQueryable<SupportCase>> VisibleCasesAsync(CancellationToken ct)
     {
         var actorId = ActorId ?? Guid.Empty;
+        if (currentUser.UserType == UserType.Driver && !await HasActiveDriverIdentityAsync(ct))
+            return db.Set<SupportCase>().Where(_ => false);
         if (IsSuperAdmin || IsSupportAdmin)
         {
             var candidates = await db.GetActiveSupportOperatorCandidatesAsync(ct);
