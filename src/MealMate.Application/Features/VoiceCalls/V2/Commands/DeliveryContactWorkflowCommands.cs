@@ -256,7 +256,8 @@ public sealed class GetDeliveryContactCaseV2QueryHandler : IQueryHandler<GetDeli
             contactCaseValue.HoldId,
             hold is not null && hold.ResumedAtUtc is null,
             hold?.ResumedAtUtc is not null,
-            CanHold: contactCaseValue.QualifiedMissedCount >= 1 && contactCaseValue.HoldId is null && contactCaseValue.State == DeliveryContactCase.StateOpen,
+            // Temporarily hide Hold in /case for mobile testing, matching eligibility.
+            CanHold: false,
             CanRevealPhone: contactCaseValue.CanRevealPhone() && hold?.ResumedAtUtc is not null,
             contactCaseValue.LastCallId,
             contactCaseValue.CreatedAtUtc));

@@ -283,15 +283,15 @@ public sealed class ContactRadiusTemporarilyDisabledTests
     }
 
     [Theory]
-    [InlineData(0, "none", false, false, false)]
-    [InlineData(1, "none", true, false, false)]
-    [InlineData(2, "none", true, false, false)]
-    [InlineData(1, "active", false, false, false)]
-    [InlineData(2, "active", false, false, false)]
-    [InlineData(1, "resumed", false, true, false)]
-    [InlineData(2, "resumed", false, true, true)]
+    [InlineData(0, "none", false, false)]
+    [InlineData(1, "none", false, false)]
+    [InlineData(2, "none", false, false)]
+    [InlineData(1, "active", false, false)]
+    [InlineData(2, "active", false, false)]
+    [InlineData(1, "resumed", true, false)]
+    [InlineData(2, "resumed", true, true)]
     public async Task Eligibility_ReturnsCurrentWorkflow_WithHoldTemporarilyHiddenForMobileTesting(
-        int misses, string holdState, bool canHold, bool canRetry, bool canReveal)
+        int misses, string holdState, bool canRetry, bool canReveal)
     {
         await using var db = CreateInMemoryDbContext();
         var (stop, driver, customer) = await SeedDeliveryContext(db);
@@ -325,7 +325,7 @@ public sealed class ContactRadiusTemporarilyDisabledTests
         var caseResult = await new GetDeliveryContactCaseV2QueryHandler(
             new DeliveryContactCaseService(db, clock, eligibility), db)
             .Handle(new(stop.Id, driver), default);
-        caseResult.Value.CanHold.Should().Be(canHold);
+        caseResult.Value.CanHold.Should().BeFalse();
         result.Value.CanRevealPhone.Should().Be(caseResult.Value.CanRevealPhone);
 
         // Customer participants see the case, never driver-only action rights.
