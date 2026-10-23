@@ -10,6 +10,11 @@ namespace MealMate.Api.Controllers.V1;
 [Route("api/v1/support/cases")]
 public sealed class SupportCasesController(SupportCaseService service) : ApiControllerBase
 {
+    [HttpGet("/api/v1/support/delivered-boxes")]
+    [ProducesResponseType(typeof(SupportDeliveredBoxesPageDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> DeliveredBoxes([FromQuery] SupportDeliveredBoxesQuery query, CancellationToken ct)
+        => HandleResult(await service.GetDeliveredBoxesAsync(query, ct));
+
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] SupportCaseListQuery query, CancellationToken ct)
         => HandleResult(await service.ListAsync(query, ct));
