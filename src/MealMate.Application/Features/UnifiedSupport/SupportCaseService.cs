@@ -124,6 +124,8 @@ public sealed partial class SupportCaseService
             if (activeCycle is not null)
             {
                 activeCycleDto = Timing.SupportTimingPolicyService.MapCycleToDto(activeCycle);
+                if (!canReadInternal)
+                    activeCycleDto = activeCycleDto with { EscalationReason = null, Notes = null };
             }
         }
         return new SupportCaseDto(

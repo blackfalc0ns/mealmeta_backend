@@ -148,6 +148,7 @@ public sealed class SupportDeliveredBoxesHttpTests : IClassFixture<OrderLifecycl
         var restaurantId = Guid.NewGuid();
         var date = new DateOnly(2026, 10, 23);
         var orderId = Guid.NewGuid();
+        var fallbackDayId = Guid.NewGuid();
         await using (var db = _fixture.CreateDbContext())
         {
             var program = NewProgram();
@@ -155,31 +156,107 @@ public sealed class SupportDeliveredBoxesHttpTests : IClassFixture<OrderLifecycl
             var owned = NewSubscription(customerId, program.Id, bundle.Id, date);
             var foreign = NewSubscription(otherCustomerId, program.Id, bundle.Id, date);
             var ownDay = NewDay(owned.Id, restaurantId, date, SubscriptionDayStatus.Delivered);
+            var fallbackDay = NewDay(owned.Id, restaurantId, date.AddDays(-1), SubscriptionDayStatus.Delivered);
+            fallbackDay.Id = fallbackDayId;
             var foreignDay = NewDay(foreign.Id, restaurantId, date, SubscriptionDayStatus.Delivered);
             var ownedOrder = NewOrder(ownDay.Id, restaurantId, date, OrderStatus.Delivered, 2);
             ownedOrder.Id = orderId;
             var foreignOrder = NewOrder(foreignDay.Id, restaurantId, date, OrderStatus.Delivered, 1);
-            db.AddRange(program, bundle, owned, foreign, ownDay, foreignDay, ownedOrder, foreignOrder, NewRestaurant(restaurantId));
+            db.AddRange(program, bundle, owned, foreign, ownDay, fallbackDay, foreignDay, ownedOrder, foreignOrder, NewRestaurant(restaurantId));
             await db.SaveChangesAsync();
         }
 
         using var customer = _fixture.CreateClientForUser(new TokenUser(customerId, UserType.Customer, ["Customer"], []));
         var selector = await customer.GetFromJsonAsync<SupportDeliveredBoxesPageDto>("/api/v1/support/delivered-boxes");
-        var selected = selector!.Items.Should().ContainSingle().Subject;
-        selected.RelatedResourceId.Should().Be(orderId);
-        var create = await customer.PostAsJsonAsync("/api/v1/support/cases", new CreateSupportCaseRequest(
-            SupportCaseChannel.Customer, SupportCaseKind.Complaint, "delivery", "Delivered box issue", "Something was wrong.",
-            "delivered-box-selector-case", selected.RelatedResourceType, selected.RelatedResourceId));
-        create.StatusCode.Should().Be(HttpStatusCode.Created, await create.Content.ReadAsStringAsync());
-        var created = await create.Content.ReadFromJsonAsync<SupportCaseDto>();
-        created!.RelatedResourceType.Should().Be("RestaurantDailyOrder");
-        created.RelatedResourceId.Should().Be(orderId);
+        selector.Should().NotBeNull();
+        selector!.Items.Should().HaveCount(2);
+        var selectedOrder = selector.Items.Single(item => item.RelatedResourceType == "RestaurantDailyOrder");
+        selectedOrder.RelatedResourceId.Should().Be(orderId);
+        var selectedLegacyDay = selector.Items.Single(item => item.RelatedResourceType == "SubscriptionDay");
+        selectedLegacyDay.RelatedResourceId.Should().Be(fallbackDayId);
+
+        var orderCreate = await customer.PostAsJsonAsync("/api/v1/customer/support/issues", new CustomerSupportCreateRequest(
+            "MissingItems", "Delivered box issue", "Something was wrong.", "delivered-box-selector-order-issue",
+            selectedOrder.RelatedResourceType, selectedOrder.RelatedResourceId));
+        orderCreate.StatusCode.Should().Be(HttpStatusCode.Created, await orderCreate.Content.ReadAsStringAsync());
+        var createdOrderCase = await orderCreate.Content.ReadFromJsonAsync<SupportCaseDto>();
+        createdOrderCase!.Kind.Should().Be(nameof(SupportCaseKind.Complaint));
+        createdOrderCase.Category.Should().Be("customer.issue.MissingItems");
+        createdOrderCase.RelatedResourceType.Should().Be("RestaurantDailyOrder");
+        createdOrderCase.RelatedResourceId.Should().Be(orderId);
+
+        var dayCreate = await customer.PostAsJsonAsync("/api/v1/customer/support/issues", new CustomerSupportCreateRequest(
+            "MissingItems", "Legacy delivered day issue", "Something was wrong.", "delivered-box-selector-day-issue",
+            selectedLegacyDay.RelatedResourceType, selectedLegacyDay.RelatedResourceId));
+        dayCreate.StatusCode.Should().Be(HttpStatusCode.Created, await dayCreate.Content.ReadAsStringAsync());
+        var createdDayCase = await dayCreate.Content.ReadFromJsonAsync<SupportCaseDto>();
+        createdDayCase!.Kind.Should().Be(nameof(SupportCaseKind.Complaint));
+        createdDayCase.Category.Should().Be("customer.issue.MissingItems");
+        createdDayCase.RelatedResourceType.Should().Be("SubscriptionDay");
+        createdDayCase.RelatedResourceId.Should().Be(fallbackDayId);
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            var persistedCases = await db.SupportCases.AsNoTracking()
+                .Where(supportCase => supportCase.Id == createdOrderCase.Id || supportCase.Id == createdDayCase.Id)
+                .ToDictionaryAsync(supportCase => supportCase.Id);
+            persistedCases[createdOrderCase.Id].RelatedResourceType.Should().Be("RestaurantDailyOrder");
+            persistedCases[createdOrderCase.Id].RelatedResourceId.Should().Be(orderId);
+            persistedCases[createdDayCase.Id].RelatedResourceType.Should().Be("SubscriptionDay");
+            persistedCases[createdDayCase.Id].RelatedResourceId.Should().Be(fallbackDayId);
+        }
 
         using var other = _fixture.CreateClientForUser(new TokenUser(otherCustomerId, UserType.Customer, ["Customer"], []));
-        var forged = await other.PostAsJsonAsync("/api/v1/support/cases", new CreateSupportCaseRequest(
-            SupportCaseChannel.Customer, SupportCaseKind.Complaint, "delivery", "Foreign order", "Should not bind.",
-            "foreign-delivered-box-selector-case", "RestaurantDailyOrder", orderId));
+        var forged = await other.PostAsJsonAsync("/api/v1/customer/support/issues", new CustomerSupportCreateRequest(
+            "MissingItems", "Foreign order", "Should not bind.", "foreign-delivered-box-selector-case",
+            selectedOrder.RelatedResourceType, selectedOrder.RelatedResourceId));
         forged.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task CreateReplayIsResolvedBeforeSoftDeletedResourceAndStillChecksChangedPayload()
+    {
+        var customerId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+        var date = new DateOnly(2026, 10, 23);
+        var dayId = Guid.NewGuid();
+        await using (var db = _fixture.CreateDbContext())
+        {
+            var program = NewProgram();
+            var bundle = NewBundle(program.Id);
+            var subscription = NewSubscription(customerId, program.Id, bundle.Id, date);
+            var day = NewDay(subscription.Id, restaurantId, date, SubscriptionDayStatus.Delivered);
+            day.Id = dayId;
+            db.AddRange(program, bundle, subscription, day, NewRestaurant(restaurantId));
+            await db.SaveChangesAsync();
+        }
+
+        using var customer = _fixture.CreateClientForUser(new TokenUser(customerId, UserType.Customer, ["Customer"], []));
+        var request = new CreateSupportCaseRequest(SupportCaseChannel.Customer, SupportCaseKind.Complaint,
+            "delivery", "Delivered day issue", "Please review this delivered day.",
+            "soft-deleted-resource-create-replay", "SubscriptionDay", dayId);
+        var createdResponse = await customer.PostAsJsonAsync("/api/v1/support/cases", request);
+        createdResponse.StatusCode.Should().Be(HttpStatusCode.Created, await createdResponse.Content.ReadAsStringAsync());
+        var created = await createdResponse.Content.ReadFromJsonAsync<SupportCaseDto>();
+        created.Should().NotBeNull();
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            var day = await db.SubscriptionDays.SingleAsync(subscriptionDay => subscriptionDay.Id == dayId);
+            day.IsDeleted = true;
+            await db.SaveChangesAsync();
+        }
+
+        var replay = await customer.PostAsJsonAsync("/api/v1/support/cases", request);
+        replay.StatusCode.Should().Be(HttpStatusCode.Created, await replay.Content.ReadAsStringAsync());
+        (await replay.Content.ReadFromJsonAsync<SupportCaseDto>())!.Id.Should().Be(created!.Id);
+
+        var changedReplay = await customer.PostAsJsonAsync("/api/v1/support/cases", request with { Subject = "Changed after deletion" });
+        changedReplay.StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        var newKeyRequest = request with { IdempotencyKey = "soft-deleted-resource-new-key" };
+        var missingResource = await customer.PostAsJsonAsync("/api/v1/support/cases", newKeyRequest);
+        missingResource.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     private static MealMate.Domain.ProgramsSubscriptions.Program NewProgram()

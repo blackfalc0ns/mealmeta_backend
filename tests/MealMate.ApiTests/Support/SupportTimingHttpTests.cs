@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FluentAssertions;
 using MealMate.ApiTests.OrderLifecycle;
 using MealMate.Application.Common.Abstractions;
@@ -32,6 +33,46 @@ public sealed class SupportTimingHttpTests : IClassFixture<OrderLifecycleEndToEn
         using var anonymous = _fixture.Factory.CreateClient();
         var response = await anonymous.GetAsync("/api/v1/support/timing-policies");
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task PersistedSupportInternalOperatorCanReadPrivateTimingCycleText()
+    {
+        var scopeId = Guid.NewGuid();
+        var restaurantId = Guid.NewGuid();
+        var admin = new TokenUser(Guid.NewGuid(), UserType.Admin, ["SupportOperator"],
+            [PermissionCodes.SupportView, PermissionCodes.SupportInternal], ScopeIds: [scopeId]);
+        var now = DateTime.UtcNow;
+        var supportCase = SupportCase.Create(SupportCaseChannel.Restaurant, SupportCaseKind.Complaint,
+            SupportCaseOwnerTeam.PlatformSupport, "delivery", "Restaurant delivery issue", "Review required.",
+            Guid.NewGuid(), now, restaurantId: restaurantId);
+        var cycle = SupportCaseTimingCycle.StartConfigured(supportCase.Id, 1, Guid.NewGuid(), 1, Guid.NewGuid(), now,
+            now.AddMinutes(30), now.AddHours(4), TimeSpan.FromHours(2));
+        cycle.Escalate("Private escalation reason", now.AddMinutes(1));
+        cycle.SetUnrouted(true, "Private routing notes");
+        supportCase.SetActiveTimingCycle(cycle.Id);
+        await using (var db = _fixture.CreateDbContext())
+        {
+            db.AccessScopes.Add(new AccessScope
+            {
+                Id = scopeId,
+                Name = "Global support internal test scope",
+                ScopeType = AccessScopeType.Global,
+                IsActive = true,
+            });
+            db.SupportCases.Add(supportCase);
+            db.SupportCaseTimingCycles.Add(cycle);
+            await db.SaveChangesAsync();
+            await SupportTestIdentity.SeedAsync(db, admin);
+        }
+
+        using var client = _fixture.CreateClientForUser(admin);
+        var response = await client.GetFromJsonAsync<JsonElement>($"/api/v1/support/cases/{supportCase.Id}");
+        var activeCycle = response.GetProperty("activeTimingCycle");
+        activeCycle.GetProperty("escalationReason").GetString().Should().Be("Private escalation reason");
+        activeCycle.GetProperty("notes").GetString().Should().Be("Private routing notes");
+        activeCycle.GetProperty("isEscalated").GetBoolean().Should().BeTrue();
+        activeCycle.GetProperty("isUnrouted").GetBoolean().Should().BeTrue();
     }
 
     [Fact]

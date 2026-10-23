@@ -28,6 +28,7 @@ public sealed partial class SupportCaseService
         if (ActorId is null) return Unauthorized();
         if (_currentUser.UserType == MealMate.Domain.Enums.UserType.Admin && !_access.IsSupportAdmin && !_access.IsSuperAdmin) return Forbidden();
         if (query.PageNumber < 1 || query.PageSize is < 1 or > 100
+            || (long)query.PageNumber * query.PageSize > int.MaxValue
             || (query.Status.HasValue && !Enum.IsDefined(query.Status.Value))
             || (query.Kind.HasValue && !Enum.IsDefined(query.Kind.Value))) return Invalid();
         var cases = await _access.VisibleCasesAsync(ct);

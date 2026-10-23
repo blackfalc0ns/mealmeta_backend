@@ -52,6 +52,14 @@ public sealed class SupportCasesHttpTests : IClassFixture<OrderLifecycleEndToEnd
     }
 
     [Fact]
+    public async Task GenericCaseListRejectsOffsetOverflow()
+    {
+        using var customer = _fixture.CreateClientForUser(new TokenUser(Guid.NewGuid(), UserType.Customer, ["Customer"], []));
+        var response = await customer.GetAsync("/api/v1/support/cases?pageNumber=2147483647&pageSize=2");
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
     public async Task RestaurantStaffCanCloseAndReopenOwnCaseUsingUrlActionWithoutBodyAction()
     {
         var restaurantId = Guid.NewGuid();

@@ -11,17 +11,23 @@
 1. اعرض الخيارات من `GET /api/v1/customer/support/options` ثم افتح شكوى أو اقتراحاً من القائمتين الموضحتين أعلاه. تعرض صفحات `GET /api/v1/customer/support/issues` و`GET /api/v1/customer/support/suggestions` تذاكر العميل فقط.
 2. التفاصيل من `GET /api/v1/customer/support/{requestType}/{caseId}`. كل عنصر قائمة يحتوي `id`, `requestType`, `typeCode` (قد يكون `null` للتصنيف القديم), `category`, `subject`, `status`, `createdAtUtc`, `modifiedAtUtc` (قد يكون `null`), و`version`.
 3. الرد والإرفاق عبر مسار العميل المخصص كما سبق. اعرض الرسائل العامة المرئية، حالة الخادم، المرفقات المقروءة، وموعد SLA إن أعاده الخادم. لا تعرض المهام الخاصة أو مخرجاتها.
-4. الإغلاق متاح من حالة `Resolved` فقط. إعادة الفتح تحتاج سبباً غير فارغ. أرسل الإصدار الحالي ومفتاح idempotency منفصلاً لكل عملية.
+4. الإغلاق متاح من حالة `Resolved` فقط. إعادة الفتح تحتاج سبباً غير فارغ. أرسل الإصدار الحالي ومفتاح idempotency منفصلاً لكل عملية. إعادة الفتح من العميل تنشئ إشعار inbox واحداً لمشغل دعم منصة مؤهل؛ تعطى الأولوية للمشغل المؤهل المعيّن، ولا تكرر إعادة المحاولة المطابقة الإشعار. هذا إشعار داخل التطبيق ولا يثبت إرسال push خارجي.
 
 للتوافق مع العملاء القديمة، تبقى مسارات `/api/v1/support/cases` المشتركة صالحة لعرض/إنشاء الحالات العامة وفق العقد المشترك؛ استمر باستخدامها لمسار الإشعارات العميق الموجود `/support/cases/{caseId}` حتى يعيد التطبيق تحميل الحالة. لا تخلط أسماء requestType في الواجهة المخصصة مع مسارات `cases` المشتركة.
 
 ## اختيار يوم التوصيل والصندوق المرتبط بالشكوى
 
-لا توجد شاشة جوال جاهزة لهذا التدفق في هذا المستودع. لبناء محدد اختيار العناصر المسلّمة فقط، استخدم `GET /api/v1/support/delivered-boxes?pageNumber=1&pageSize=20` مع جلسة عميل. يمكن تمرير `fromDate`, `toDate` بصيغة `YYYY-MM-DD` و`subscriptionId`. يعيد الخادم العناصر المملوكة للعميل فقط: كل طلب يومي بحالة `Delivered` مرة واحدة، أو يوم اشتراك قديم بحالة `Delivered` فقط إذا لم يوجد له أي طلب يومي. الطلبات المعلقة أو الفاشلة أو الملغاة والأيام المحذوفة لا تظهر. هذه أهلية قائمة الاختيار فقط؛ إنشاء شكوى عامة أو مرتبطة بمورد يظل خاضعاً للتحقق المعتاد، ولا يمنع هذا المسار شكاوى التأخير أو عدم الاستلام.
+لا توجد شاشة جوال جاهزة لهذا التدفق في هذا المستودع. لبناء محدد اختيار العناصر المسلّمة فقط، استخدم `GET /api/v1/support/delivered-boxes?pageNumber=1&pageSize=20` مع جلسة عميل. يمكن تمرير `fromDate`, `toDate` بصيغة `YYYY-MM-DD` و`subscriptionId`. يعيد الخادم العناصر المملوكة للعميل فقط: كل طلب يومي بحالة `Delivered` مرة واحدة، أو يوم اشتراك قديم بحالة `Delivered` فقط إذا لم يوجد له أي طلب يومي. الطلبات المعلقة أو الفاشلة أو الملغاة والأيام المحذوفة لا تظهر. لا يمنع اختيار مورد مسلّم تقديم شكوى عن التأخير أو عدم الاستلام.
 
 تحتوي الاستجابة على `{items,totalCount,pageNumber,pageSize}`. العنصر يتضمن `subscriptionId`, `subscriptionDayId`, و`restaurantDailyOrderId` القابل لأن يكون `null`, و`serviceDate`, و`restaurantId` وأسماء المطعم القابلة لأن تكون `null`, و`boxCount` القابل لأن يكون `null` لليوم القديم، و`orderCode` و`deliveredAtUtc` القابلين لأن يكونا `null`, و`relatedResourceType`/`relatedResourceId`. القيم المدعومة لمورد الشكوى في هذه القائمة هي `RestaurantDailyOrder` و`SubscriptionDay`. اجمع العناصر في التطبيق حسب `serviceDate` عند عرضها كأيام؛ قد يحتوي اليوم أكثر من طلب يومي. وقت التسليم يأتي من محطة رحلة مسلّمة مطابقة فقط، ولا يقدّر الخادم وقتاً عند غياب سجل حقيقي.
 
-بعد اختيار عنصر، أرسل `relatedResourceType` و`relatedResourceId` كما أعادهما الخادم إلى `POST /api/v1/support/cases`. يتحقق الخادم من ملكية المورد؛ لا تستخدم معرف الاشتراك أو اليوم كبديل عن المعرف المحدد في العنصر المختار. `GET /api/v1/customer/delivery-widget?serviceDate=YYYY-MM-DD&subscriptionId={subscriptionId}` يظل مساراً عاماً لبطاقة التوصيل، وليس قائمة أهلية للشكاوى: قد يعرض حالات غير مسلّمة. لتفاصيل اليوم استخدم `GET /api/v1/customer/subscription-days/{subscriptionDayId}/delivery-details`؛ الخادم يتحقق من صلاحية القراءة ويعيد `404` عند غياب اليوم أو عدم السماح بالوصول.
+بعد اختيار عنصر، أنشئ الشكوى من المسار المخصص `POST /api/v1/customer/support/issues` مستخدماً `typeCode`, `subject`, `description`, `idempotencyKey`, وحقلي المورد كما أعادهما العنصر:
+
+```json
+{"typeCode":"MissingItems","subject":"Delivered order issue","description":"Describe the issue","idempotencyKey":"<unique-key>","relatedResourceType":"<selected-relatedResourceType>","relatedResourceId":"<selected-relatedResourceId>"}
+```
+
+استخدم القيمتين المختارتين حرفياً؛ لا ترسل معرف الاشتراك أو اليوم بدلاً من `relatedResourceId`. الخادم يتحقق من ملكية المورد. يظل `POST /api/v1/support/cases` متوافقاً مع الإنشاء العام، لكنه غير مطلوب لتدفق شكوى الصندوق المسلّم. `GET /api/v1/customer/delivery-widget?serviceDate=YYYY-MM-DD&subscriptionId={subscriptionId}` يظل مساراً عاماً لبطاقة التوصيل، وليس قائمة أهلية للشكاوى: قد يعرض حالات غير مسلّمة. لتفاصيل اليوم استخدم `GET /api/v1/customer/subscription-days/{subscriptionDayId}/delivery-details`؛ الخادم يتحقق من صلاحية القراءة ويعيد `404` عند غياب اليوم أو عدم السماح بالوصول.
 
 ## الإشعارات
 

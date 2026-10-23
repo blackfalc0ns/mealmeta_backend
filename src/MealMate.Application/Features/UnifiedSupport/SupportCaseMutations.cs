@@ -42,15 +42,6 @@ public sealed partial class SupportCaseService
             return Error.Validation(SupportCaseProblemCodes.OperationalRouteRequired);
         await _locks.LockSupportHandoverKeyAsync(actorId.Value, request.IdempotencyKey, ct);
 
-        var resource = await ResolveCustomerResourceAsync(request.Channel, actorId.Value,
-            request.RelatedResourceType, request.RelatedResourceId, ct);
-        if (!resource.Supported) return Invalid();
-        if (!resource.Found) return NotFound();
-
-        var owner = SupportCaseOwnerTeam.PlatformSupport;
-        var triage = await ResolveTriageGeographyAsync(request.Channel, actorId.Value, ct);
-        var selectedRestaurantId = request.Channel is SupportCaseChannel.Restaurant or SupportCaseChannel.DeliveryManager
-            ? _currentUser.RestaurantId : resource.RestaurantId;
         var hash = Hash(new { Operation = "create", Request = request });
         try
         {
@@ -63,6 +54,16 @@ public sealed partial class SupportCaseService
             }
         }
         catch (SupportCaseIdempotencyException) { return Conflict(SupportCaseProblemCodes.IdempotencyKeyReused); }
+
+        var resource = await ResolveCustomerResourceAsync(request.Channel, actorId.Value,
+            request.RelatedResourceType, request.RelatedResourceId, ct);
+        if (!resource.Supported) return Invalid();
+        if (!resource.Found) return NotFound();
+
+        var owner = SupportCaseOwnerTeam.PlatformSupport;
+        var triage = await ResolveTriageGeographyAsync(request.Channel, actorId.Value, ct);
+        var selectedRestaurantId = request.Channel is SupportCaseChannel.Restaurant or SupportCaseChannel.DeliveryManager
+            ? _currentUser.RestaurantId : resource.RestaurantId;
 
         SupportCase supportCase;
         try
@@ -496,6 +497,8 @@ public sealed partial class SupportCaseService
         };
         _db.SupportCaseEvents.Add(supportEvent);
         if (action is "request-information" or "resolve") await NotifyRequesterAsync(supportCase, supportEvent, now, ct);
+        if (action == "reopen" && requesterActor)
+            await NotifyPlatformOperatorsAsync(supportCase, supportEvent, now, "support.case.reopened", ct);
         if (action == "complete-party-task" && isAssignedTaskRecipient)
             await NotifyPlatformOperatorsAsync(supportCase, supportEvent, now, "support.case.task.completed", ct);
         if (action == "create-party-task" && createdTask is not null)

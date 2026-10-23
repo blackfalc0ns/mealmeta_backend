@@ -164,6 +164,35 @@ public sealed class CustomerSupportHttpTests : IClassFixture<OrderLifecycleEndTo
     }
 
     [Fact]
+    public async Task CustomerCaseDetailAndSharedListDoNotExposePrivateTimingCycleText()
+    {
+        var customerId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        var supportCase = SupportCase.Create(SupportCaseChannel.Customer, SupportCaseKind.Complaint,
+            SupportCaseOwnerTeam.PlatformSupport, "customer.issue.Payment", "Payment support", "Please review this payment.",
+            customerId, now);
+        var cycle = SupportCaseTimingCycle.StartConfigured(supportCase.Id, 1, Guid.NewGuid(), 1, Guid.NewGuid(), now,
+            now.AddMinutes(30), now.AddHours(4), TimeSpan.FromHours(2));
+        cycle.Escalate("Private escalation reason", now.AddMinutes(1));
+        cycle.SetUnrouted(true, "Private routing notes");
+        supportCase.SetActiveTimingCycle(cycle.Id);
+        await using (var db = _fixture.CreateDbContext())
+        {
+            db.SupportCases.Add(supportCase);
+            db.SupportCaseTimingCycles.Add(cycle);
+            await db.SaveChangesAsync();
+        }
+
+        using var customer = _fixture.CreateClientForUser(new TokenUser(customerId, UserType.Customer, ["Customer"], []));
+        var detail = await customer.GetFromJsonAsync<JsonElement>($"/api/v1/customer/support/issues/{supportCase.Id}");
+        AssertCustomerTimingCycleRedacted(detail.GetProperty("activeTimingCycle"), now.AddHours(4), now.AddHours(2));
+
+        var list = await customer.GetFromJsonAsync<JsonElement>("/api/v1/support/cases?kind=Complaint");
+        var item = list.GetProperty("items").EnumerateArray().Single(entry => entry.GetProperty("id").GetGuid() == supportCase.Id);
+        AssertCustomerTimingCycleRedacted(item.GetProperty("activeTimingCycle"), now.AddHours(4), now.AddHours(2));
+    }
+
+    [Fact]
     public async Task CustomerCanReplyAndCloseOrReopenOnlyOwnTypedCases()
     {
         var customerId = Guid.NewGuid();
@@ -237,4 +266,14 @@ public sealed class CustomerSupportHttpTests : IClassFixture<OrderLifecycleEndTo
 
     private static string[] ReadOptionValues(JsonElement options)
         => options.EnumerateArray().Select(option => option.GetProperty("value").GetString()!).ToArray();
+
+    private static void AssertCustomerTimingCycleRedacted(JsonElement cycle, DateTime resolutionDeadline, DateTime escalationDeadline)
+    {
+        cycle.GetProperty("isEscalated").GetBoolean().Should().BeTrue();
+        cycle.GetProperty("isUnrouted").GetBoolean().Should().BeTrue();
+        cycle.GetProperty("resolutionDeadlineUtc").GetDateTime().Should().BeCloseTo(resolutionDeadline, TimeSpan.FromSeconds(1));
+        cycle.GetProperty("escalationDeadlineUtc").GetDateTime().Should().BeCloseTo(escalationDeadline, TimeSpan.FromSeconds(1));
+        cycle.GetProperty("escalationReason").ValueKind.Should().Be(JsonValueKind.Null);
+        cycle.GetProperty("notes").ValueKind.Should().Be(JsonValueKind.Null);
+    }
 }
