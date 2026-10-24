@@ -417,25 +417,11 @@ public sealed class DriverDeliveryOrderCommandHandlers
                 : "A photo documenting box delivery and condition is required.");
         }
 
-        // 2. Barcode & OTP are completely optional at delivery.
-        // If a barcode is scanned, we verify it matches the order code to prevent accidental mixup.
-        // NOTE: DeliveryOtp is deliberately NOT read anywhere — no verification system
-        // exists yet, so no OTP support may be advertised (screens-07 contract).
-        if (!string.IsNullOrWhiteSpace(request.BarcodeValue))
-        {
-            var cleanInputBarcode = request.BarcodeValue.Trim().TrimStart('#');
-            var cleanOrderCode = stop.OrderCode?.Trim().TrimStart('#') ?? string.Empty;
-
-            if (!string.IsNullOrWhiteSpace(cleanOrderCode)
-                && !cleanInputBarcode.Equals(cleanOrderCode, StringComparison.OrdinalIgnoreCase)
-                && !cleanOrderCode.EndsWith(cleanInputBarcode, StringComparison.OrdinalIgnoreCase)
-                && !cleanInputBarcode.EndsWith(cleanOrderCode, StringComparison.OrdinalIgnoreCase))
-            {
-                return Error.Validation("Orders.BarcodeMismatch", isAr
-                    ? "باركود الفاتورة الممسوح عند التسليم لا يطابق هذا العميل."
-                    : "Scanned delivery barcode does not match this customer's box.");
-            }
-        }
+        // Repeat the pickup QR for this order before accepting delivery evidence.
+        // DeliveryOtp remains unverified and cannot substitute for this scan.
+        var qrError = await DeliveryPickupQrGuard.ValidateAsync(
+            _db, _messages, stop, driverId, request.BarcodeValue, cancellationToken);
+        if (qrError is not null) return qrError;
 
         // 3. Proof photo binding: the key must reference a real upload recorded by
         // the generic upload endpoint, owned by the delivering driver, and be an
@@ -469,7 +455,7 @@ public sealed class DriverDeliveryOrderCommandHandlers
             OrderId = stop.DailyOrderId,
             SubscriptionDayId = stop.SubscriptionDayId,
             DriverProfileId = driverId ?? Guid.Empty,
-            BarcodeValue = request.BarcodeValue ?? stop.OrderCode ?? "DELIVERED",
+            BarcodeValue = DeliveryPickupQrGuard.Normalize(request.BarcodeValue!),
             PhotoPath = request.ProofPhotoStorageKey,
             Latitude = request.Latitude,
             Longitude = request.Longitude,

@@ -150,6 +150,24 @@ public sealed class DriverOfflineSyncCommandHandler
                         }
                         if (stop.Status != TripStopStatus.PickedUp && stop.Status != TripStopStatus.Delivered)
                         {
+                            var pickupCode = string.IsNullOrWhiteSpace(item.BarcodeValue)
+                                ? string.Empty : DeliveryPickupQrGuard.Normalize(item.BarcodeValue);
+                            var matchesLabel = pickupCode.Length > 0
+                                && (!stop.MealBarcodeId.HasValue && !string.IsNullOrWhiteSpace(stop.OrderCode)
+                                    && pickupCode == DeliveryPickupQrGuard.Normalize(stop.OrderCode)
+                                    || await _db.MealBarcodes.AnyAsync(b =>
+                                        !b.IsRevoked && b.Status != MealBarcodeStatus.Revoked && b.Status != MealBarcodeStatus.Archived
+                                        && (stop.MealBarcodeId.HasValue ? b.Id == stop.MealBarcodeId
+                                            : stop.SubscriptionDayId.HasValue && b.SubscriptionDayId == stop.SubscriptionDayId
+                                                && (!b.TripStopId.HasValue || b.TripStopId == stop.Id))
+                                        && (b.BarcodeValue == pickupCode || b.BarcodeValue == "#" + pickupCode), cancellationToken));
+                            if (!matchesLabel)
+                            {
+                                results.Add(new OfflineSyncItemResultDto(item.ClientActionId, item.BoxId, item.ActionType,
+                                    false, _messages.GetMessage(pickupCode.Length == 0
+                                        ? "Orders.DeliveryBarcodeRequired" : "Orders.BarcodeMismatch")));
+                                break;
+                            }
                             stop.Status = TripStopStatus.PickedUp;
                             _db.PickupScans.Add(new PickupScan
                             {
@@ -157,7 +175,7 @@ public sealed class DriverOfflineSyncCommandHandler
                                 OrderId = stop.DailyOrderId,
                                 SubscriptionDayId = stop.SubscriptionDayId,
                                 DriverProfileId = driverId,
-                                BarcodeValue = item.BarcodeValue ?? stop.OrderCode ?? "PICKED_UP",
+                                BarcodeValue = pickupCode,
                                 PhotoPath = item.PhotoStorageKey!,
                                 Latitude = item.Latitude,
                                 Longitude = item.Longitude,
@@ -170,6 +188,17 @@ public sealed class DriverOfflineSyncCommandHandler
                     case "deliver":
                     case "delivery":
                     case "deliveryconfirmation":
+                        if (stop.Status != TripStopStatus.Delivered)
+                        {
+                            var qrError = await DeliveryPickupQrGuard.ValidateAsync(
+                                _db, _messages, stop, driverId, item.BarcodeValue, cancellationToken);
+                            if (qrError is not null)
+                            {
+                                results.Add(new OfflineSyncItemResultDto(item.ClientActionId, item.BoxId,
+                                    item.ActionType, false, qrError.Description));
+                                break;
+                            }
+                        }
                         if (!await ValidateOfflineEvidenceAsync(item.PhotoStorageKey, driverId, cancellationToken))
                         {
                             results.Add(new OfflineSyncItemResultDto(item.ClientActionId, item.BoxId, item.ActionType, false,
@@ -191,7 +220,7 @@ public sealed class DriverOfflineSyncCommandHandler
                                 OrderId = stop.DailyOrderId,
                                 SubscriptionDayId = stop.SubscriptionDayId,
                                 DriverProfileId = driverId,
-                                BarcodeValue = item.BarcodeValue ?? stop.OrderCode ?? "DELIVERED",
+                                BarcodeValue = DeliveryPickupQrGuard.Normalize(item.BarcodeValue!),
                                 PhotoPath = item.PhotoStorageKey!,
                                 Latitude = item.Latitude,
                                 Longitude = item.Longitude,

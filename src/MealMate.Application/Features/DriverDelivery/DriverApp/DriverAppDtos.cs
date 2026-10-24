@@ -98,6 +98,7 @@ public sealed record PickupBoxResponseDto(
     DateTime PickedUpAtUtc,
     bool IsManualEntry = false);
 
+/// <summary>BarcodeValue must contain the QR scanned again at delivery, matching the persisted pickup scan.</summary>
 public sealed record CompleteDeliveryRequest(
     string? BarcodeValue = null,
     string? ProofPhotoStorageKey = null,
@@ -116,7 +117,7 @@ public sealed record CompleteDeliveryRequest(
 /// stays the original instant, <see cref="IsFirstDelivery"/> is false, and no
 /// counter, scan record, or notification is repeated.
 /// Note: the request's deliveryOtp field is currently NOT verified by the
-/// backend; delivery works with proof photo only. See the screens-07 contract
+/// backend; delivery requires the pickup QR again and a proof photo. See the screens-07 contract
 /// documentation before advertising OTP support in any UI.
 /// </summary>
 public sealed record CompleteDeliveryResponseDto(

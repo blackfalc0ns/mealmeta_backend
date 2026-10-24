@@ -1575,4 +1575,7 @@
   <data name="support.operational_route_required" xml:space="preserve"><value>Operational driver reports must use the guarded delivery issue workflow.</value></data>
   <data name="support.attachment_unsupported" xml:space="preserve"><value>This file cannot be attached. Use a supported image or PDF file smaller than 25 MB.</value></data>
   <data name="support.attachment_storage_unavailable" xml:space="preserve"><value>Private support file storage is temporarily unavailable.</value></data>
+  <data name="Orders.DeliveryBarcodeRequired" xml:space="preserve"><value>Scan the same box QR used at pickup before confirming delivery.</value></data>
+  <data name="Orders.DeliveryPickupScanRequired" xml:space="preserve"><value>No pickup scan was found for this order and driver. Delivery cannot be confirmed.</value></data>
+  <data name="Orders.BarcodeMismatch" xml:space="preserve"><value>The scanned box QR does not match this customer's pickup QR. Scan the correct box.</value></data>
 </root>

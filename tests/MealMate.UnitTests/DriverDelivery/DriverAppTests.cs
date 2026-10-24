@@ -647,12 +647,12 @@ public class DriverAppTests
 
         var trip = new Trip { RestaurantId = Guid.NewGuid(), Code = "TRP-101", PlannedDate = DateOnly.FromDateTime(DateTime.UtcNow) };
         db.Trips.Add(trip);
-        AddAssignedDriver(db, trip);
-        AddAssignedDriver(db, trip);
+        var driver = AddAssignedDriver(db, trip);
 
         var stop = new TripStop
         {
             TripId = trip.Id,
+            DailyOrderId = Guid.NewGuid(),
             OrderCode = "BX-458722",
             CustomerMaskedId = "CUST-01",
             ZoneNameAr = "السالمية",
@@ -663,6 +663,11 @@ public class DriverAppTests
             Status = TripStopStatus.PickedUp
         };
         db.TripStops.Add(stop);
+        db.PickupScans.Add(new PickupScan
+        {
+            TripId = trip.Id, DriverProfileId = driver.Id, OrderId = stop.DailyOrderId,
+            BarcodeValue = "BX-458722", ScannedAtUtc = DateTime.UtcNow.AddMinutes(-5)
+        });
         await db.SaveChangesAsync();
 
         // The proof key must reference a real recorded upload (no driver identity
@@ -690,9 +695,10 @@ public class DriverAppTests
         result2.IsSuccess.Should().BeFalse();
         result2.Error.Code.Should().Be("Orders.ProofPhotoRequired");
 
-        // Act 3 - Delivery without barcode/code succeeds when photo is provided (Code is fully optional)
+        // Act 3 - A photo cannot substitute for scanning the pickup QR again.
         var result3 = await handler.Handle(new CompleteBoxDeliveryCommand(stop.Id, BarcodeValue: null, ProofPhotoStorageKey: "photos/door.jpg"), CancellationToken.None);
-        result3.IsSuccess.Should().BeTrue();
+        result3.IsSuccess.Should().BeFalse();
+        result3.Error.Code.Should().Be("Orders.DeliveryBarcodeRequired");
 
     }
 

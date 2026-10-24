@@ -1515,4 +1515,7 @@
   <data name="support.operational_route_required" xml:space="preserve"><value>يجب إرسال بلاغات التوصيل التشغيلية عبر مسار مشاكل التوصيل المحمي.</value></data>
   <data name="support.attachment_unsupported" xml:space="preserve"><value>لا يمكن إرفاق هذا الملف. استخدم صورة أو ملف PDF مدعومًا بحجم أقل من 25 ميغابايت.</value></data>
   <data name="support.attachment_storage_unavailable" xml:space="preserve"><value>تخزين ملفات الدعم الخاصة غير متاح مؤقتًا.</value></data>
+  <data name="Orders.DeliveryBarcodeRequired" xml:space="preserve"><value>امسح نفس QR البوكس المستخدم عند التحميل قبل تأكيد التسليم.</value></data>
+  <data name="Orders.DeliveryPickupScanRequired" xml:space="preserve"><value>لا يوجد سجل تحميل لهذا الطلب والسائق. لا يمكن تأكيد التسليم.</value></data>
+  <data name="Orders.BarcodeMismatch" xml:space="preserve"><value>QR البوكس الممسوح لا يطابق كود التحميل الخاص بطلب العميل. امسح البوكس الصحيح.</value></data>
 </root>
