@@ -28,11 +28,25 @@ public sealed partial class SupportCaseService
         if (ActorId is null) return Unauthorized();
         if (_currentUser.UserType == MealMate.Domain.Enums.UserType.Admin && !_access.IsSupportAdmin && !_access.IsSuperAdmin) return Forbidden();
         if (_currentUser.UserType == MealMate.Domain.Enums.UserType.Driver && !await _access.HasActiveDriverIdentityAsync(ct)) return Forbidden();
+        var search = query.Search?.Trim();
+        // Searching full case content is restricted to platform operators. Task-only recipients
+        // must not infer fields that ProjectAsync deliberately conceals from them.
+        if (!string.IsNullOrEmpty(search) && !_access.IsSupportAdmin && !_access.IsSuperAdmin) return Forbidden();
         if (query.PageNumber < 1 || query.PageSize is < 1 or > 100
+            || search?.Length > 200
             || (long)query.PageNumber * query.PageSize > int.MaxValue
             || (query.Status.HasValue && !Enum.IsDefined(query.Status.Value))
             || (query.Kind.HasValue && !Enum.IsDefined(query.Kind.Value))) return Invalid();
         var cases = await _access.VisibleCasesAsync(ct);
+        if (!string.IsNullOrEmpty(search))
+        {
+            var normalized = search.ToLowerInvariant();
+            var hasId = Guid.TryParse(search, out var caseId);
+            cases = cases.Where(c => (hasId && c.Id == caseId)
+                || c.Subject.ToLower().Contains(normalized)
+                || c.Body.ToLower().Contains(normalized)
+                || c.Category.ToLower().Contains(normalized));
+        }
         if (query.Status.HasValue) cases = cases.Where(c => c.Status == query.Status.Value);
         if (query.Kind.HasValue) cases = cases.Where(c => c.Kind == query.Kind.Value);
         if (!string.IsNullOrWhiteSpace(query.Category))

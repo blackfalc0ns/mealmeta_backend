@@ -30,6 +30,46 @@ public sealed class SupportCasesHttpTests : IClassFixture<OrderLifecycleEndToEnd
     }
 
     [Fact]
+    public async Task AdminSearchFiltersPersistedCasesBeforePaginationAndTreatsWildcardsLiterally()
+    {
+        var adminId = Guid.NewGuid();
+        var marker = Guid.NewGuid().ToString("N");
+        var first = SupportCase.Create(SupportCaseChannel.Customer, SupportCaseKind.Complaint,
+            SupportCaseOwnerTeam.PlatformSupport, "account", $"{marker} INVOICE", $"{marker} فاتورة متأخرة", Guid.NewGuid(), DateTime.UtcNow);
+        var second = SupportCase.Create(SupportCaseChannel.Customer, SupportCaseKind.Complaint,
+            SupportCaseOwnerTeam.PlatformSupport, "account", $"{marker} invoice", "Follow up", Guid.NewGuid(), DateTime.UtcNow.AddMinutes(-1));
+        second.TryTransitionTo(SupportCaseStatus.InProgress).Should().BeTrue();
+        await using (var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_fixture.ConnectionString).Options,
+            Substitute.For<IDomainEventDispatcher>()))
+        {
+            db.SupportCases.AddRange(first, second);
+            await db.SaveChangesAsync();
+            await SupportTestIdentity.SeedAsync(db, new TokenUser(adminId, UserType.Admin, ["SuperAdmin"], []));
+        }
+        using var admin = _fixture.CreateClientForUser(new TokenUser(adminId, UserType.Admin, ["SuperAdmin"], []));
+        var page = await admin.GetFromJsonAsync<SupportCasePageDto>($"/api/v1/support/cases?search={marker}%20invoice&pageSize=1&pageNumber=2");
+        page!.TotalCount.Should().Be(2);
+        page.Items.Should().ContainSingle().Which.Id.Should().Be(second.Id);
+        var filtered = await admin.GetFromJsonAsync<SupportCasePageDto>($"/api/v1/support/cases?search={marker}&status=InProgress");
+        filtered!.TotalCount.Should().Be(1);
+        filtered.Items.Single().Id.Should().Be(second.Id);
+        var exact = await admin.GetFromJsonAsync<SupportCasePageDto>($"/api/v1/support/cases?search={first.Id}");
+        exact!.Items.Should().ContainSingle().Which.Id.Should().Be(first.Id);
+        var arabic = await admin.GetFromJsonAsync<SupportCasePageDto>($"/api/v1/support/cases?search={Uri.EscapeDataString($"{marker} فاتورة")}");
+        arabic!.Items.Should().ContainSingle().Which.Id.Should().Be(first.Id);
+        var literal = await admin.GetFromJsonAsync<SupportCasePageDto>($"/api/v1/support/cases?search={marker}%25");
+        literal!.TotalCount.Should().Be(0);
+        (await admin.GetAsync($"/api/v1/support/cases?search={new string('x', 201)}")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task NonAdminCannotUseSearchToInferPrivateCaseContent()
+    {
+        using var customer = _fixture.CreateClientForUser(new TokenUser(Guid.NewGuid(), UserType.Customer, ["Customer"], []));
+        (await customer.GetAsync("/api/v1/support/cases?search=private")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
     public async Task CustomerCanCreateAndReadOnlyOwnPersistedCases()
     {
         var ownerId = Guid.NewGuid();
@@ -877,6 +917,10 @@ public sealed class SupportCasesHttpTests : IClassFixture<OrderLifecycleEndToEnd
         (await tenantOperator.GetAsync($"/api/v1/support/cases/{supportCaseId}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await countryOperator.GetAsync($"/api/v1/support/cases/{supportCaseId}")).StatusCode.Should().Be(HttpStatusCode.OK);
         (await countryOperator.GetFromJsonAsync<SupportCasePageDto>("/api/v1/support/cases"))!.Items.Should().ContainSingle(x => x.Id == supportCaseId);
+        var hiddenSearch = await tenantOperator.GetFromJsonAsync<SupportCasePageDto>($"/api/v1/support/cases?search={supportCaseId}");
+        hiddenSearch!.TotalCount.Should().Be(0);
+        var allowedSearch = await countryOperator.GetFromJsonAsync<SupportCasePageDto>($"/api/v1/support/cases?search={supportCaseId}");
+        allowedSearch!.Items.Should().ContainSingle().Which.Id.Should().Be(supportCaseId);
     }
 
     [Fact]

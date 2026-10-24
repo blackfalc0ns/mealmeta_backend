@@ -47,7 +47,8 @@ public sealed record SupportCaseListQuery(
     int PageSize = 20,
     SupportCaseStatus? Status = null,
     SupportCaseKind? Kind = null,
-    string? Category = null);
+    string? Category = null,
+    string? Search = null);
 
 public sealed record SupportCaseMessageDto(
     Guid Id,
