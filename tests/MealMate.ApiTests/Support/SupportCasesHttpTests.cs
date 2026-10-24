@@ -35,14 +35,16 @@ public sealed class SupportCasesHttpTests : IClassFixture<OrderLifecycleEndToEnd
         var adminId = Guid.NewGuid();
         var marker = Guid.NewGuid().ToString("N");
         var first = SupportCase.Create(SupportCaseChannel.Customer, SupportCaseKind.Complaint,
-            SupportCaseOwnerTeam.PlatformSupport, "account", $"{marker} INVOICE", $"{marker} فاتورة متأخرة", Guid.NewGuid(), DateTime.UtcNow);
+            SupportCaseOwnerTeam.PlatformSupport, "customer.issue.Account", $"{marker} INVOICE", $"{marker} فاتورة متأخرة", Guid.NewGuid(), DateTime.UtcNow);
         var second = SupportCase.Create(SupportCaseChannel.Customer, SupportCaseKind.Complaint,
             SupportCaseOwnerTeam.PlatformSupport, "account", $"{marker} invoice", "Follow up", Guid.NewGuid(), DateTime.UtcNow.AddMinutes(-1));
         second.TryTransitionTo(SupportCaseStatus.InProgress).Should().BeTrue();
+        var suggestion = SupportCase.Create(SupportCaseChannel.Customer, SupportCaseKind.GeneralRequest,
+            SupportCaseOwnerTeam.PlatformSupport, "customer.suggestion.AppExperience", $"{marker} suggestion", "Improve usability", Guid.NewGuid(), DateTime.UtcNow);
         await using (var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_fixture.ConnectionString).Options,
             Substitute.For<IDomainEventDispatcher>()))
         {
-            db.SupportCases.AddRange(first, second);
+            db.SupportCases.AddRange(first, second, suggestion);
             await db.SaveChangesAsync();
             await SupportTestIdentity.SeedAsync(db, new TokenUser(adminId, UserType.Admin, ["SuperAdmin"], []));
         }
@@ -57,6 +59,10 @@ public sealed class SupportCasesHttpTests : IClassFixture<OrderLifecycleEndToEnd
         exact!.Items.Should().ContainSingle().Which.Id.Should().Be(first.Id);
         var arabic = await admin.GetFromJsonAsync<SupportCasePageDto>($"/api/v1/support/cases?search={Uri.EscapeDataString($"{marker} فاتورة")}");
         arabic!.Items.Should().ContainSingle().Which.Id.Should().Be(first.Id);
+        var category = await admin.GetFromJsonAsync<SupportCasePageDto>($"/api/v1/support/cases?search={Uri.EscapeDataString("الحساب")}");
+        category!.Items.Should().Contain(x => x.Id == first.Id).And.NotContain(x => x.Id == second.Id);
+        var suggestionCategory = await admin.GetFromJsonAsync<SupportCasePageDto>($"/api/v1/support/cases?search={Uri.EscapeDataString("تجربة التطبيق")}");
+        suggestionCategory!.Items.Should().Contain(x => x.Id == suggestion.Id).And.NotContain(x => x.Id == first.Id);
         var literal = await admin.GetFromJsonAsync<SupportCasePageDto>($"/api/v1/support/cases?search={marker}%25");
         literal!.TotalCount.Should().Be(0);
         (await admin.GetAsync($"/api/v1/support/cases?search={new string('x', 201)}")).StatusCode.Should().Be(HttpStatusCode.BadRequest);

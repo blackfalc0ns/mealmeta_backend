@@ -42,10 +42,20 @@ public sealed partial class SupportCaseService
         {
             var normalized = search.ToLowerInvariant();
             var hasId = Guid.TryParse(search, out var caseId);
+            var categoryMatches = CustomerSupportCatalog.Issues
+                .Where(option => option.LabelAr.Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || option.LabelEn.Contains(search, StringComparison.OrdinalIgnoreCase))
+                .Select(option => CustomerSupportCatalog.CategoryFor(CustomerSupportCatalog.IssuesRequestType, option.Value))
+                .Concat(CustomerSupportCatalog.Suggestions
+                    .Where(option => option.LabelAr.Contains(search, StringComparison.OrdinalIgnoreCase)
+                        || option.LabelEn.Contains(search, StringComparison.OrdinalIgnoreCase))
+                    .Select(option => CustomerSupportCatalog.CategoryFor(CustomerSupportCatalog.SuggestionsRequestType, option.Value)))
+                .ToArray();
             cases = cases.Where(c => (hasId && c.Id == caseId)
                 || c.Subject.ToLower().Contains(normalized)
                 || c.Body.ToLower().Contains(normalized)
-                || c.Category.ToLower().Contains(normalized));
+                || c.Category.ToLower().Contains(normalized)
+                || categoryMatches.Contains(c.Category));
         }
         if (query.Status.HasValue) cases = cases.Where(c => c.Status == query.Status.Value);
         if (query.Kind.HasValue) cases = cases.Where(c => c.Kind == query.Kind.Value);
